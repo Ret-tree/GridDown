@@ -143,6 +143,11 @@ const SOSModule = (function() {
         { pattern: '—  —  —', meaning: 'SOS', description: '3 long blasts' }
     ];
 
+    // Broadcast settings
+    const BROADCAST_INTERVAL = 60000; // 60 seconds between repeat broadcasts
+    const INITIAL_BURST_COUNT = 3;    // Send 3 times initially
+    const INITIAL_BURST_DELAY = 5000; // 5 seconds between initial bursts
+
     // State
     let state = {
         isActive: false,
@@ -155,10 +160,17 @@ const SOSModule = (function() {
         currentPosition: null,
         signalLog: [],
         acknowledgedBy: [],
+        broadcastInterval: null,  // Interval ID for repeat broadcasts
+        broadcastCount: 0,        // Number of broadcasts sent
+        lastBroadcast: null,      // Timestamp of last broadcast
         meshtastic: {
             connected: false,
             nodeId: null,
             channel: null
+        },
+        aprs: {
+            connected: false,
+            callsign: null
         }
     };
 
@@ -336,6 +348,7 @@ const SOSModule = (function() {
             activatedAt: new Date()
         };
         state.activatedAt = new Date();
+        state.broadcastCount = 0;
         
         // Log the activation
         addSignalLog('activated', `SOS Activated: ${emergency.name}`);
@@ -343,6 +356,12 @@ const SOSModule = (function() {
         // Get current position
         if (state.currentPosition) {
             state.activeEmergency.position = { ...state.currentPosition };
+        } else if (typeof GPSModule !== 'undefined') {
+            const pos = GPSModule.getPosition();
+            if (pos) {
+                state.activeEmergency.position = { lat: pos.lat, lon: pos.lon, altitude: pos.altitude };
+                state.currentPosition = state.activeEmergency.position;
+            }
         }
         
         saveState();
@@ -353,8 +372,11 @@ const SOSModule = (function() {
             Events.emit('sos:activated', state.activeEmergency);
         }
         
-        // Attempt to send via available methods
-        sendEmergencySignal();
+        // Send initial burst of emergency signals
+        sendInitialBurst();
+        
+        // Start repeat broadcast interval
+        startBroadcastInterval();
         
         if (typeof ModalsModule !== 'undefined') {
             ModalsModule.showToast(`🆘 SOS ACTIVATED - ${emergency.name}`, 'error');
@@ -369,6 +391,9 @@ const SOSModule = (function() {
     function deactivateSOS(reason = 'User cancelled') {
         if (!state.isActive) return;
         
+        // Stop repeat broadcasts
+        stopBroadcastInterval();
+        
         addSignalLog('deactivated', `SOS Cancelled: ${reason}`);
         
         const wasActive = { ...state.activeEmergency };
@@ -377,6 +402,8 @@ const SOSModule = (function() {
         state.activeEmergency = null;
         state.activatedAt = null;
         state.acknowledgedBy = [];
+        state.broadcastCount = 0;
+        state.lastBroadcast = null;
         
         saveState();
         notifySubscribers({ type: 'deactivated', reason, wasActive });
@@ -385,33 +412,133 @@ const SOSModule = (function() {
             Events.emit('sos:deactivated', { reason, wasActive });
         }
         
-        // Send all-clear if possible
+        // Send all-clear via all available methods
         sendAllClear();
         
         if (typeof ModalsModule !== 'undefined') {
-            ModalsModule.showToast('✓ SOS Cancelled', 'success');
+            ModalsModule.showToast('✓ SOS Cancelled - All Clear sent', 'success');
         }
     }
 
     /**
-     * Send emergency signal via available methods
+     * Send initial burst of emergency signals (multiple times for reliability)
      */
-    function sendEmergencySignal() {
+    async function sendInitialBurst() {
+        addSignalLog('burst_start', `Starting initial SOS burst (${INITIAL_BURST_COUNT} transmissions)`);
+        
+        for (let i = 0; i < INITIAL_BURST_COUNT; i++) {
+            await sendEmergencySignal();
+            if (i < INITIAL_BURST_COUNT - 1) {
+                await sleep(INITIAL_BURST_DELAY);
+            }
+        }
+        
+        addSignalLog('burst_complete', `Initial SOS burst complete`);
+    }
+    
+    /**
+     * Start repeat broadcast interval
+     */
+    function startBroadcastInterval() {
+        // Clear any existing interval
+        stopBroadcastInterval();
+        
+        // Set up repeat broadcasts
+        state.broadcastInterval = setInterval(() => {
+            if (state.isActive) {
+                sendEmergencySignal();
+                addSignalLog('repeat_broadcast', `Repeat SOS broadcast #${state.broadcastCount}`);
+            }
+        }, BROADCAST_INTERVAL);
+        
+        addSignalLog('interval_started', `Repeat broadcasts every ${BROADCAST_INTERVAL/1000}s`);
+    }
+    
+    /**
+     * Stop repeat broadcast interval
+     */
+    function stopBroadcastInterval() {
+        if (state.broadcastInterval) {
+            clearInterval(state.broadcastInterval);
+            state.broadcastInterval = null;
+            addSignalLog('interval_stopped', 'Repeat broadcasts stopped');
+        }
+    }
+    
+    /**
+     * Helper sleep function
+     */
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    /**
+     * Send emergency signal via all available methods
+     */
+    async function sendEmergencySignal() {
         const emergency = state.activeEmergency;
         if (!emergency) return;
+        
+        state.broadcastCount++;
+        state.lastBroadcast = new Date();
         
         // Build message
         const message = buildEmergencyMessage(emergency);
         
-        // Try Meshtastic if connected
-        if (state.meshtastic.connected) {
-            sendViaMeshtastic(message);
+        let sentVia = [];
+        
+        // Try Meshtastic if available and connected
+        if (typeof MeshtasticModule !== 'undefined' && MeshtasticModule.isConnected()) {
+            try {
+                await sendViaMeshtastic(emergency);
+                sentVia.push('Meshtastic');
+            } catch (e) {
+                console.error('[SOS] Meshtastic send failed:', e);
+                addSignalLog('meshtastic_error', `Meshtastic failed: ${e.message}`);
+            }
         }
         
-        // Log attempt
-        addSignalLog('signal_sent', `Emergency signal broadcast attempted`);
+        // Try APRS if available and connected
+        if (typeof APRSModule !== 'undefined' && APRSModule.isConnected()) {
+            try {
+                await sendViaAPRS(emergency, message);
+                sentVia.push('APRS');
+            } catch (e) {
+                console.error('[SOS] APRS send failed:', e);
+                addSignalLog('aprs_error', `APRS failed: ${e.message}`);
+            }
+        }
         
-        return message;
+        // Log result
+        if (sentVia.length > 0) {
+            addSignalLog('signal_sent', `SOS #${state.broadcastCount} sent via: ${sentVia.join(', ')}`);
+            
+            // Emit event
+            if (typeof Events !== 'undefined') {
+                Events.emit('sos:broadcast', { 
+                    count: state.broadcastCount, 
+                    sentVia, 
+                    timestamp: state.lastBroadcast 
+                });
+            }
+        } else {
+            addSignalLog('no_connection', `SOS #${state.broadcastCount} - No active radio connections`);
+            
+            // Show warning on first broadcast only
+            if (state.broadcastCount === 1 && typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('⚠️ No radio connected - SOS not transmitted', 'error');
+            }
+        }
+        
+        // Update subscribers
+        notifySubscribers({ 
+            type: 'broadcast', 
+            count: state.broadcastCount, 
+            sentVia,
+            timestamp: state.lastBroadcast
+        });
+        
+        return { sentVia, message };
     }
 
     /**
@@ -427,7 +554,11 @@ const SOSModule = (function() {
         if (pos) {
             message += `POS: ${pos.lat.toFixed(6)}, ${pos.lon.toFixed(6)}\n`;
             if (typeof Coordinates !== 'undefined') {
-                message += `MGRS: ${Coordinates.format(pos.lat, pos.lon, { format: 'mgrs' })}\n`;
+                try {
+                    message += `MGRS: ${Coordinates.toMGRS(pos.lat, pos.lon)}\n`;
+                } catch (e) {
+                    // MGRS conversion failed, skip
+                }
             }
         }
         
@@ -449,25 +580,138 @@ const SOSModule = (function() {
     }
 
     /**
-     * Send via Meshtastic (placeholder for future integration)
+     * Send SOS via Meshtastic mesh network
      */
-    function sendViaMeshtastic(message) {
-        // Future: Integrate with Meshtastic.js library
-        console.log('[SOS] Meshtastic send (placeholder):', message);
-        addSignalLog('meshtastic', 'Meshtastic broadcast (not connected)');
+    async function sendViaMeshtastic(emergency) {
+        if (typeof MeshtasticModule === 'undefined') {
+            throw new Error('MeshtasticModule not available');
+        }
+        
+        if (!MeshtasticModule.isConnected()) {
+            throw new Error('Meshtastic not connected');
+        }
+        
+        const type = EMERGENCY_TYPES[emergency.type] || EMERGENCY_TYPES.general;
+        const pos = emergency.position || state.currentPosition;
+        
+        // Use MeshtasticModule's built-in SOS function
+        await MeshtasticModule.sendSOS({
+            situation: type.name,
+            injuries: emergency.injuries > 0 ? `${emergency.injuries} injured` : 'None reported',
+            people: 1,
+            supplies: emergency.immobile ? 'Immobile - cannot move' : 'Mobile',
+            message: emergency.details || type.description
+        });
+        
+        addSignalLog('meshtastic_sent', `Meshtastic SOS broadcast sent`);
+        
+        return true;
+    }
+    
+    /**
+     * Send SOS via APRS radio network
+     */
+    async function sendViaAPRS(emergency, message) {
+        if (typeof APRSModule === 'undefined') {
+            throw new Error('APRSModule not available');
+        }
+        
+        if (!APRSModule.isConnected()) {
+            throw new Error('APRS not connected');
+        }
+        
+        const type = EMERGENCY_TYPES[emergency.type] || EMERGENCY_TYPES.general;
+        const pos = emergency.position || state.currentPosition;
+        
+        // Build APRS emergency status text
+        const emergencyStatus = `**EMERGENCY** ${type.name}${emergency.injuries > 0 ? ' - ' + emergency.injuries + ' injured' : ''}`;
+        
+        // Store original status and symbol
+        const originalStatus = APRSModule.getStatusText ? APRSModule.getStatusText() : '';
+        const originalSymbol = APRSModule.getSymbol ? APRSModule.getSymbol() : '/>';
+        
+        // Set emergency status and symbol (APRS emergency symbol is /!)
+        if (APRSModule.setStatusText) {
+            APRSModule.setStatusText(emergencyStatus);
+        }
+        if (APRSModule.setSymbol) {
+            APRSModule.setSymbol('/!'); // APRS emergency/priority symbol
+        }
+        
+        // Send emergency beacon
+        await APRSModule.sendBeacon(true); // force immediate beacon
+        
+        // Also send emergency message to APRS-IS if available (repeat 3 times)
+        // APRS emergency frequency monitoring stations will see this
+        try {
+            // Send to common emergency/distress tactical call
+            await APRSModule.sendMessage('EMER', `${type.prowords} ${type.name} at ${pos ? pos.lat.toFixed(4) + ',' + pos.lon.toFixed(4) : 'unknown location'}`);
+        } catch (e) {
+            // Message send failed, but beacon was sent
+            console.warn('[SOS] APRS message failed, beacon sent:', e);
+        }
+        
+        addSignalLog('aprs_sent', `APRS emergency beacon transmitted`);
+        
+        return true;
     }
 
     /**
-     * Send all-clear signal
+     * Send all-clear signal via all available methods
      */
-    function sendAllClear() {
-        const message = 'CANCEL CANCEL CANCEL - Previous emergency cancelled - All clear';
+    async function sendAllClear() {
+        const allClearMessage = 'CANCEL CANCEL CANCEL - Previous emergency cancelled - All clear';
         
-        if (state.meshtastic.connected) {
-            sendViaMeshtastic(message);
+        let sentVia = [];
+        
+        // Send via Meshtastic
+        if (typeof MeshtasticModule !== 'undefined' && MeshtasticModule.isConnected()) {
+            try {
+                // Send all-clear message
+                if (MeshtasticModule.sendTextMessage) {
+                    await MeshtasticModule.sendTextMessage(allClearMessage);
+                }
+                sentVia.push('Meshtastic');
+                addSignalLog('meshtastic_clear', 'Meshtastic all-clear sent');
+            } catch (e) {
+                console.error('[SOS] Meshtastic all-clear failed:', e);
+            }
         }
         
-        addSignalLog('all_clear', 'All-clear signal sent');
+        // Send via APRS
+        if (typeof APRSModule !== 'undefined' && APRSModule.isConnected()) {
+            try {
+                // Reset to normal status
+                if (APRSModule.setStatusText) {
+                    APRSModule.setStatusText('All clear - emergency cancelled');
+                }
+                if (APRSModule.setSymbol) {
+                    APRSModule.setSymbol('/>'); // Normal vehicle symbol
+                }
+                
+                // Send beacon with all-clear status
+                await APRSModule.sendBeacon(true);
+                
+                // Send message
+                await APRSModule.sendMessage('EMER', allClearMessage);
+                
+                sentVia.push('APRS');
+                addSignalLog('aprs_clear', 'APRS all-clear sent');
+            } catch (e) {
+                console.error('[SOS] APRS all-clear failed:', e);
+            }
+        }
+        
+        if (sentVia.length > 0) {
+            addSignalLog('all_clear_sent', `All-clear sent via: ${sentVia.join(', ')}`);
+        } else {
+            addSignalLog('all_clear_local', 'All-clear (no radio connections)');
+        }
+        
+        // Emit event
+        if (typeof Events !== 'undefined') {
+            Events.emit('sos:all_clear', { sentVia, timestamp: new Date() });
+        }
     }
 
     /**
@@ -609,6 +853,18 @@ const SOSModule = (function() {
             return `${hours}h ${remainMins}m`;
         }
         return `${mins}m`;
+    }
+    
+    /**
+     * Format timestamp as relative time (e.g., "30s ago", "2m ago")
+     */
+    function formatTimeAgo(timestamp) {
+        if (!timestamp) return '';
+        const seconds = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
+        
+        if (seconds < 60) return `${seconds}s ago`;
+        if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+        return `${Math.floor(seconds / 3600)}h ago`;
     }
 
     /**
@@ -756,6 +1012,11 @@ const SOSModule = (function() {
             const emergency = state.activeEmergency;
             const elapsed = formatDuration(Date.now() - new Date(emergency.activatedAt).getTime());
             
+            // Check radio connections
+            const meshtasticConnected = typeof MeshtasticModule !== 'undefined' && MeshtasticModule.isConnected();
+            const aprsConnected = typeof APRSModule !== 'undefined' && APRSModule.isConnected();
+            const hasRadio = meshtasticConnected || aprsConnected;
+            
             html += `
                 <div style="padding:16px;background:rgba(239,68,68,0.15);border:2px solid rgba(239,68,68,0.4);border-radius:12px;margin-bottom:16px;animation:pulse 2s infinite">
                     <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
@@ -764,6 +1025,41 @@ const SOSModule = (function() {
                             <div style="font-size:16px;font-weight:600;color:#ef4444">${emergency.name}</div>
                             <div style="font-size:12px;color:rgba(255,255,255,0.6)">Active for ${elapsed}</div>
                         </div>
+                    </div>
+                    
+                    <!-- Broadcast Status -->
+                    <div style="padding:10px;background:rgba(0,0,0,0.2);border-radius:8px;margin-bottom:12px">
+                        <div style="font-size:11px;font-weight:500;color:rgba(255,255,255,0.5);margin-bottom:8px">📡 BROADCAST STATUS</div>
+                        
+                        <!-- Radio Connections -->
+                        <div style="display:flex;gap:8px;margin-bottom:8px">
+                            <div style="flex:1;padding:6px 8px;background:${meshtasticConnected ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)'};border-radius:6px;font-size:11px;display:flex;align-items:center;gap:6px">
+                                <span style="color:${meshtasticConnected ? '#22c55e' : '#6b7280'}">●</span>
+                                <span style="color:${meshtasticConnected ? '#22c55e' : 'rgba(255,255,255,0.4)'}">Meshtastic</span>
+                            </div>
+                            <div style="flex:1;padding:6px 8px;background:${aprsConnected ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)'};border-radius:6px;font-size:11px;display:flex;align-items:center;gap:6px">
+                                <span style="color:${aprsConnected ? '#22c55e' : '#6b7280'}">●</span>
+                                <span style="color:${aprsConnected ? '#22c55e' : 'rgba(255,255,255,0.4)'}">APRS</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Broadcast Count -->
+                        <div style="display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,0.6)">
+                            <span>Broadcasts sent: <span style="color:#f97316;font-weight:600">${state.broadcastCount}</span></span>
+                            ${state.lastBroadcast ? `
+                                <span>Last: ${formatTimeAgo(state.lastBroadcast)}</span>
+                            ` : ''}
+                        </div>
+                        
+                        ${!hasRadio ? `
+                            <div style="margin-top:8px;padding:8px;background:rgba(239,68,68,0.1);border-radius:6px;font-size:10px;color:#f97316">
+                                ⚠️ No radio connected - SOS not being transmitted. Connect Meshtastic or APRS to broadcast.
+                            </div>
+                        ` : `
+                            <div style="margin-top:8px;font-size:10px;color:rgba(255,255,255,0.4)">
+                                Repeating every 60 seconds until cancelled
+                            </div>
+                        `}
                     </div>
                     
                     ${state.acknowledgedBy.length > 0 ? `
@@ -781,12 +1077,41 @@ const SOSModule = (function() {
                 </div>
             `;
         } else {
+            // Check radio connections for status display
+            const meshtasticConnected = typeof MeshtasticModule !== 'undefined' && MeshtasticModule.isConnected();
+            const aprsConnected = typeof APRSModule !== 'undefined' && APRSModule.isConnected();
+            const hasRadio = meshtasticConnected || aprsConnected;
+            
             // SOS Activation Buttons
             html += `
                 <div style="margin-bottom:16px">
                     <button class="btn btn--full" id="quick-sos-btn" style="padding:20px;font-size:18px;background:linear-gradient(135deg,#ef4444,#dc2626);margin-bottom:12px">
                         🆘 ACTIVATE SOS
                     </button>
+                    
+                    <!-- Radio Status -->
+                    <div style="padding:10px;background:var(--color-bg-elevated);border-radius:8px;margin-bottom:12px">
+                        <div style="font-size:11px;font-weight:500;color:rgba(255,255,255,0.5);margin-bottom:6px">📡 Radio Status</div>
+                        <div style="display:flex;gap:8px">
+                            <div style="flex:1;padding:6px 8px;background:${meshtasticConnected ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)'};border-radius:6px;font-size:11px;display:flex;align-items:center;gap:6px">
+                                <span style="color:${meshtasticConnected ? '#22c55e' : '#6b7280'}">●</span>
+                                <span style="color:${meshtasticConnected ? '#22c55e' : 'rgba(255,255,255,0.4)'}">Meshtastic</span>
+                            </div>
+                            <div style="flex:1;padding:6px 8px;background:${aprsConnected ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)'};border-radius:6px;font-size:11px;display:flex;align-items:center;gap:6px">
+                                <span style="color:${aprsConnected ? '#22c55e' : '#6b7280'}">●</span>
+                                <span style="color:${aprsConnected ? '#22c55e' : 'rgba(255,255,255,0.4)'}">APRS</span>
+                            </div>
+                        </div>
+                        ${!hasRadio ? `
+                            <div style="margin-top:6px;font-size:10px;color:#f97316">
+                                ⚠️ No radio connected - SOS will not be transmitted
+                            </div>
+                        ` : `
+                            <div style="margin-top:6px;font-size:10px;color:#22c55e">
+                                ✓ SOS will broadcast via ${[meshtasticConnected ? 'Meshtastic' : '', aprsConnected ? 'APRS' : ''].filter(Boolean).join(' & ')}
+                            </div>
+                        `}
+                    </div>
                     
                     <div class="section-label">Emergency Type</div>
                     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
@@ -1350,6 +1675,14 @@ const SOSModule = (function() {
         getState,
         renderPanel,
         attachPanelListeners,
+        
+        // Broadcast control
+        sendEmergencySignal,    // Manually trigger a broadcast
+        getBroadcastCount: () => state.broadcastCount,
+        getLastBroadcast: () => state.lastBroadcast,
+        isBroadcasting: () => state.broadcastInterval !== null,
+        
+        // Constants
         EMERGENCY_TYPES,
         SIGNAL_METHODS,
         GROUND_AIR_SIGNALS,
