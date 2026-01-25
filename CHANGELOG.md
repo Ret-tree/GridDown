@@ -2,6 +2,30 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.5.1] - 2025-01-25
+
+### Added
+- **APRS Distance/Bearing Display** - Station list now shows:
+  - Distance to each APRS station (miles or feet)
+  - Compass bearing and degrees from your position
+  - Stations sorted by distance (nearest first) when GPS enabled
+  - "Enable GPS" prompt when position unavailable
+
+### Enhanced
+- **APRS Station Cards** - Improved layout with:
+  - Larger icons (36px)
+  - Distance/bearing on right side
+  - Station status text display
+  - Speed indicator for moving stations
+  - Better visual hierarchy
+
+### Technical
+- Added to APRSModule: calculateDistance(), calculateBearing(), bearingToCompass()
+- Added getDistanceToStation() and getStationsWithDistance() functions
+- Stations auto-sort by distance when GPS position available
+- Increased visible stations from 20 to 25
+- Service worker cache version updated to v6.5.1
+
 ## [6.5.0] - 2025-01-25
 
 ### Added
