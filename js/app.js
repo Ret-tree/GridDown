@@ -79,6 +79,12 @@ const App = (function() {
                 await RadioModule.init();
             }
             
+            // Initialize Medical Reference module
+            if (typeof MedicalModule !== 'undefined') {
+                MedicalModule.init();
+                console.log('Medical reference module initialized');
+            }
+            
             // Initialize Meshtastic module
             if (typeof MeshtasticModule !== 'undefined') {
                 MeshtasticModule.init();
