@@ -428,6 +428,7 @@ const PanelsModule = (function() {
             case 'comms': renderComms(); break;
             case 'terrain': renderTerrain(); break;
             case 'radio': renderRadio(); break;
+            case 'medical': renderMedical(); break;
             default: renderMapLayers();
         }
         const panelEl = document.getElementById('panel');
@@ -9349,6 +9350,732 @@ ${text}
             document.getElementById('radio-content').innerHTML = renderRadioTabContent();
             attachRadioContentHandlers();
         };
+    }
+
+    // =========================================================================
+    // MEDICAL REFERENCE PANEL
+    // =========================================================================
+    
+    let medicalState = {
+        searchQuery: '',
+        activeCategory: null,
+        activeView: 'categories', // 'categories', 'search', 'protocol', 'medication', 'bookmarks'
+        selectedProtocol: null,
+        selectedMedication: null,
+        bookmarks: []
+    };
+
+    // Load bookmarks from storage
+    async function loadMedicalBookmarks() {
+        try {
+            const saved = await Storage.Settings.get('medical_bookmarks');
+            if (saved) {
+                medicalState.bookmarks = saved;
+            }
+        } catch (e) {
+            console.error('Failed to load medical bookmarks:', e);
+        }
+    }
+
+    // Save bookmarks to storage
+    async function saveMedicalBookmarks() {
+        try {
+            await Storage.Settings.set('medical_bookmarks', medicalState.bookmarks);
+        } catch (e) {
+            console.error('Failed to save medical bookmarks:', e);
+        }
+    }
+
+    function renderMedical() {
+        if (typeof MedicalModule === 'undefined') {
+            container.innerHTML = `
+                <div class="panel__header">
+                    <h2 class="panel__title">🏥 Medical Reference</h2>
+                </div>
+                <div class="empty-state">
+                    <div class="empty-state__icon">${Icons.get('medical')}</div>
+                    <div class="empty-state__title">Medical Module Not Loaded</div>
+                    <div class="empty-state__desc">Medical reference features are not available</div>
+                </div>
+            `;
+            return;
+        }
+
+        // Load bookmarks if needed
+        if (medicalState.bookmarks.length === 0) {
+            loadMedicalBookmarks();
+        }
+
+        const categories = MedicalModule.getCategories();
+        const medCategories = MedicalModule.getMedCategories();
+
+        container.innerHTML = `
+            <div class="panel__header">
+                <h2 class="panel__title">🏥 Medical Reference</h2>
+                ${medicalState.activeView !== 'categories' ? `
+                    <button class="btn btn--secondary" id="medical-back" style="padding:8px">
+                        ${Icons.get('back')}
+                    </button>
+                ` : ''}
+            </div>
+
+            <!-- Disclaimer -->
+            <div style="padding:10px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;margin-bottom:16px">
+                <div style="font-size:11px;color:#ef4444;font-weight:600;margin-bottom:4px">⚠️ DISCLAIMER</div>
+                <div style="font-size:10px;color:rgba(255,255,255,0.7);line-height:1.4">
+                    For educational reference only. Not a substitute for professional medical training or emergency care. 
+                    Always seek professional help when available.
+                </div>
+            </div>
+
+            <!-- Search Bar -->
+            <div style="position:relative;margin-bottom:16px">
+                <input type="text" id="medical-search" 
+                    placeholder="Search protocols, medications, symptoms..." 
+                    value="${medicalState.searchQuery}"
+                    style="padding-left:36px">
+                <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);opacity:0.5">
+                    ${Icons.get('search')}
+                </span>
+            </div>
+
+            <!-- Quick Access Bookmarks -->
+            ${medicalState.bookmarks.length > 0 && medicalState.activeView === 'categories' ? `
+                <div style="margin-bottom:16px">
+                    <div class="section-label" style="display:flex;justify-content:space-between;align-items:center">
+                        <span>${Icons.get('bookmark')} Bookmarked</span>
+                        <button class="btn btn--secondary" id="view-all-bookmarks" style="padding:4px 8px;font-size:10px">
+                            View All (${medicalState.bookmarks.length})
+                        </button>
+                    </div>
+                    <div style="display:flex;gap:8px;overflow-x:auto;padding:4px 0">
+                        ${medicalState.bookmarks.slice(0, 3).map(b => {
+                            const item = MedicalModule.getProtocol(b) || MedicalModule.getMedication(b);
+                            if (!item) return '';
+                            const isProtocol = !!MedicalModule.getProtocol(b);
+                            return `
+                                <button class="chip chip--active" 
+                                    data-bookmark="${b}" 
+                                    data-type="${isProtocol ? 'protocol' : 'medication'}"
+                                    style="white-space:nowrap">
+                                    ${isProtocol ? '📋' : '💊'} ${item.title || item.name}
+                                </button>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            ` : ''}
+
+            <!-- Content Area -->
+            <div id="medical-content">
+                ${renderMedicalContent()}
+            </div>
+        `;
+
+        attachMedicalHandlers();
+    }
+
+    function renderMedicalContent() {
+        // Check for search results first
+        if (medicalState.searchQuery && medicalState.searchQuery.length >= 2) {
+            return renderMedicalSearchResults();
+        }
+
+        switch (medicalState.activeView) {
+            case 'protocol':
+                return renderMedicalProtocol();
+            case 'medication':
+                return renderMedicalMedication();
+            case 'category':
+                return renderMedicalCategory();
+            case 'medications':
+                return renderMedicationsList();
+            case 'bookmarks':
+                return renderMedicalBookmarks();
+            case 'quickref':
+                return renderQuickReferences();
+            default:
+                return renderMedicalCategories();
+        }
+    }
+
+    function renderMedicalCategories() {
+        const categories = MedicalModule.getCategories();
+        const medCategories = MedicalModule.getMedCategories();
+        
+        return `
+            <!-- Protocol Categories -->
+            <div class="section-label">📋 Protocols & Procedures</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px">
+                ${Object.entries(categories).map(([key, cat]) => `
+                    <button class="card" data-category="${key}" style="text-align:center;padding:16px">
+                        <div style="font-size:24px;margin-bottom:8px">${cat.icon}</div>
+                        <div style="font-size:13px;font-weight:500">${cat.name}</div>
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:4px">
+                            ${MedicalModule.getProtocolsByCategory(key).length} protocols
+                        </div>
+                    </button>
+                `).join('')}
+            </div>
+
+            <!-- Medications Section -->
+            <div class="section-label">💊 Medications Reference</div>
+            <button class="card" data-view="medications" style="width:100%;margin-bottom:12px">
+                <div class="card__header">
+                    <div class="card__icon" style="background:rgba(245,158,11,0.15)">💊</div>
+                    <div>
+                        <div class="card__title">Drug Reference & Interactions</div>
+                        <div class="card__subtitle">${Object.keys(MedicalModule.getAllMedications()).length} medications with dosing & warnings</div>
+                    </div>
+                </div>
+            </button>
+
+            <!-- Quick References -->
+            <div class="section-label">📊 Quick References</div>
+            <button class="card" data-view="quickref" style="width:100%;margin-bottom:12px">
+                <div class="card__header">
+                    <div class="card__icon" style="background:rgba(59,130,246,0.15)">📊</div>
+                    <div>
+                        <div class="card__title">Vital Signs, CPR, Burns, etc.</div>
+                        <div class="card__subtitle">Essential reference tables</div>
+                    </div>
+                </div>
+            </button>
+        `;
+    }
+
+    function renderMedicalCategory() {
+        const cat = medicalState.activeCategory;
+        if (!cat) return renderMedicalCategories();
+
+        const categoryInfo = MedicalModule.getCategories()[cat];
+        const protocols = MedicalModule.getProtocolsByCategory(cat);
+
+        return `
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+                <div style="font-size:32px">${categoryInfo.icon}</div>
+                <div>
+                    <div style="font-size:16px;font-weight:600">${categoryInfo.name}</div>
+                    <div style="font-size:12px;color:rgba(255,255,255,0.5)">${protocols.length} protocols</div>
+                </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:8px">
+                ${protocols.map(p => `
+                    <button class="card" data-protocol="${p.id}" style="text-align:left">
+                        <div class="card__header">
+                            <div class="card__icon" style="background:${getSeverityColor(p.severity)}22;color:${getSeverityColor(p.severity)}">
+                                ${getSeverityIcon(p.severity)}
+                            </div>
+                            <div style="flex:1">
+                                <div class="card__title">${p.title}</div>
+                                <div class="card__subtitle" style="display:flex;gap:8px;align-items:center">
+                                    <span style="padding:2px 6px;background:${getSeverityColor(p.severity)}33;color:${getSeverityColor(p.severity)};border-radius:4px;font-size:9px;font-weight:600">
+                                        ${p.severity.toUpperCase()}
+                                    </span>
+                                </div>
+                            </div>
+                            ${medicalState.bookmarks.includes(p.id) ? `<span style="color:#f59e0b">${Icons.get('bookmarkFilled')}</span>` : ''}
+                        </div>
+                    </button>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function renderMedicalProtocol() {
+        const p = medicalState.selectedProtocol;
+        if (!p) return renderMedicalCategories();
+
+        const protocol = MedicalModule.getProtocol(p);
+        if (!protocol) return '<div class="empty-state">Protocol not found</div>';
+
+        const isBookmarked = medicalState.bookmarks.includes(p);
+
+        return `
+            <div style="margin-bottom:16px">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                    <div style="font-size:18px;font-weight:600">${protocol.title}</div>
+                    <button class="btn btn--secondary" id="toggle-bookmark" data-id="${p}" style="padding:8px">
+                        ${isBookmarked ? Icons.get('bookmarkFilled') : Icons.get('bookmark')}
+                    </button>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+                    <span style="padding:4px 10px;background:${getSeverityColor(protocol.severity)}33;color:${getSeverityColor(protocol.severity)};border-radius:20px;font-size:11px;font-weight:600">
+                        ${protocol.severity.toUpperCase()}
+                    </span>
+                    ${protocol.tags.slice(0, 3).map(t => `
+                        <span style="padding:4px 10px;background:rgba(255,255,255,0.1);border-radius:20px;font-size:11px;color:rgba(255,255,255,0.6)">
+                            ${t}
+                        </span>
+                    `).join('')}
+                </div>
+                <div style="font-size:13px;color:rgba(255,255,255,0.8);line-height:1.5;padding:12px;background:rgba(255,255,255,0.05);border-radius:8px">
+                    ${protocol.overview}
+                </div>
+            </div>
+
+            <!-- Steps -->
+            <div class="section-label">📋 Protocol Steps</div>
+            <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px">
+                ${protocol.steps.map((step, i) => `
+                    <div style="padding:14px;background:rgba(255,255,255,0.03);border-radius:10px;border-left:3px solid ${getSeverityColor(protocol.severity)}">
+                        <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#fff">
+                            ${step.title}
+                        </div>
+                        <div style="font-size:12px;color:rgba(255,255,255,0.75);line-height:1.5;white-space:pre-wrap">
+                            ${step.content}
+                        </div>
+                        ${step.warning ? `
+                            <div style="margin-top:10px;padding:10px;background:rgba(239,68,68,0.15);border-radius:6px;border-left:3px solid #ef4444">
+                                <div style="font-size:11px;font-weight:600;color:#ef4444;margin-bottom:4px">⚠️ WARNING</div>
+                                <div style="font-size:11px;color:rgba(255,255,255,0.8)">${step.warning}</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+
+            ${protocol.equipment && protocol.equipment.length > 0 ? `
+                <div class="section-label">🎒 Equipment Needed</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+                    ${protocol.equipment.map(e => `
+                        <span style="padding:6px 12px;background:rgba(59,130,246,0.15);border-radius:20px;font-size:11px;color:#3b82f6">
+                            ${e}
+                        </span>
+                    `).join('')}
+                </div>
+            ` : ''}
+
+            ${protocol.medications && protocol.medications.length > 0 ? `
+                <div class="section-label">💊 Medications</div>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+                    ${protocol.medications.map(m => `
+                        <div style="padding:12px;background:rgba(245,158,11,0.1);border-radius:8px">
+                            <div style="font-size:13px;font-weight:600;color:#f59e0b">${m.name}</div>
+                            <div style="font-size:11px;color:rgba(255,255,255,0.6)">Dose: ${m.dose}</div>
+                            <div style="font-size:11px;color:rgba(255,255,255,0.5)">${m.purpose}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : ''}
+
+            ${protocol.notes ? `
+                <div class="section-label">📝 Notes</div>
+                <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;font-size:12px;color:rgba(255,255,255,0.7);line-height:1.5">
+                    ${protocol.notes}
+                </div>
+            ` : ''}
+        `;
+    }
+
+    function renderMedicationsList() {
+        const medCategories = MedicalModule.getMedCategories();
+        const allMeds = MedicalModule.getAllMedications();
+
+        return `
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+                <div style="font-size:32px">💊</div>
+                <div>
+                    <div style="font-size:16px;font-weight:600">Medications Reference</div>
+                    <div style="font-size:12px;color:rgba(255,255,255,0.5)">Dosing, interactions, and warnings</div>
+                </div>
+            </div>
+
+            ${Object.entries(medCategories).map(([catKey, catInfo]) => {
+                const meds = MedicalModule.getMedicationsByCategory(catKey);
+                if (meds.length === 0) return '';
+                
+                return `
+                    <div class="section-label">${catInfo.icon} ${catInfo.name}</div>
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+                        ${meds.map(m => `
+                            <button class="card" data-medication="${Object.keys(MedicalModule.MEDICATIONS).find(k => MedicalModule.MEDICATIONS[k] === m)}" style="text-align:left">
+                                <div class="card__header">
+                                    <div class="card__icon" style="background:rgba(245,158,11,0.15)">${catInfo.icon}</div>
+                                    <div style="flex:1">
+                                        <div class="card__title">${m.name}</div>
+                                        <div class="card__subtitle">${m.uses.slice(0, 2).join(', ')}</div>
+                                    </div>
+                                </div>
+                            </button>
+                        `).join('')}
+                    </div>
+                `;
+            }).join('')}
+        `;
+    }
+
+    function renderMedicalMedication() {
+        const key = medicalState.selectedMedication;
+        if (!key) return renderMedicationsList();
+
+        const med = MedicalModule.getMedication(key);
+        if (!med) return '<div class="empty-state">Medication not found</div>';
+
+        const isBookmarked = medicalState.bookmarks.includes(key);
+
+        return `
+            <div style="margin-bottom:16px">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                    <div style="font-size:18px;font-weight:600">${med.name}</div>
+                    <button class="btn btn--secondary" id="toggle-bookmark" data-id="${key}" style="padding:8px">
+                        ${isBookmarked ? Icons.get('bookmarkFilled') : Icons.get('bookmark')}
+                    </button>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+                    ${med.uses.map(u => `
+                        <span style="padding:4px 10px;background:rgba(59,130,246,0.2);color:#3b82f6;border-radius:20px;font-size:11px">
+                            ${u}
+                        </span>
+                    `).join('')}
+                </div>
+            </div>
+
+            <!-- Dosing -->
+            <div class="section-label">💊 Dosing</div>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+                <div style="padding:12px;background:rgba(34,197,94,0.1);border-radius:8px">
+                    <div style="font-size:11px;color:#22c55e;font-weight:600;margin-bottom:4px">ADULT DOSE</div>
+                    <div style="font-size:13px;color:#fff">${med.adultDose}</div>
+                </div>
+                ${med.pediatricDose ? `
+                    <div style="padding:12px;background:rgba(59,130,246,0.1);border-radius:8px">
+                        <div style="font-size:11px;color:#3b82f6;font-weight:600;margin-bottom:4px">PEDIATRIC DOSE</div>
+                        <div style="font-size:13px;color:#fff">${med.pediatricDose}</div>
+                    </div>
+                ` : ''}
+            </div>
+
+            <!-- Contraindications -->
+            ${med.contraindications && med.contraindications.length > 0 ? `
+                <div class="section-label">🚫 Contraindications</div>
+                <div style="padding:12px;background:rgba(239,68,68,0.1);border-radius:8px;margin-bottom:16px">
+                    <ul style="margin:0;padding-left:20px;color:rgba(255,255,255,0.8);font-size:12px;line-height:1.6">
+                        ${med.contraindications.map(c => `<li>${c}</li>`).join('')}
+                    </ul>
+                </div>
+            ` : ''}
+
+            <!-- Drug Interactions -->
+            ${med.interactions && med.interactions.length > 0 ? `
+                <div class="section-label">⚠️ Drug Interactions</div>
+                <div style="padding:12px;background:rgba(245,158,11,0.1);border-radius:8px;margin-bottom:16px">
+                    <ul style="margin:0;padding-left:20px;color:rgba(255,255,255,0.8);font-size:12px;line-height:1.6">
+                        ${med.interactions.map(i => `<li>${i}</li>`).join('')}
+                    </ul>
+                </div>
+            ` : ''}
+
+            <!-- Warnings -->
+            ${med.warnings ? `
+                <div class="section-label">⚠️ Warnings</div>
+                <div style="padding:12px;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);border-radius:8px;margin-bottom:16px">
+                    <div style="font-size:12px;color:rgba(255,255,255,0.9);line-height:1.5">${med.warnings}</div>
+                </div>
+            ` : ''}
+
+            <!-- Notes -->
+            ${med.notes ? `
+                <div class="section-label">📝 Clinical Notes</div>
+                <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;font-size:12px;color:rgba(255,255,255,0.7);line-height:1.5">
+                    ${med.notes}
+                </div>
+            ` : ''}
+        `;
+    }
+
+    function renderMedicalSearchResults() {
+        const results = MedicalModule.search(medicalState.searchQuery);
+        const totalResults = results.protocols.length + results.medications.length;
+
+        if (totalResults === 0) {
+            return `
+                <div class="empty-state">
+                    <div class="empty-state__icon">${Icons.get('search')}</div>
+                    <div class="empty-state__title">No Results</div>
+                    <div class="empty-state__desc">Try different search terms</div>
+                </div>
+            `;
+        }
+
+        return `
+            <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px">
+                Found ${totalResults} result${totalResults !== 1 ? 's' : ''} for "${medicalState.searchQuery}"
+            </div>
+
+            ${results.protocols.length > 0 ? `
+                <div class="section-label">📋 Protocols (${results.protocols.length})</div>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+                    ${results.protocols.map(p => `
+                        <button class="card" data-protocol="${p.id}" style="text-align:left">
+                            <div class="card__header">
+                                <div class="card__icon" style="background:${getSeverityColor(p.severity)}22;color:${getSeverityColor(p.severity)}">
+                                    ${getSeverityIcon(p.severity)}
+                                </div>
+                                <div style="flex:1">
+                                    <div class="card__title">${p.title}</div>
+                                    <div class="card__subtitle">${p.overview.substring(0, 60)}...</div>
+                                </div>
+                            </div>
+                        </button>
+                    `).join('')}
+                </div>
+            ` : ''}
+
+            ${results.medications.length > 0 ? `
+                <div class="section-label">💊 Medications (${results.medications.length})</div>
+                <div style="display:flex;flex-direction:column;gap:8px">
+                    ${results.medications.map(m => {
+                        const key = Object.keys(MedicalModule.MEDICATIONS).find(k => MedicalModule.MEDICATIONS[k] === m);
+                        return `
+                            <button class="card" data-medication="${key}" style="text-align:left">
+                                <div class="card__header">
+                                    <div class="card__icon" style="background:rgba(245,158,11,0.15)">💊</div>
+                                    <div style="flex:1">
+                                        <div class="card__title">${m.name}</div>
+                                        <div class="card__subtitle">${m.uses.slice(0, 2).join(', ')}</div>
+                                    </div>
+                                </div>
+                            </button>
+                        `;
+                    }).join('')}
+                </div>
+            ` : ''}
+        `;
+    }
+
+    function renderQuickReferences() {
+        const refs = MedicalModule.getQuickReferences();
+
+        return `
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+                <div style="font-size:32px">📊</div>
+                <div>
+                    <div style="font-size:16px;font-weight:600">Quick Reference Tables</div>
+                    <div style="font-size:12px;color:rgba(255,255,255,0.5)">Essential medical reference data</div>
+                </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:16px">
+                ${Object.entries(refs).map(([key, ref]) => `
+                    <div style="padding:14px;background:rgba(255,255,255,0.03);border-radius:10px">
+                        <div style="font-size:14px;font-weight:600;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.1)">
+                            ${ref.title}
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:4px">
+                            ${ref.content.map(item => `
+                                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05)">
+                                    <span style="font-size:12px;color:rgba(255,255,255,0.6)">${item.label}</span>
+                                    <span style="font-size:12px;font-weight:600;color:#fff">${item.value}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    function renderMedicalBookmarks() {
+        if (medicalState.bookmarks.length === 0) {
+            return `
+                <div class="empty-state">
+                    <div class="empty-state__icon">${Icons.get('bookmark')}</div>
+                    <div class="empty-state__title">No Bookmarks</div>
+                    <div class="empty-state__desc">Bookmark protocols and medications for quick access</div>
+                </div>
+            `;
+        }
+
+        return `
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+                <div style="font-size:32px">🔖</div>
+                <div>
+                    <div style="font-size:16px;font-weight:600">Bookmarked Items</div>
+                    <div style="font-size:12px;color:rgba(255,255,255,0.5)">${medicalState.bookmarks.length} saved</div>
+                </div>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:8px">
+                ${medicalState.bookmarks.map(id => {
+                    const protocol = MedicalModule.getProtocol(id);
+                    const medication = MedicalModule.getMedication(id);
+                    
+                    if (protocol) {
+                        return `
+                            <button class="card" data-protocol="${id}" style="text-align:left">
+                                <div class="card__header">
+                                    <div class="card__icon" style="background:${getSeverityColor(protocol.severity)}22;color:${getSeverityColor(protocol.severity)}">
+                                        📋
+                                    </div>
+                                    <div style="flex:1">
+                                        <div class="card__title">${protocol.title}</div>
+                                        <div class="card__subtitle">${protocol.severity.toUpperCase()} • Protocol</div>
+                                    </div>
+                                    <span style="color:#f59e0b">${Icons.get('bookmarkFilled')}</span>
+                                </div>
+                            </button>
+                        `;
+                    } else if (medication) {
+                        return `
+                            <button class="card" data-medication="${id}" style="text-align:left">
+                                <div class="card__header">
+                                    <div class="card__icon" style="background:rgba(245,158,11,0.15)">💊</div>
+                                    <div style="flex:1">
+                                        <div class="card__title">${medication.name}</div>
+                                        <div class="card__subtitle">Medication</div>
+                                    </div>
+                                    <span style="color:#f59e0b">${Icons.get('bookmarkFilled')}</span>
+                                </div>
+                            </button>
+                        `;
+                    }
+                    return '';
+                }).join('')}
+            </div>
+        `;
+    }
+
+    function getSeverityColor(severity) {
+        const colors = {
+            critical: '#ef4444',
+            urgent: '#f59e0b',
+            moderate: '#3b82f6',
+            minor: '#22c55e',
+            info: '#6b7280'
+        };
+        return colors[severity] || colors.info;
+    }
+
+    function getSeverityIcon(severity) {
+        const icons = {
+            critical: '🔴',
+            urgent: '🟠',
+            moderate: '🔵',
+            minor: '🟢',
+            info: 'ℹ️'
+        };
+        return icons[severity] || icons.info;
+    }
+
+    function attachMedicalHandlers() {
+        // Back button
+        const backBtn = container.querySelector('#medical-back');
+        if (backBtn) {
+            backBtn.onclick = () => {
+                if (medicalState.searchQuery) {
+                    medicalState.searchQuery = '';
+                    const searchInput = container.querySelector('#medical-search');
+                    if (searchInput) searchInput.value = '';
+                } else if (medicalState.activeView === 'protocol' || medicalState.activeView === 'medication') {
+                    if (medicalState.activeCategory) {
+                        medicalState.activeView = 'category';
+                    } else {
+                        medicalState.activeView = 'categories';
+                    }
+                } else if (medicalState.activeView === 'category') {
+                    medicalState.activeView = 'categories';
+                    medicalState.activeCategory = null;
+                } else {
+                    medicalState.activeView = 'categories';
+                }
+                medicalState.selectedProtocol = null;
+                medicalState.selectedMedication = null;
+                renderMedical();
+            };
+        }
+
+        // Search input
+        const searchInput = container.querySelector('#medical-search');
+        if (searchInput) {
+            searchInput.oninput = Helpers.debounce((e) => {
+                medicalState.searchQuery = e.target.value;
+                document.getElementById('medical-content').innerHTML = renderMedicalContent();
+                attachMedicalContentHandlers();
+            }, 300);
+        }
+
+        // View all bookmarks
+        const viewBookmarks = container.querySelector('#view-all-bookmarks');
+        if (viewBookmarks) {
+            viewBookmarks.onclick = () => {
+                medicalState.activeView = 'bookmarks';
+                renderMedical();
+            };
+        }
+
+        // Bookmark chips
+        container.querySelectorAll('[data-bookmark]').forEach(btn => {
+            btn.onclick = () => {
+                const id = btn.dataset.bookmark;
+                const type = btn.dataset.type;
+                if (type === 'protocol') {
+                    medicalState.selectedProtocol = id;
+                    medicalState.activeView = 'protocol';
+                } else {
+                    medicalState.selectedMedication = id;
+                    medicalState.activeView = 'medication';
+                }
+                renderMedical();
+            };
+        });
+
+        attachMedicalContentHandlers();
+    }
+
+    function attachMedicalContentHandlers() {
+        // Category buttons
+        container.querySelectorAll('[data-category]').forEach(btn => {
+            btn.onclick = () => {
+                medicalState.activeCategory = btn.dataset.category;
+                medicalState.activeView = 'category';
+                renderMedical();
+            };
+        });
+
+        // View buttons (medications, quickref)
+        container.querySelectorAll('[data-view]').forEach(btn => {
+            btn.onclick = () => {
+                medicalState.activeView = btn.dataset.view;
+                renderMedical();
+            };
+        });
+
+        // Protocol buttons
+        container.querySelectorAll('[data-protocol]').forEach(btn => {
+            btn.onclick = () => {
+                medicalState.selectedProtocol = btn.dataset.protocol;
+                medicalState.activeView = 'protocol';
+                renderMedical();
+            };
+        });
+
+        // Medication buttons
+        container.querySelectorAll('[data-medication]').forEach(btn => {
+            btn.onclick = () => {
+                medicalState.selectedMedication = btn.dataset.medication;
+                medicalState.activeView = 'medication';
+                renderMedical();
+            };
+        });
+
+        // Toggle bookmark
+        const bookmarkBtn = container.querySelector('#toggle-bookmark');
+        if (bookmarkBtn) {
+            bookmarkBtn.onclick = () => {
+                const id = bookmarkBtn.dataset.id;
+                const idx = medicalState.bookmarks.indexOf(id);
+                if (idx > -1) {
+                    medicalState.bookmarks.splice(idx, 1);
+                } else {
+                    medicalState.bookmarks.push(id);
+                }
+                saveMedicalBookmarks();
+                renderMedical();
+                ModalsModule.showToast(idx > -1 ? 'Bookmark removed' : 'Bookmarked!', 'success');
+            };
+        }
     }
 
     return { init, render };
