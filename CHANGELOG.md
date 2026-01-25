@@ -2,6 +2,57 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.6.0] - 2025-01-25
+
+### Added
+- **RadiaCode Integration** - Full gamma spectrometer/dosimeter support:
+  - Web Bluetooth connection to RadiaCode 101/102/103/110 devices
+  - Real-time dose rate (μSv/h) and count rate (CPS) display
+  - Live radiation level indicator with color-coded alerts
+  - Track recording with GPS-tagged radiation readings
+  - Automatic threshold-based alerting system
+  - Spectrum viewer with peak detection
+  - Isotope identification from gamma spectrum (14 isotopes)
+  - GeoJSON export for radiation tracks
+  - Map visualization with color-coded radiation overlay
+  - Offline storage for readings and tracks
+
+- **Demo Mode** - Test RadiaCode features without hardware:
+  - Simulated radiation readings with realistic variation
+  - Demo spectrum with natural isotope peaks (K-40, Bi-214, Pb-214)
+  - Full UI functionality for testing and demonstrations
+  - Periodic elevated readings to test alert system
+  - Works on all browsers (no Web Bluetooth required)
+
+### Enhanced
+- **Team Panel** - Added RadiaCode section with:
+  - Connection status and device info
+  - Large dose rate display with alert level badge
+  - Recording controls for radiation tracks
+  - Track history with statistics
+  - Quick spectrum viewer access
+  - Demo mode indicator (purple theme)
+  - Reference radiation levels guide
+
+### Technical
+- RadiaCode BLE protocol from mkgeiger/RadiaCode Arduino library (MIT)
+  - Service UUID: `e63215e5-7003-49d8-96b0-b024798fb901`
+  - Write Characteristic: `e63215e6-7003-49d8-96b0-b024798fb901`
+  - Notify Characteristic: `e63215e7-7003-49d8-96b0-b024798fb901`
+  - 18-byte chunked writes (BLE MTU limitation)
+  - 4-byte little-endian size header on responses
+  - 30-second timeout for large responses (spectrum data)
+- New RadiaCodeModule with 1100+ lines of functionality
+- Haversine-based distance calculations for track distance
+- 1024-channel spectrum analysis with peak detection
+- Isotope library with 14 common isotopes (K-40, Cs-137, Co-60, I-131, etc.)
+- Multi-level alert system: normal, elevated, warning, alarm
+- Audio alerts via Web Audio API
+- IndexedDB storage for tracks and settings
+- Canvas-based map rendering for radiation overlays
+- Service worker cache version updated to v6.6.0
+- Credits: Protocol based on cdump/radiacode and mkgeiger/RadiaCode (MIT)
+
 ## [6.5.1] - 2025-01-25
 
 ### Added
