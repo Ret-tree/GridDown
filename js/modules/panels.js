@@ -2629,10 +2629,313 @@ const PanelsModule = (function() {
         });
     }
 
+    /**
+     * Render Team Management section
+     */
+    function renderTeamManagementSection(currentTeam, isInTeam, myMember, teamMembers, rallyPoints, ROLES, RALLY_TYPES) {
+        if (!isInTeam) {
+            // Not in a team - show create/join options
+            return `
+                <div style="margin-bottom:20px">
+                    <div class="section-label" style="display:flex;align-items:center;gap:8px">
+                        👥 Team Management
+                        <span style="font-size:10px;color:rgba(255,255,255,0.3);font-weight:400">Coordinate with your group</span>
+                    </div>
+                    
+                    <!-- No Team State -->
+                    <div style="padding:20px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:12px;text-align:center">
+                        <div style="font-size:32px;margin-bottom:12px">👥</div>
+                        <div style="font-size:14px;font-weight:500;margin-bottom:4px">No Active Team</div>
+                        <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:16px">
+                            Create a team or join an existing one to coordinate with your group
+                        </div>
+                        
+                        <div style="display:flex;gap:8px;justify-content:center">
+                            <button class="btn btn--primary" id="team-create-btn">
+                                ➕ Create Team
+                            </button>
+                            <button class="btn btn--secondary" id="team-join-btn">
+                                🔗 Join Team
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="divider"></div>
+            `;
+        }
+        
+        // In a team - show team info
+        const myRole = ROLES[myMember?.role] || ROLES.support;
+        const isLeader = myMember?.role === 'leader' || myMember?.role === 'coleader';
+        
+        return `
+            <div style="margin-bottom:20px">
+                <div class="section-label" style="display:flex;align-items:center;gap:8px">
+                    👥 Team Management
+                    <span style="font-size:10px;color:rgba(255,255,255,0.3);font-weight:400">${currentTeam.id}</span>
+                </div>
+                
+                <!-- Team Info Card -->
+                <div style="padding:14px;background:linear-gradient(135deg,rgba(249,115,22,0.1),rgba(234,88,12,0.05));border:1px solid rgba(249,115,22,0.2);border-radius:12px;margin-bottom:12px">
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                        <div style="width:44px;height:44px;border-radius:10px;background:rgba(249,115,22,0.2);display:flex;align-items:center;justify-content:center;font-size:22px">
+                            👥
+                        </div>
+                        <div style="flex:1">
+                            <div style="font-size:16px;font-weight:600">${escapeHtml(currentTeam.name)}</div>
+                            <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+                                ${teamMembers.length} member${teamMembers.length !== 1 ? 's' : ''} • ${rallyPoints.length} rally point${rallyPoints.length !== 1 ? 's' : ''}
+                            </div>
+                        </div>
+                        <div style="text-align:right">
+                            <div style="font-size:12px;font-weight:500;color:${myRole.color}">${myRole.icon} ${myRole.name}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Quick Actions -->
+                    <div style="display:flex;gap:8px">
+                        ${isLeader ? `
+                            <button class="btn btn--secondary" id="team-invite-btn" style="flex:1;font-size:11px;padding:8px">
+                                📤 Invite
+                            </button>
+                        ` : ''}
+                        <button class="btn btn--secondary" id="team-settings-btn" style="flex:1;font-size:11px;padding:8px">
+                            ⚙️ Settings
+                        </button>
+                        <button class="btn btn--secondary" id="team-leave-btn" style="font-size:11px;padding:8px;color:#ef4444">
+                            🚪 Leave
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Team Health Summary -->
+                <div style="display:flex;gap:8px;margin-bottom:12px">
+                    ${(() => {
+                        const health = typeof TeamModule !== 'undefined' ? TeamModule.getTeamHealth() : { active: 0, stale: 0, offline: 0 };
+                        return `
+                            <div style="flex:1;padding:8px;background:rgba(34,197,94,0.1);border-radius:8px;text-align:center">
+                                <div style="font-size:16px;font-weight:600;color:#22c55e">${health.active}</div>
+                                <div style="font-size:9px;color:rgba(255,255,255,0.4)">ACTIVE</div>
+                            </div>
+                            <div style="flex:1;padding:8px;background:rgba(245,158,11,0.1);border-radius:8px;text-align:center">
+                                <div style="font-size:16px;font-weight:600;color:#f59e0b">${health.stale}</div>
+                                <div style="font-size:9px;color:rgba(255,255,255,0.4)">STALE</div>
+                            </div>
+                            <div style="flex:1;padding:8px;background:rgba(107,114,128,0.1);border-radius:8px;text-align:center">
+                                <div style="font-size:16px;font-weight:600;color:#6b7280">${health.offline}</div>
+                                <div style="font-size:9px;color:rgba(255,255,255,0.4)">OFFLINE</div>
+                            </div>
+                        `;
+                    })()}
+                </div>
+                
+                <!-- Team Members with Distance/Bearing -->
+                <div style="margin-bottom:12px">
+                    <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;display:flex;justify-content:space-between">
+                        <span>MEMBERS</span>
+                        <span>${teamMembers.length}/${typeof TeamModule !== 'undefined' ? '20' : '?'}</span>
+                    </div>
+                    <div style="display:flex;flex-direction:column;gap:6px">
+                        ${(() => {
+                            // Get current GPS position if available
+                            const gpsState = typeof GPSModule !== 'undefined' ? GPSModule.getState() : null;
+                            const myPos = gpsState?.position ? { lat: gpsState.position.lat, lon: gpsState.position.lon } : null;
+                            
+                            return teamMembers.map(m => {
+                                const role = ROLES[m.role] || ROLES.support;
+                                const isMe = m.id === myMember?.id;
+                                const statusColor = m.status === 'active' ? '#22c55e' : m.status === 'stale' ? '#f59e0b' : '#6b7280';
+                                
+                                // Get distance/bearing if we have GPS
+                                let distInfo = null;
+                                if (!isMe && myPos && typeof TeamModule !== 'undefined') {
+                                    distInfo = TeamModule.getDistanceToMember(m.id, myPos);
+                                }
+                                
+                                // Format last seen time
+                                let lastSeenText = '';
+                                if (m.lastSeen) {
+                                    const elapsed = Date.now() - new Date(m.lastSeen).getTime();
+                                    if (elapsed < 60000) lastSeenText = 'Now';
+                                    else if (elapsed < 3600000) lastSeenText = Math.floor(elapsed / 60000) + 'm';
+                                    else if (elapsed < 86400000) lastSeenText = Math.floor(elapsed / 3600000) + 'h';
+                                    else lastSeenText = Math.floor(elapsed / 86400000) + 'd';
+                                }
+                                
+                                return `
+                                    <div style="padding:10px;background:${isMe ? 'rgba(249,115,22,0.1)' : 'rgba(255,255,255,0.03)'};border:1px solid ${isMe ? 'rgba(249,115,22,0.2)' : 'transparent'};border-radius:10px;cursor:pointer" 
+                                         data-team-member="${m.id}">
+                                        <div style="display:flex;align-items:center;gap:10px">
+                                            <!-- Role Icon & Status -->
+                                            <div style="position:relative">
+                                                <div style="width:36px;height:36px;border-radius:8px;background:${role.color}22;display:flex;align-items:center;justify-content:center;font-size:18px">
+                                                    ${role.icon}
+                                                </div>
+                                                <div style="position:absolute;bottom:-2px;right:-2px;width:10px;height:10px;border-radius:50%;background:${statusColor};border:2px solid #0f1419"></div>
+                                            </div>
+                                            
+                                            <!-- Member Info -->
+                                            <div style="flex:1;min-width:0">
+                                                <div style="display:flex;align-items:center;gap:6px">
+                                                    <span style="font-size:13px;font-weight:500">${escapeHtml(m.shortName || m.name)}</span>
+                                                    ${isMe ? '<span style="font-size:9px;padding:2px 6px;background:rgba(249,115,22,0.2);border-radius:4px;color:#f97316">YOU</span>' : ''}
+                                                </div>
+                                                <div style="font-size:10px;color:${role.color}">${role.name}${lastSeenText ? ' • ' + lastSeenText + ' ago' : ''}</div>
+                                            </div>
+                                            
+                                            <!-- Distance/Bearing (if available) -->
+                                            ${!isMe && distInfo ? `
+                                                <div style="text-align:right">
+                                                    <div style="font-size:14px;font-weight:600;color:#3b82f6">${distInfo.formatted}</div>
+                                                    <div style="font-size:10px;color:rgba(255,255,255,0.5)">
+                                                        ${distInfo.compass} (${Math.round(distInfo.bearing)}°)
+                                                    </div>
+                                                </div>
+                                            ` : !isMe && m.lat && m.lon ? `
+                                                <div style="text-align:right">
+                                                    <div style="font-size:10px;color:rgba(255,255,255,0.4)">📍 Has position</div>
+                                                </div>
+                                            ` : !isMe ? `
+                                                <div style="text-align:right">
+                                                    <div style="font-size:10px;color:rgba(255,255,255,0.3)">No position</div>
+                                                </div>
+                                            ` : ''}
+                                            
+                                            <!-- Go To Button -->
+                                            ${!isMe && m.lat && m.lon ? `
+                                                <button class="btn btn--secondary" data-goto-team="${m.id}" style="padding:6px 10px;font-size:11px" title="Go to location">
+                                                    🎯
+                                                </button>
+                                            ` : ''}
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('');
+                        })()}
+                    </div>
+                </div>
+                
+                <!-- Rally Points -->
+                <div style="margin-bottom:12px">
+                    <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+                        <span>RALLY POINTS</span>
+                        <button class="btn btn--secondary" id="team-add-rally-btn" style="padding:2px 8px;font-size:10px">+ Add</button>
+                    </div>
+                    ${rallyPoints.length === 0 ? `
+                        <div style="padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;font-size:11px;color:rgba(255,255,255,0.4);text-align:center">
+                            No rally points defined. Add one for emergency meetup locations.
+                        </div>
+                    ` : `
+                        <div style="display:flex;flex-direction:column;gap:6px">
+                            ${(() => {
+                                const gpsState = typeof GPSModule !== 'undefined' ? GPSModule.getState() : null;
+                                const myPos = gpsState?.position ? { lat: gpsState.position.lat, lon: gpsState.position.lon } : null;
+                                
+                                return rallyPoints.map(rp => {
+                                    const rpType = RALLY_TYPES[rp.type] || RALLY_TYPES.primary;
+                                    
+                                    // Get distance/bearing if we have GPS
+                                    let distInfo = null;
+                                    if (myPos && typeof TeamModule !== 'undefined') {
+                                        distInfo = TeamModule.getDistanceToRally(rp.id, myPos);
+                                    }
+                                    
+                                    return `
+                                        <div style="padding:10px;background:rgba(255,255,255,0.03);border:1px solid ${rpType.color}33;border-radius:10px;display:flex;align-items:center;gap:10px" data-rally-id="${rp.id}">
+                                            <div style="width:36px;height:36px;border-radius:8px;background:${rpType.color}22;display:flex;align-items:center;justify-content:center;font-size:18px">
+                                                ${rpType.icon}
+                                            </div>
+                                            <div style="flex:1;min-width:0">
+                                                <div style="font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(rp.name)}</div>
+                                                <div style="font-size:10px;color:${rpType.color}">${rpType.name}${rp.schedule ? ' • ' + rp.schedule : ''}</div>
+                                            </div>
+                                            ${distInfo ? `
+                                                <div style="text-align:right">
+                                                    <div style="font-size:13px;font-weight:600;color:${rpType.color}">${distInfo.formatted}</div>
+                                                    <div style="font-size:9px;color:rgba(255,255,255,0.5)">${distInfo.compass} (${Math.round(distInfo.bearing)}°)</div>
+                                                </div>
+                                            ` : ''}
+                                            <button class="btn btn--secondary" data-goto-rally="${rp.id}" style="padding:6px 10px;font-size:11px">🎯</button>
+                                        </div>
+                                    `;
+                                }).join('');
+                            })()}
+                        </div>
+                    `}
+                </div>
+                
+                <!-- Comm Plan Summary -->
+                ${currentTeam.commPlan ? `
+                    <div style="padding:12px;background:rgba(139,92,246,0.1);border:1px solid rgba(139,92,246,0.2);border-radius:10px">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                            <div style="font-size:10px;color:rgba(255,255,255,0.4)">COMM PLAN</div>
+                            ${isLeader ? `<button class="btn btn--secondary" id="team-edit-commplan-btn" style="padding:2px 8px;font-size:9px">Edit</button>` : ''}
+                        </div>
+                        
+                        <!-- Frequencies & Emergency Word -->
+                        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+                            ${currentTeam.commPlan.primaryFreq ? `
+                                <div style="padding:4px 8px;background:rgba(255,255,255,0.05);border-radius:6px;font-size:11px">
+                                    📻 ${currentTeam.commPlan.primaryFreq}
+                                </div>
+                            ` : ''}
+                            ${currentTeam.commPlan.emergencyWord ? `
+                                <div style="padding:4px 8px;background:rgba(239,68,68,0.15);border-radius:6px;font-size:11px;color:#ef4444">
+                                    🆘 "${currentTeam.commPlan.emergencyWord}"
+                                </div>
+                            ` : ''}
+                            ${currentTeam.meshChannel ? `
+                                <div style="padding:4px 8px;background:rgba(255,255,255,0.05);border-radius:6px;font-size:11px">
+                                    📡 Ch ${currentTeam.meshChannel}
+                                </div>
+                            ` : ''}
+                        </div>
+                        
+                        <!-- Next Check-In -->
+                        ${(() => {
+                            const nextCheckIn = typeof TeamModule !== 'undefined' ? TeamModule.getNextCheckIn() : null;
+                            if (nextCheckIn) {
+                                return `
+                                    <div style="padding:8px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:6px;display:flex;align-items:center;gap:8px">
+                                        <span style="font-size:16px">⏰</span>
+                                        <div style="flex:1">
+                                            <div style="font-size:11px;font-weight:500;color:#22c55e">Next Check-In</div>
+                                            <div style="font-size:10px;color:rgba(255,255,255,0.5)">${nextCheckIn.formatted}</div>
+                                        </div>
+                                    </div>
+                                `;
+                            } else if (currentTeam.commPlan.checkInTimes && currentTeam.commPlan.checkInTimes.length > 0) {
+                                return `
+                                    <div style="font-size:10px;color:rgba(255,255,255,0.4)">
+                                        ${currentTeam.commPlan.checkInTimes.length} scheduled check-in${currentTeam.commPlan.checkInTimes.length !== 1 ? 's' : ''}
+                                    </div>
+                                `;
+                            }
+                            return '';
+                        })()}
+                    </div>
+                ` : ''}
+            </div>
+            
+            <div class="divider"></div>
+        `;
+    }
+
     function renderTeam() {
         const team = State.get('teamMembers');
         const waypoints = State.get('waypoints') || [];
         const routes = State.get('routes') || [];
+        
+        // Get Team state
+        const hasTeamModule = typeof TeamModule !== 'undefined';
+        const currentTeam = hasTeamModule ? TeamModule.getCurrentTeam() : null;
+        const isInTeam = hasTeamModule && TeamModule.isInTeam();
+        const myMember = isInTeam ? TeamModule.getMyMember() : null;
+        const teamMembers = isInTeam ? TeamModule.getMembers() : [];
+        const rallyPoints = isInTeam ? TeamModule.getRallyPoints() : [];
+        const ROLES = hasTeamModule ? TeamModule.ROLES : {};
+        const RALLY_TYPES = hasTeamModule ? TeamModule.RALLY_TYPES : {};
         
         // Get Meshtastic connection state
         const meshState = typeof MeshtasticModule !== 'undefined' 
@@ -2654,6 +2957,9 @@ const PanelsModule = (function() {
         
         container.innerHTML = `
             <div class="panel__header"><h2 class="panel__title">Team & Mesh</h2></div>
+            
+            <!-- ========== TEAM MANAGEMENT SECTION ========== -->
+            ${renderTeamManagementSection(currentTeam, isInTeam, myMember, teamMembers, rallyPoints, ROLES, RALLY_TYPES)}
             
             <!-- Meshtastic Connection Section -->
             <div style="margin-bottom:20px">
@@ -2870,6 +3176,87 @@ const PanelsModule = (function() {
             </div>
         `;
         
+        // === TEAM MANAGEMENT EVENT HANDLERS ===
+        
+        // Create Team button
+        const createTeamBtn = container.querySelector('#team-create-btn');
+        if (createTeamBtn) {
+            createTeamBtn.onclick = () => openCreateTeamModal();
+        }
+        
+        // Join Team button
+        const joinTeamBtn = container.querySelector('#team-join-btn');
+        if (joinTeamBtn) {
+            joinTeamBtn.onclick = () => openJoinTeamModal();
+        }
+        
+        // Invite to Team button
+        const inviteBtn = container.querySelector('#team-invite-btn');
+        if (inviteBtn) {
+            inviteBtn.onclick = () => openTeamInviteModal();
+        }
+        
+        // Team Settings button
+        const teamSettingsBtn = container.querySelector('#team-settings-btn');
+        if (teamSettingsBtn) {
+            teamSettingsBtn.onclick = () => openTeamSettingsModal();
+        }
+        
+        // Comm Plan Edit button
+        const commPlanEditBtn = container.querySelector('#team-edit-commplan-btn');
+        if (commPlanEditBtn) {
+            commPlanEditBtn.onclick = () => openCommPlanModal();
+        }
+        
+        // Leave Team button
+        const leaveTeamBtn = container.querySelector('#team-leave-btn');
+        if (leaveTeamBtn) {
+            leaveTeamBtn.onclick = () => {
+                if (confirm('Are you sure you want to leave this team?')) {
+                    try {
+                        TeamModule.leaveTeam();
+                        ModalsModule.showToast('Left the team', 'success');
+                        renderTeam();
+                    } catch (err) {
+                        ModalsModule.showToast('Error: ' + err.message, 'error');
+                    }
+                }
+            };
+        }
+        
+        // Add Rally Point button
+        const addRallyBtn = container.querySelector('#team-add-rally-btn');
+        if (addRallyBtn) {
+            addRallyBtn.onclick = () => openAddRallyPointModal();
+        }
+        
+        // Go to Rally Point buttons
+        container.querySelectorAll('[data-goto-rally]').forEach(btn => {
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                const rallyPoints = TeamModule.getRallyPoints();
+                const rp = rallyPoints.find(r => r.id === btn.dataset.gotoRally);
+                if (rp && rp.lat && rp.lon && typeof MapModule !== 'undefined') {
+                    MapModule.setCenter(rp.lat, rp.lon, 15);
+                    ModalsModule.showToast(`Centered on ${rp.name}`, 'info');
+                }
+            };
+        });
+        
+        // Team member click (for details)
+        container.querySelectorAll('[data-team-member]').forEach(el => {
+            el.onclick = (e) => {
+                // Don't trigger if clicking on the goto button
+                if (e.target.closest('[data-goto-team]')) return;
+                
+                const members = TeamModule.getMembers();
+                const member = members.find(m => m.id === el.dataset.teamMember);
+                if (member) {
+                    openTeamMemberDetailModal(member);
+                }
+            };
+        });
+        
         // === MESHTASTIC EVENT HANDLERS ===
         
         // Bluetooth connect
@@ -3076,6 +3463,1016 @@ const PanelsModule = (function() {
         return div.innerHTML;
     }
     
+    // =========================================================================
+    // TEAM MANAGEMENT MODALS
+    // =========================================================================
+    
+    /**
+     * Open Create Team modal
+     */
+    function openCreateTeamModal() {
+        const modalContainer = document.getElementById('modal-container');
+        
+        modalContainer.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop">
+                <div class="modal" style="max-width:420px">
+                    <div class="modal__header">
+                        <h3 class="modal__title">➕ Create New Team</h3>
+                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                    </div>
+                    <div class="modal__body">
+                        <div class="form-group">
+                            <label>Team Name</label>
+                            <input type="text" id="team-name" placeholder="e.g., Sierra Expedition" maxlength="30">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Description (optional)</label>
+                            <input type="text" id="team-desc" placeholder="Brief description of the mission">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Your Name</label>
+                            <input type="text" id="team-my-name" placeholder="Your display name" value="${typeof MeshtasticModule !== 'undefined' ? MeshtasticModule.getConnectionState().nodeName || '' : ''}">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Your Short Name (4 chars)</label>
+                            <input type="text" id="team-my-short" placeholder="e.g., LEAD" maxlength="4" style="text-transform:uppercase">
+                        </div>
+                        
+                        <div style="padding:12px;background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.2);border-radius:8px;margin-top:16px">
+                            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:8px">
+                                💡 A unique Team ID and passphrase will be auto-generated. Share these with your team members to let them join.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal__footer">
+                        <button class="btn btn--secondary" id="modal-cancel">Cancel</button>
+                        <button class="btn btn--primary" id="modal-create">Create Team</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const closeModal = () => { modalContainer.innerHTML = ''; };
+        
+        modalContainer.querySelector('#modal-close').onclick = closeModal;
+        modalContainer.querySelector('#modal-cancel').onclick = closeModal;
+        modalContainer.querySelector('#modal-backdrop').onclick = (e) => {
+            if (e.target.id === 'modal-backdrop') closeModal();
+        };
+        
+        modalContainer.querySelector('#modal-create').onclick = () => {
+            const name = modalContainer.querySelector('#team-name').value.trim();
+            const desc = modalContainer.querySelector('#team-desc').value.trim();
+            const myName = modalContainer.querySelector('#team-my-name').value.trim();
+            const myShort = modalContainer.querySelector('#team-my-short').value.trim().toUpperCase();
+            
+            if (!name) {
+                ModalsModule.showToast('Please enter a team name', 'error');
+                return;
+            }
+            
+            if (!myName) {
+                ModalsModule.showToast('Please enter your name', 'error');
+                return;
+            }
+            
+            try {
+                const team = TeamModule.createTeam({
+                    name: name,
+                    description: desc,
+                    creatorName: myName,
+                    creatorShortName: myShort || myName.substring(0, 4).toUpperCase()
+                });
+                
+                closeModal();
+                ModalsModule.showToast(`Team "${team.name}" created!`, 'success');
+                
+                // Show invite modal immediately
+                setTimeout(() => openTeamInviteModal(), 500);
+                
+                renderTeam();
+            } catch (err) {
+                ModalsModule.showToast('Error: ' + err.message, 'error');
+            }
+        };
+    }
+    
+    /**
+     * Open Join Team modal
+     */
+    function openJoinTeamModal() {
+        const modalContainer = document.getElementById('modal-container');
+        
+        modalContainer.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop">
+                <div class="modal" style="max-width:420px">
+                    <div class="modal__header">
+                        <h3 class="modal__title">🔗 Join a Team</h3>
+                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                    </div>
+                    <div class="modal__body">
+                        <p style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:16px">
+                            Enter a team invite code, paste package data, or import a .gdteam file.
+                        </p>
+                        
+                        <div class="form-group">
+                            <label>Invite Code or Package Data</label>
+                            <textarea id="team-import-data" rows="4" placeholder="GDTEAM:eyJ0Ijoi... or paste JSON package"></textarea>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Passphrase (if required)</label>
+                            <input type="text" id="team-passphrase" placeholder="e.g., alpha-bravo-42">
+                        </div>
+                        
+                        <div style="text-align:center;margin:16px 0">
+                            <span style="color:rgba(255,255,255,0.3);font-size:12px">— or —</span>
+                        </div>
+                        
+                        <label class="btn btn--secondary btn--full" style="cursor:pointer">
+                            📁 Import .gdteam File
+                            <input type="file" id="team-file-input" accept=".gdteam,.json" style="display:none">
+                        </label>
+                    </div>
+                    <div class="modal__footer">
+                        <button class="btn btn--secondary" id="modal-cancel">Cancel</button>
+                        <button class="btn btn--primary" id="modal-join">Join Team</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const closeModal = () => { modalContainer.innerHTML = ''; };
+        
+        modalContainer.querySelector('#modal-close').onclick = closeModal;
+        modalContainer.querySelector('#modal-cancel').onclick = closeModal;
+        modalContainer.querySelector('#modal-backdrop').onclick = (e) => {
+            if (e.target.id === 'modal-backdrop') closeModal();
+        };
+        
+        // File import
+        modalContainer.querySelector('#team-file-input').onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            try {
+                const pkg = await TeamModule.importFromFile(file);
+                modalContainer.querySelector('#team-import-data').value = JSON.stringify(pkg);
+                ModalsModule.showToast('File loaded, enter passphrase and click Join', 'info');
+            } catch (err) {
+                ModalsModule.showToast('Error reading file: ' + err.message, 'error');
+            }
+        };
+        
+        // Join button
+        modalContainer.querySelector('#modal-join').onclick = async () => {
+            const data = modalContainer.querySelector('#team-import-data').value.trim();
+            const passphrase = modalContainer.querySelector('#team-passphrase').value.trim();
+            
+            if (!data) {
+                ModalsModule.showToast('Please enter invite code or package data', 'error');
+                return;
+            }
+            
+            try {
+                let packageData = data;
+                
+                // Try to parse as JSON if not an invite code
+                if (!data.startsWith('GDTEAM:')) {
+                    try {
+                        packageData = JSON.parse(data);
+                    } catch (e) {
+                        // Keep as string
+                    }
+                }
+                
+                const team = await TeamModule.importTeamPackage(packageData, passphrase || undefined);
+                
+                closeModal();
+                ModalsModule.showToast(`Joined team "${team.name}"!`, 'success');
+                renderTeam();
+            } catch (err) {
+                ModalsModule.showToast('Error: ' + err.message, 'error');
+            }
+        };
+    }
+    
+    /**
+     * Open Team Invite modal (for sharing)
+     */
+    function openTeamInviteModal() {
+        if (!TeamModule.isInTeam()) return;
+        
+        const team = TeamModule.getCurrentTeam();
+        const inviteCode = TeamModule.generateInviteCode();
+        const modalContainer = document.getElementById('modal-container');
+        
+        modalContainer.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop">
+                <div class="modal" style="max-width:420px">
+                    <div class="modal__header">
+                        <h3 class="modal__title">📤 Invite to Team</h3>
+                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                    </div>
+                    <div class="modal__body">
+                        <div style="text-align:center;margin-bottom:20px">
+                            <div style="font-size:24px;margin-bottom:8px">👥</div>
+                            <div style="font-size:16px;font-weight:600">${escapeHtml(team.name)}</div>
+                            <div style="font-size:12px;color:rgba(255,255,255,0.5)">Team ID: ${team.id}</div>
+                        </div>
+                        
+                        <!-- QR Code -->
+                        <div style="text-align:center;margin-bottom:20px">
+                            <div id="team-qr-container" style="display:inline-block;padding:16px;background:#fff;border-radius:12px">
+                                <div style="color:#000;font-size:12px">Loading QR...</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Passphrase -->
+                        <div style="padding:12px;background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.2);border-radius:8px;margin-bottom:16px">
+                            <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:4px">PASSPHRASE (share separately)</div>
+                            <div style="font-size:16px;font-weight:600;font-family:monospace;letter-spacing:1px">${team.passphrase}</div>
+                        </div>
+                        
+                        <!-- Invite Code -->
+                        <div class="form-group">
+                            <label>Invite Code</label>
+                            <textarea id="invite-code-text" rows="3" readonly style="font-size:10px;font-family:monospace">${inviteCode}</textarea>
+                        </div>
+                        
+                        <div style="display:flex;gap:8px">
+                            <button class="btn btn--secondary" id="copy-invite-code" style="flex:1">
+                                📋 Copy Code
+                            </button>
+                            <button class="btn btn--secondary" id="download-team-file" style="flex:1">
+                                📁 Download .gdteam
+                            </button>
+                        </div>
+                    </div>
+                    <div class="modal__footer">
+                        <button class="btn btn--primary btn--full" id="modal-close-btn">Done</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const closeModal = () => { modalContainer.innerHTML = ''; };
+        
+        modalContainer.querySelector('#modal-close').onclick = closeModal;
+        modalContainer.querySelector('#modal-close-btn').onclick = closeModal;
+        modalContainer.querySelector('#modal-backdrop').onclick = (e) => {
+            if (e.target.id === 'modal-backdrop') closeModal();
+        };
+        
+        // Generate QR code
+        TeamModule.generateTeamQR(180).then(qrDataUrl => {
+            const qrContainer = modalContainer.querySelector('#team-qr-container');
+            if (qrContainer) {
+                qrContainer.innerHTML = `<img src="${qrDataUrl}" alt="Team QR Code" style="display:block">`;
+            }
+        });
+        
+        // Copy invite code
+        modalContainer.querySelector('#copy-invite-code').onclick = () => {
+            const code = modalContainer.querySelector('#invite-code-text').value;
+            navigator.clipboard.writeText(code).then(() => {
+                ModalsModule.showToast('Invite code copied!', 'success');
+            }).catch(() => {
+                modalContainer.querySelector('#invite-code-text').select();
+                document.execCommand('copy');
+                ModalsModule.showToast('Invite code copied!', 'success');
+            });
+        };
+        
+        // Download file
+        modalContainer.querySelector('#download-team-file').onclick = () => {
+            TeamModule.downloadTeamPackage();
+            ModalsModule.showToast('Team file downloaded', 'success');
+        };
+    }
+    
+    /**
+     * Open Team Settings modal
+     */
+    function openTeamSettingsModal() {
+        if (!TeamModule.isInTeam()) return;
+        
+        const team = TeamModule.getCurrentTeam();
+        const myMember = TeamModule.getMyMember();
+        const isLeader = myMember?.role === 'leader';
+        const modalContainer = document.getElementById('modal-container');
+        
+        modalContainer.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop">
+                <div class="modal" style="max-width:420px">
+                    <div class="modal__header">
+                        <h3 class="modal__title">⚙️ Team Settings</h3>
+                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                    </div>
+                    <div class="modal__body">
+                        <!-- Team Info -->
+                        <div style="padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:16px">
+                            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+                                <span style="font-size:11px;color:rgba(255,255,255,0.5)">Team ID</span>
+                                <span style="font-size:12px;font-family:monospace">${team.id}</span>
+                            </div>
+                            <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+                                <span style="font-size:11px;color:rgba(255,255,255,0.5)">Mesh Channel</span>
+                                <span style="font-size:12px">Channel ${team.meshChannel}</span>
+                            </div>
+                            <div style="display:flex;justify-content:space-between">
+                                <span style="font-size:11px;color:rgba(255,255,255,0.5)">Passphrase</span>
+                                <span style="font-size:12px;font-family:monospace">${team.passphrase}</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Comm Plan -->
+                        <div class="section-label">Communication Plan</div>
+                        <div class="form-group">
+                            <label>Primary Frequency</label>
+                            <input type="text" id="comm-primary" value="${team.commPlan?.primaryFreq || ''}" placeholder="e.g., 146.520 MHz" ${!isLeader ? 'disabled' : ''}>
+                        </div>
+                        <div class="form-group">
+                            <label>Emergency Word</label>
+                            <input type="text" id="comm-emergency" value="${team.commPlan?.emergencyWord || ''}" placeholder="e.g., MAYDAY" ${!isLeader ? 'disabled' : ''}>
+                        </div>
+                        
+                        ${isLeader ? `
+                            <div class="divider"></div>
+                            <div class="section-label" style="color:#ef4444">Danger Zone</div>
+                            <button class="btn btn--secondary btn--full" id="dissolve-team-btn" style="color:#ef4444;border-color:rgba(239,68,68,0.3)">
+                                ⚠️ Dissolve Team
+                            </button>
+                        ` : ''}
+                    </div>
+                    <div class="modal__footer">
+                        <button class="btn btn--secondary" id="modal-cancel">Cancel</button>
+                        ${isLeader ? `<button class="btn btn--primary" id="modal-save">Save Changes</button>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const closeModal = () => { modalContainer.innerHTML = ''; };
+        
+        modalContainer.querySelector('#modal-close').onclick = closeModal;
+        modalContainer.querySelector('#modal-cancel').onclick = closeModal;
+        modalContainer.querySelector('#modal-backdrop').onclick = (e) => {
+            if (e.target.id === 'modal-backdrop') closeModal();
+        };
+        
+        // Save changes
+        const saveBtn = modalContainer.querySelector('#modal-save');
+        if (saveBtn) {
+            saveBtn.onclick = () => {
+                try {
+                    TeamModule.updateTeam({
+                        commPlan: {
+                            primaryFreq: modalContainer.querySelector('#comm-primary').value.trim(),
+                            emergencyWord: modalContainer.querySelector('#comm-emergency').value.trim()
+                        }
+                    });
+                    closeModal();
+                    ModalsModule.showToast('Settings saved', 'success');
+                    renderTeam();
+                } catch (err) {
+                    ModalsModule.showToast('Error: ' + err.message, 'error');
+                }
+            };
+        }
+        
+        // Dissolve team
+        const dissolveBtn = modalContainer.querySelector('#dissolve-team-btn');
+        if (dissolveBtn) {
+            dissolveBtn.onclick = () => {
+                if (confirm('Are you sure you want to dissolve this team? This action cannot be undone.')) {
+                    if (confirm('All members will be removed. Type "DISSOLVE" in the next prompt to confirm.')) {
+                        const confirmation = prompt('Type DISSOLVE to confirm:');
+                        if (confirmation === 'DISSOLVE') {
+                            try {
+                                TeamModule.dissolveTeam();
+                                closeModal();
+                                ModalsModule.showToast('Team dissolved', 'success');
+                                renderTeam();
+                            } catch (err) {
+                                ModalsModule.showToast('Error: ' + err.message, 'error');
+                            }
+                        }
+                    }
+                }
+            };
+        }
+    }
+    
+    /**
+     * Open Add Rally Point modal
+     */
+    function openAddRallyPointModal() {
+        if (!TeamModule.isInTeam()) return;
+        
+        const RALLY_TYPES = TeamModule.RALLY_TYPES;
+        const modalContainer = document.getElementById('modal-container');
+        
+        // Get current map center for default coordinates
+        const mapState = typeof MapModule !== 'undefined' ? MapModule.getMapState() : { lat: 37.4215, lon: -119.1892 };
+        
+        modalContainer.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop">
+                <div class="modal" style="max-width:420px">
+                    <div class="modal__header">
+                        <h3 class="modal__title">🏁 Add Rally Point</h3>
+                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                    </div>
+                    <div class="modal__body">
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" id="rally-name" placeholder="e.g., Trailhead Parking">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Type</label>
+                            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+                                ${Object.entries(RALLY_TYPES).map(([key, rt]) => `
+                                    <button class="btn btn--secondary rally-type-btn ${key === 'primary' ? 'rally-type-btn--selected' : ''}" 
+                                            data-rally-type="${key}" 
+                                            style="padding:10px;flex-direction:column;gap:4px;${key === 'primary' ? 'border-color:' + rt.color : ''}">
+                                        <span style="font-size:18px">${rt.icon}</span>
+                                        <span style="font-size:10px">${rt.name.split(' ')[0]}</span>
+                                    </button>
+                                `).join('')}
+                            </div>
+                        </div>
+                        
+                        <div style="display:flex;gap:8px">
+                            <div class="form-group" style="flex:1">
+                                <label>Latitude</label>
+                                <input type="number" id="rally-lat" step="0.0001" value="${mapState.lat.toFixed(4)}">
+                            </div>
+                            <div class="form-group" style="flex:1">
+                                <label>Longitude</label>
+                                <input type="number" id="rally-lon" step="0.0001" value="${mapState.lon.toFixed(4)}">
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn--secondary btn--full" id="use-gps-btn" style="margin-bottom:16px">
+                            📍 Use Current GPS Location
+                        </button>
+                        
+                        <div class="form-group">
+                            <label>Schedule (optional)</label>
+                            <input type="text" id="rally-schedule" placeholder="e.g., Every 2 hours, or 0800 daily">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Notes</label>
+                            <textarea id="rally-notes" rows="2" placeholder="Additional instructions..."></textarea>
+                        </div>
+                    </div>
+                    <div class="modal__footer">
+                        <button class="btn btn--secondary" id="modal-cancel">Cancel</button>
+                        <button class="btn btn--primary" id="modal-add">Add Rally Point</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const closeModal = () => { modalContainer.innerHTML = ''; };
+        let selectedType = 'primary';
+        
+        modalContainer.querySelector('#modal-close').onclick = closeModal;
+        modalContainer.querySelector('#modal-cancel').onclick = closeModal;
+        modalContainer.querySelector('#modal-backdrop').onclick = (e) => {
+            if (e.target.id === 'modal-backdrop') closeModal();
+        };
+        
+        // Type selection
+        modalContainer.querySelectorAll('.rally-type-btn').forEach(btn => {
+            btn.onclick = () => {
+                modalContainer.querySelectorAll('.rally-type-btn').forEach(b => {
+                    b.classList.remove('rally-type-btn--selected');
+                    b.style.borderColor = '';
+                });
+                btn.classList.add('rally-type-btn--selected');
+                btn.style.borderColor = RALLY_TYPES[btn.dataset.rallyType].color;
+                selectedType = btn.dataset.rallyType;
+            };
+        });
+        
+        // Use GPS button
+        modalContainer.querySelector('#use-gps-btn').onclick = () => {
+            if ('geolocation' in navigator) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        modalContainer.querySelector('#rally-lat').value = pos.coords.latitude.toFixed(4);
+                        modalContainer.querySelector('#rally-lon').value = pos.coords.longitude.toFixed(4);
+                        ModalsModule.showToast('GPS location set', 'success');
+                    },
+                    (err) => {
+                        ModalsModule.showToast('Could not get GPS: ' + err.message, 'error');
+                    },
+                    { enableHighAccuracy: true }
+                );
+            } else {
+                ModalsModule.showToast('Geolocation not supported', 'error');
+            }
+        };
+        
+        // Add button
+        modalContainer.querySelector('#modal-add').onclick = () => {
+            const name = modalContainer.querySelector('#rally-name').value.trim();
+            const lat = parseFloat(modalContainer.querySelector('#rally-lat').value);
+            const lon = parseFloat(modalContainer.querySelector('#rally-lon').value);
+            const schedule = modalContainer.querySelector('#rally-schedule').value.trim();
+            const notes = modalContainer.querySelector('#rally-notes').value.trim();
+            
+            if (!name) {
+                ModalsModule.showToast('Please enter a name', 'error');
+                return;
+            }
+            
+            if (isNaN(lat) || isNaN(lon)) {
+                ModalsModule.showToast('Please enter valid coordinates', 'error');
+                return;
+            }
+            
+            try {
+                TeamModule.addRallyPoint({
+                    name: name,
+                    type: selectedType,
+                    lat: lat,
+                    lon: lon,
+                    schedule: schedule,
+                    notes: notes
+                });
+                
+                closeModal();
+                ModalsModule.showToast('Rally point added', 'success');
+                renderTeam();
+            } catch (err) {
+                ModalsModule.showToast('Error: ' + err.message, 'error');
+            }
+        };
+    }
+    
+    /**
+     * Open Team Member detail modal
+     */
+    function openTeamMemberModal(member) {
+        const ROLES = TeamModule.ROLES;
+        const role = ROLES[member.role] || ROLES.support;
+        const myMember = TeamModule.getMyMember();
+        const canEdit = myMember?.role === 'leader' || myMember?.role === 'coleader';
+        const isMe = member.id === myMember?.id;
+        const modalContainer = document.getElementById('modal-container');
+        
+        const lastSeenText = member.lastSeen 
+            ? formatMeshTime(member.lastSeen)
+            : 'Unknown';
+        
+        modalContainer.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop">
+                <div class="modal" style="max-width:380px">
+                    <div class="modal__header">
+                        <h3 class="modal__title">${role.icon} ${escapeHtml(member.name)}</h3>
+                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                    </div>
+                    <div class="modal__body">
+                        <div style="text-align:center;margin-bottom:20px">
+                            <div style="width:60px;height:60px;border-radius:50%;background:${role.color}22;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:28px">
+                                ${role.icon}
+                            </div>
+                            <div style="font-size:14px;color:${role.color}">${role.name}</div>
+                            <div style="font-size:11px;color:rgba(255,255,255,0.4)">
+                                ${member.shortName || 'N/A'} • ${isMe ? 'This is you' : `Last seen: ${lastSeenText}`}
+                            </div>
+                        </div>
+                        
+                        ${member.lat && member.lon ? `
+                            <div style="padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:16px">
+                                <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:4px">LAST KNOWN POSITION</div>
+                                <div style="font-size:13px;font-family:monospace">${member.lat.toFixed(4)}°, ${member.lon.toFixed(4)}°</div>
+                            </div>
+                            <button class="btn btn--secondary btn--full" id="goto-member-btn" style="margin-bottom:16px">
+                                🎯 Go to Location
+                            </button>
+                        ` : ''}
+                        
+                        ${canEdit && !isMe ? `
+                            <div class="section-label">Change Role</div>
+                            <select id="member-role-select" style="margin-bottom:16px">
+                                ${Object.entries(ROLES).map(([key, r]) => `
+                                    <option value="${key}" ${member.role === key ? 'selected' : ''}>${r.icon} ${r.name}</option>
+                                `).join('')}
+                            </select>
+                            
+                            <button class="btn btn--secondary btn--full" id="remove-member-btn" style="color:#ef4444;border-color:rgba(239,68,68,0.3)">
+                                Remove from Team
+                            </button>
+                        ` : ''}
+                    </div>
+                    <div class="modal__footer">
+                        <button class="btn btn--secondary btn--full" id="modal-close-btn">Close</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const closeModal = () => { modalContainer.innerHTML = ''; };
+        
+        modalContainer.querySelector('#modal-close').onclick = closeModal;
+        modalContainer.querySelector('#modal-close-btn').onclick = closeModal;
+        modalContainer.querySelector('#modal-backdrop').onclick = (e) => {
+            if (e.target.id === 'modal-backdrop') closeModal();
+        };
+        
+        // Go to location
+        const gotoBtn = modalContainer.querySelector('#goto-member-btn');
+        if (gotoBtn) {
+            gotoBtn.onclick = () => {
+                if (member.lat && member.lon && typeof MapModule !== 'undefined') {
+                    MapModule.setCenter(member.lat, member.lon, 15);
+                    closeModal();
+                    ModalsModule.showToast(`Centered on ${member.name}`, 'info');
+                }
+            };
+        }
+        
+        // Change role
+        const roleSelect = modalContainer.querySelector('#member-role-select');
+        if (roleSelect) {
+            roleSelect.onchange = () => {
+                try {
+                    TeamModule.setMemberRole(member.id, roleSelect.value);
+                    ModalsModule.showToast('Role updated', 'success');
+                    closeModal();
+                    renderTeam();
+                } catch (err) {
+                    ModalsModule.showToast('Error: ' + err.message, 'error');
+                }
+            };
+        }
+        
+        // Remove member
+        const removeBtn = modalContainer.querySelector('#remove-member-btn');
+        if (removeBtn) {
+            removeBtn.onclick = () => {
+                if (confirm(`Remove ${member.name} from the team?`)) {
+                    try {
+                        TeamModule.removeMember(member.id);
+                        closeModal();
+                        ModalsModule.showToast('Member removed', 'success');
+                        renderTeam();
+                    } catch (err) {
+                        ModalsModule.showToast('Error: ' + err.message, 'error');
+                    }
+                }
+            };
+        }
+    }
+
+    /**
+     * Open detailed team member modal with distance/bearing
+     */
+    function openTeamMemberDetailModal(member) {
+        const ROLES = TeamModule.ROLES;
+        const role = ROLES[member.role] || ROLES.support;
+        const myMember = TeamModule.getMyMember();
+        const canEdit = myMember?.role === 'leader' || myMember?.role === 'coleader';
+        const isMe = member.id === myMember?.id;
+        const modalContainer = document.getElementById('modal-container');
+        
+        // Get GPS position for distance/bearing
+        const gpsState = typeof GPSModule !== 'undefined' ? GPSModule.getState() : null;
+        const myPos = gpsState?.position ? { lat: gpsState.position.lat, lon: gpsState.position.lon } : null;
+        
+        // Calculate distance/bearing
+        let distInfo = null;
+        if (!isMe && myPos && member.lat && member.lon) {
+            distInfo = TeamModule.getDistanceToMember(member.id, myPos);
+        }
+        
+        const lastSeenText = member.lastSeen ? formatMeshTime(member.lastSeen) : 'Unknown';
+        const statusColor = member.status === 'active' ? '#22c55e' : member.status === 'stale' ? '#f59e0b' : '#6b7280';
+        const statusText = member.status === 'active' ? 'Active' : member.status === 'stale' ? 'Stale' : 'Offline';
+        
+        modalContainer.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop">
+                <div class="modal" style="max-width:400px">
+                    <div class="modal__header">
+                        <h3 class="modal__title">${role.icon} ${escapeHtml(member.name)}</h3>
+                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                    </div>
+                    <div class="modal__body">
+                        <!-- Member Header -->
+                        <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
+                            <div style="position:relative">
+                                <div style="width:64px;height:64px;border-radius:12px;background:${role.color}22;display:flex;align-items:center;justify-content:center;font-size:32px">
+                                    ${role.icon}
+                                </div>
+                                <div style="position:absolute;bottom:-4px;right:-4px;width:16px;height:16px;border-radius:50%;background:${statusColor};border:3px solid #1a1f2e"></div>
+                            </div>
+                            <div style="flex:1">
+                                <div style="font-size:16px;font-weight:600">${escapeHtml(member.name)}</div>
+                                <div style="font-size:12px;color:${role.color}">${role.name}</div>
+                                <div style="font-size:11px;color:rgba(255,255,255,0.4)">
+                                    ${member.shortName || 'N/A'} • ${statusText}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        ${isMe ? `
+                            <div style="padding:12px;background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.2);border-radius:10px;text-align:center;margin-bottom:16px">
+                                <span style="font-size:12px;color:#f97316">This is you</span>
+                            </div>
+                        ` : ''}
+                        
+                        <!-- Distance/Bearing Card -->
+                        ${!isMe && distInfo ? `
+                            <div style="padding:16px;background:linear-gradient(135deg,rgba(59,130,246,0.1),rgba(59,130,246,0.05));border:1px solid rgba(59,130,246,0.2);border-radius:12px;margin-bottom:16px">
+                                <div style="display:flex;justify-content:space-between;align-items:center">
+                                    <div>
+                                        <div style="font-size:24px;font-weight:700;color:#3b82f6">${distInfo.formatted}</div>
+                                        <div style="font-size:11px;color:rgba(255,255,255,0.5)">Distance from you</div>
+                                    </div>
+                                    <div style="text-align:center;padding:12px;background:rgba(0,0,0,0.2);border-radius:8px">
+                                        <div style="font-size:20px;font-weight:600">${distInfo.compass}</div>
+                                        <div style="font-size:10px;color:rgba(255,255,255,0.4)">${Math.round(distInfo.bearing)}°</div>
+                                    </div>
+                                </div>
+                            </div>
+                        ` : !isMe && member.lat && member.lon && !myPos ? `
+                            <div style="padding:12px;background:rgba(255,255,255,0.03);border-radius:10px;text-align:center;margin-bottom:16px;font-size:11px;color:rgba(255,255,255,0.4)">
+                                Enable GPS to see distance and bearing
+                            </div>
+                        ` : ''}
+                        
+                        <!-- Position Info -->
+                        ${member.lat && member.lon ? `
+                            <div style="padding:12px;background:rgba(255,255,255,0.03);border-radius:10px;margin-bottom:16px">
+                                <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:6px">LAST KNOWN POSITION</div>
+                                <div style="font-size:13px;font-family:'IBM Plex Mono',monospace">${member.lat.toFixed(5)}°, ${member.lon.toFixed(5)}°</div>
+                                <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px">Updated ${lastSeenText}</div>
+                            </div>
+                            <button class="btn btn--primary btn--full" id="goto-member-btn" style="margin-bottom:16px">
+                                🎯 Go to Location on Map
+                            </button>
+                        ` : `
+                            <div style="padding:16px;background:rgba(255,255,255,0.03);border-radius:10px;text-align:center;margin-bottom:16px">
+                                <div style="font-size:24px;margin-bottom:8px">📍</div>
+                                <div style="font-size:12px;color:rgba(255,255,255,0.4)">No position data available</div>
+                            </div>
+                        `}
+                        
+                        <!-- Role Management (for leaders) -->
+                        ${canEdit && !isMe ? `
+                            <div class="divider" style="margin:16px 0"></div>
+                            
+                            <div class="section-label">Member Management</div>
+                            
+                            <div style="margin-bottom:12px">
+                                <label style="font-size:11px;color:rgba(255,255,255,0.4);display:block;margin-bottom:6px">Change Role</label>
+                                <select id="member-role-select" style="width:100%">
+                                    ${Object.entries(ROLES).map(([key, r]) => `
+                                        <option value="${key}" ${member.role === key ? 'selected' : ''}>${r.icon} ${r.name}</option>
+                                    `).join('')}
+                                </select>
+                            </div>
+                            
+                            <button class="btn btn--secondary btn--full" id="remove-member-btn" style="color:#ef4444;border-color:rgba(239,68,68,0.3)">
+                                🚫 Remove from Team
+                            </button>
+                        ` : ''}
+                    </div>
+                    <div class="modal__footer">
+                        <button class="btn btn--secondary btn--full" id="modal-close-btn">Close</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const closeModal = () => { modalContainer.innerHTML = ''; };
+        
+        modalContainer.querySelector('#modal-close').onclick = closeModal;
+        modalContainer.querySelector('#modal-close-btn').onclick = closeModal;
+        modalContainer.querySelector('#modal-backdrop').onclick = (e) => {
+            if (e.target.id === 'modal-backdrop') closeModal();
+        };
+        
+        // Go to location
+        const gotoBtn = modalContainer.querySelector('#goto-member-btn');
+        if (gotoBtn) {
+            gotoBtn.onclick = () => {
+                if (member.lat && member.lon && typeof MapModule !== 'undefined') {
+                    MapModule.setCenter(member.lat, member.lon, 15);
+                    closeModal();
+                    ModalsModule.showToast(`Centered on ${member.name}`, 'info');
+                }
+            };
+        }
+        
+        // Change role
+        const roleSelect = modalContainer.querySelector('#member-role-select');
+        if (roleSelect) {
+            roleSelect.onchange = () => {
+                try {
+                    TeamModule.setMemberRole(member.id, roleSelect.value);
+                    ModalsModule.showToast('Role updated', 'success');
+                    closeModal();
+                    renderTeam();
+                } catch (err) {
+                    ModalsModule.showToast('Error: ' + err.message, 'error');
+                }
+            };
+        }
+        
+        // Remove member
+        const removeBtn = modalContainer.querySelector('#remove-member-btn');
+        if (removeBtn) {
+            removeBtn.onclick = () => {
+                if (confirm(`Remove ${member.name} from the team?`)) {
+                    try {
+                        TeamModule.removeMember(member.id);
+                        ModalsModule.showToast('Member removed', 'success');
+                        closeModal();
+                        renderTeam();
+                    } catch (err) {
+                        ModalsModule.showToast('Error: ' + err.message, 'error');
+                    }
+                }
+            };
+        }
+    }
+
+    /**
+     * Open comm plan editing modal
+     */
+    function openCommPlanModal() {
+        const currentTeam = TeamModule.getCurrentTeam();
+        if (!currentTeam) return;
+        
+        const commPlan = currentTeam.commPlan || {};
+        const modalContainer = document.getElementById('modal-container');
+        
+        modalContainer.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop">
+                <div class="modal" style="max-width:450px">
+                    <div class="modal__header">
+                        <h3 class="modal__title">📡 Comm Plan</h3>
+                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                    </div>
+                    <div class="modal__body">
+                        <!-- Frequencies -->
+                        <div class="section-label">Radio Frequencies</div>
+                        <div class="form-group">
+                            <label>Primary Frequency</label>
+                            <input type="text" id="comm-primary-freq" value="${commPlan.primaryFreq || ''}" 
+                                placeholder="e.g., 146.520 MHz">
+                        </div>
+                        <div class="form-group">
+                            <label>Backup Frequency</label>
+                            <input type="text" id="comm-backup-freq" value="${commPlan.backupFreq || ''}" 
+                                placeholder="e.g., 462.5625 MHz">
+                        </div>
+                        
+                        <div class="divider"></div>
+                        
+                        <!-- Emergency Word -->
+                        <div class="section-label">Emergency Protocol</div>
+                        <div class="form-group">
+                            <label>Emergency Code Word</label>
+                            <input type="text" id="comm-emergency-word" value="${commPlan.emergencyWord || ''}" 
+                                placeholder="e.g., AVALANCHE">
+                            <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:4px">
+                                Say this word to trigger emergency response
+                            </div>
+                        </div>
+                        
+                        <div class="divider"></div>
+                        
+                        <!-- Check-In Times -->
+                        <div class="section-label" style="display:flex;justify-content:space-between;align-items:center">
+                            <span>Scheduled Check-Ins</span>
+                            <button class="btn btn--secondary" id="add-checkin-btn" style="padding:2px 8px;font-size:10px">+ Add</button>
+                        </div>
+                        
+                        <div id="checkin-list" style="margin-bottom:16px">
+                            ${(commPlan.checkInTimes || []).map((ci, i) => `
+                                <div style="display:flex;align-items:center;gap:8px;padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:6px" data-checkin-index="${i}">
+                                    <span style="font-size:14px">⏰</span>
+                                    <input type="time" value="${ci.time || ''}" data-checkin-time="${i}" style="flex:1">
+                                    <select data-checkin-freq="${i}" style="width:90px;padding:6px">
+                                        <option value="daily" ${ci.frequency === 'daily' ? 'selected' : ''}>Daily</option>
+                                        <option value="hourly" ${ci.frequency === 'hourly' ? 'selected' : ''}>Hourly</option>
+                                        <option value="once" ${ci.frequency === 'once' ? 'selected' : ''}>Once</option>
+                                    </select>
+                                    <button class="btn btn--secondary" data-remove-checkin="${i}" style="padding:4px 8px;color:#ef4444">✕</button>
+                                </div>
+                            `).join('')}
+                            ${(commPlan.checkInTimes || []).length === 0 ? `
+                                <div style="padding:12px;text-align:center;font-size:11px;color:rgba(255,255,255,0.4)">
+                                    No scheduled check-ins
+                                </div>
+                            ` : ''}
+                        </div>
+                        
+                        <div class="divider"></div>
+                        
+                        <!-- Signal Plan -->
+                        <div class="section-label">Signal Plan Notes</div>
+                        <div class="form-group" style="margin-bottom:0">
+                            <textarea id="comm-signal-plan" rows="3" 
+                                placeholder="Visual/audio signals, contingency procedures...">${commPlan.signalPlan || ''}</textarea>
+                        </div>
+                    </div>
+                    <div class="modal__footer">
+                        <button class="btn btn--secondary" id="modal-cancel">Cancel</button>
+                        <button class="btn btn--primary" id="save-commplan-btn">Save Changes</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const closeModal = () => { modalContainer.innerHTML = ''; };
+        
+        modalContainer.querySelector('#modal-close').onclick = closeModal;
+        modalContainer.querySelector('#modal-cancel').onclick = closeModal;
+        modalContainer.querySelector('#modal-backdrop').onclick = (e) => {
+            if (e.target.id === 'modal-backdrop') closeModal();
+        };
+        
+        // Add check-in
+        modalContainer.querySelector('#add-checkin-btn').onclick = () => {
+            const list = modalContainer.querySelector('#checkin-list');
+            const emptyMsg = list.querySelector('div[style*="text-align:center"]');
+            if (emptyMsg) emptyMsg.remove();
+            
+            const index = list.children.length;
+            const newItem = document.createElement('div');
+            newItem.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:6px';
+            newItem.dataset.checkinIndex = index;
+            newItem.innerHTML = `
+                <span style="font-size:14px">⏰</span>
+                <input type="time" value="08:00" data-checkin-time="${index}" style="flex:1">
+                <select data-checkin-freq="${index}" style="width:90px;padding:6px">
+                    <option value="daily" selected>Daily</option>
+                    <option value="hourly">Hourly</option>
+                    <option value="once">Once</option>
+                </select>
+                <button class="btn btn--secondary" data-remove-checkin="${index}" style="padding:4px 8px;color:#ef4444">✕</button>
+            `;
+            list.appendChild(newItem);
+            
+            // Attach remove handler
+            newItem.querySelector('[data-remove-checkin]').onclick = function() {
+                newItem.remove();
+            };
+        };
+        
+        // Remove check-in handlers
+        modalContainer.querySelectorAll('[data-remove-checkin]').forEach(btn => {
+            btn.onclick = () => {
+                btn.closest('[data-checkin-index]').remove();
+            };
+        });
+        
+        // Save
+        modalContainer.querySelector('#save-commplan-btn').onclick = () => {
+            // Gather check-in times
+            const checkInTimes = [];
+            modalContainer.querySelectorAll('[data-checkin-index]').forEach(item => {
+                const timeInput = item.querySelector('[data-checkin-time]');
+                const freqSelect = item.querySelector('[data-checkin-freq]');
+                if (timeInput?.value) {
+                    checkInTimes.push({
+                        id: Helpers.generateId(),
+                        time: timeInput.value,
+                        frequency: freqSelect?.value || 'daily'
+                    });
+                }
+            });
+            
+            const updates = {
+                primaryFreq: modalContainer.querySelector('#comm-primary-freq').value.trim(),
+                backupFreq: modalContainer.querySelector('#comm-backup-freq').value.trim(),
+                emergencyWord: modalContainer.querySelector('#comm-emergency-word').value.trim().toUpperCase(),
+                signalPlan: modalContainer.querySelector('#comm-signal-plan').value.trim(),
+                checkInTimes: checkInTimes
+            };
+            
+            try {
+                TeamModule.updateCommPlan(updates);
+                ModalsModule.showToast('Comm plan saved', 'success');
+                closeModal();
+                renderTeam();
+            } catch (err) {
+                ModalsModule.showToast('Error: ' + err.message, 'error');
+            }
+        };
+    }
+
     /**
      * Open modal to select waypoint for mesh sharing
      */
