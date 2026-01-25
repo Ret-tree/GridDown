@@ -2701,14 +2701,12 @@ const PanelsModule = (function() {
         
         const gpsState = GPSModule.getState();
         const currentPos = GPSModule.getPosition();
-        const manualPos = GPSModule.getManualPosition();
         const isGPSActive = GPSModule.isActive();
         const isUsingManual = GPSModule.isUsingManualPosition();
-        const preferManual = GPSModule.isPreferManual();
         const positionSource = GPSModule.getPositionSource();
         
         // Format current position for display
-        let positionDisplay = 'No position available';
+        let positionDisplay = 'No position set';
         let positionColor = 'rgba(255,255,255,0.4)';
         
         if (currentPos) {
@@ -2722,137 +2720,58 @@ const PanelsModule = (function() {
         
         // Source indicator
         const sourceIcon = isUsingManual ? '📌' : (isGPSActive ? '🛰️' : '📍');
-        const sourceText = positionSource !== 'none' ? positionSource : 'not set';
         
         return `
             <div style="margin-bottom:20px">
                 <div class="section-label" style="display:flex;align-items:center;gap:8px">
                     📍 My Position
-                    <span style="font-size:10px;color:rgba(255,255,255,0.3);font-weight:400">GPS or Manual Entry</span>
                 </div>
                 
-                <!-- Current Position Card -->
-                <div style="padding:14px;background:${currentPos ? 'rgba(34,197,94,0.05)' : 'rgba(255,255,255,0.03)'};border:1px solid ${currentPos ? (isUsingManual ? 'rgba(168,85,247,0.3)' : 'rgba(34,197,94,0.3)') : 'rgba(255,255,255,0.1)'};border-radius:12px;margin-bottom:12px">
+                <!-- Compact Position Card -->
+                <div style="padding:12px;background:${currentPos ? 'rgba(34,197,94,0.05)' : 'rgba(255,255,255,0.03)'};border:1px solid ${currentPos ? (isUsingManual ? 'rgba(168,85,247,0.3)' : 'rgba(34,197,94,0.3)') : 'rgba(255,255,255,0.1)'};border-radius:12px">
                     
-                    <!-- Position Display -->
-                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-                        <div style="width:40px;height:40px;border-radius:10px;background:${currentPos ? (isUsingManual ? 'rgba(168,85,247,0.2)' : 'rgba(34,197,94,0.2)') : 'rgba(255,255,255,0.05)'};display:flex;align-items:center;justify-content:center">
-                            <span style="font-size:20px">${sourceIcon}</span>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <div style="width:36px;height:36px;border-radius:8px;background:${currentPos ? (isUsingManual ? 'rgba(168,85,247,0.2)' : 'rgba(34,197,94,0.2)') : 'rgba(255,255,255,0.05)'};display:flex;align-items:center;justify-content:center">
+                            <span style="font-size:18px">${sourceIcon}</span>
                         </div>
-                        <div style="flex:1">
-                            <div style="font-size:13px;font-weight:600;color:${positionColor};font-family:monospace;letter-spacing:0.5px">
+                        <div style="flex:1;min-width:0">
+                            <div style="font-size:12px;font-weight:600;color:${positionColor};font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                                 ${positionDisplay}
                             </div>
-                            <div style="font-size:11px;color:rgba(255,255,255,0.5)">
-                                Source: ${sourceText}
+                            <div style="font-size:10px;color:rgba(255,255,255,0.5)">
+                                ${positionSource !== 'none' ? positionSource : 'Not set'}
                                 ${gpsState.accuracy ? ` • ±${Math.round(gpsState.accuracy)}m` : ''}
                             </div>
                         </div>
-                    </div>
-                    
-                    <!-- GPS Controls -->
-                    <div style="display:flex;gap:8px;margin-bottom:${manualPos || !isGPSActive ? '12px' : '0'}">
-                        ${isGPSActive ? `
-                            <button class="btn btn--secondary position-gps-stop-btn" style="flex:1;font-size:12px;padding:8px">
-                                ⏹️ Stop GPS
-                            </button>
-                        ` : `
-                            <button class="btn btn--primary position-gps-start-btn" style="flex:1;font-size:12px;padding:8px">
-                                🛰️ Start GPS
-                            </button>
-                        `}
-                        <button class="btn btn--secondary position-manual-btn" style="font-size:12px;padding:8px" title="Enter position manually">
-                            ✏️ Manual
-                        </button>
                         ${currentPos ? `
-                            <button class="btn btn--secondary position-center-btn" style="font-size:12px;padding:8px" title="Center map on position">
+                            <button class="btn btn--secondary position-center-btn" style="font-size:11px;padding:6px 8px" title="Center map">
                                 🎯
                             </button>
                         ` : ''}
                     </div>
                     
-                    ${manualPos ? `
-                        <!-- Manual Position Info -->
-                        <div style="padding:10px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.2);border-radius:8px;margin-bottom:8px">
-                            <div style="display:flex;justify-content:space-between;align-items:center">
-                                <div>
-                                    <div style="font-size:10px;color:rgba(168,85,247,0.8);margin-bottom:2px">MANUAL POSITION SET</div>
-                                    <div style="font-size:12px;font-family:monospace;color:#a855f7">
-                                        ${manualPos.lat.toFixed(6)}, ${manualPos.lon.toFixed(6)}
-                                        ${manualPos.name ? ` (${manualPos.name})` : ''}
-                                    </div>
-                                </div>
-                                <button class="btn btn--secondary position-clear-manual-btn" style="font-size:10px;padding:4px 8px;color:#ef4444">
-                                    ✕ Clear
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <!-- Prefer Manual Toggle -->
-                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:rgba(255,255,255,0.7);cursor:pointer">
-                            <input type="checkbox" class="position-prefer-manual-checkbox" ${preferManual ? 'checked' : ''} style="width:16px;height:16px">
-                            <span>Prefer manual position (even when GPS available)</span>
-                        </label>
-                    ` : ''}
+                    <!-- Quick Actions -->
+                    <div style="display:flex;gap:6px;margin-top:10px">
+                        ${!currentPos ? `
+                            <button class="btn btn--primary position-goto-gps-btn" style="flex:1;font-size:11px;padding:6px">
+                                ⚙️ Set Position in GPS Panel
+                            </button>
+                        ` : `
+                            <button class="btn btn--secondary position-goto-gps-btn" style="flex:1;font-size:11px;padding:6px">
+                                ⚙️ GPS Settings
+                            </button>
+                        `}
+                    </div>
                 </div>
-                
-                <!-- Quick Position Formats (collapsed by default) -->
-                <details style="margin-bottom:8px">
-                    <summary style="font-size:11px;color:rgba(255,255,255,0.5);cursor:pointer;padding:4px 0">
-                        Position in other formats...
-                    </summary>
-                    ${currentPos ? `
-                        <div style="padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;margin-top:8px;font-size:11px;font-family:monospace">
-                            ${typeof Coordinates !== 'undefined' ? `
-                                <div style="margin-bottom:4px"><span style="color:rgba(255,255,255,0.4)">DD:</span> ${Coordinates.toDD(currentPos.lat, currentPos.lon)}</div>
-                                <div style="margin-bottom:4px"><span style="color:rgba(255,255,255,0.4)">DMS:</span> ${Coordinates.toDMS(currentPos.lat, currentPos.lon)}</div>
-                                <div style="margin-bottom:4px"><span style="color:rgba(255,255,255,0.4)">UTM:</span> ${Coordinates.toUTM(currentPos.lat, currentPos.lon)}</div>
-                                <div><span style="color:rgba(255,255,255,0.4)">MGRS:</span> ${Coordinates.toMGRS(currentPos.lat, currentPos.lon)}</div>
-                            ` : `
-                                <div>${currentPos.lat.toFixed(6)}, ${currentPos.lon.toFixed(6)}</div>
-                            `}
-                        </div>
-                    ` : `
-                        <div style="padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;margin-top:8px;font-size:11px;color:rgba(255,255,255,0.4)">
-                            No position set
-                        </div>
-                    `}
-                </details>
             </div>
         `;
     }
 
     /**
-     * Attach Position section event handlers
+     * Attach Position section event handlers (simplified for Team panel)
      */
     function attachPositionHandlers() {
         if (typeof GPSModule === 'undefined') return;
-        
-        // Start GPS button
-        const startBtn = container.querySelector('.position-gps-start-btn');
-        if (startBtn) {
-            startBtn.onclick = () => {
-                GPSModule.startInternalGPS();
-                renderTeam();
-            };
-        }
-        
-        // Stop GPS button
-        const stopBtn = container.querySelector('.position-gps-stop-btn');
-        if (stopBtn) {
-            stopBtn.onclick = () => {
-                GPSModule.stopInternalGPS();
-                renderTeam();
-            };
-        }
-        
-        // Manual entry button
-        const manualBtn = container.querySelector('.position-manual-btn');
-        if (manualBtn) {
-            manualBtn.onclick = () => {
-                openManualPositionModal();
-            };
-        }
         
         // Center map button
         const centerBtn = container.querySelector('.position-center-btn');
@@ -2865,24 +2784,13 @@ const PanelsModule = (function() {
             };
         }
         
-        // Clear manual position button
-        const clearBtn = container.querySelector('.position-clear-manual-btn');
-        if (clearBtn) {
-            clearBtn.onclick = () => {
-                GPSModule.clearManualPosition();
-                renderTeam();
-                if (typeof ModalsModule !== 'undefined') {
-                    ModalsModule.showToast('Manual position cleared', 'info');
-                }
-            };
-        }
-        
-        // Prefer manual checkbox
-        const preferCheckbox = container.querySelector('.position-prefer-manual-checkbox');
-        if (preferCheckbox) {
-            preferCheckbox.onchange = () => {
-                GPSModule.setPreferManual(preferCheckbox.checked);
-                renderTeam();
+        // Go to GPS panel button
+        const gotoGpsBtn = container.querySelector('.position-goto-gps-btn');
+        if (gotoGpsBtn) {
+            gotoGpsBtn.onclick = () => {
+                // Switch to GPS panel
+                State.set('activePanel', 'gps');
+                render();
             };
         }
     }
@@ -5845,6 +5753,102 @@ const PanelsModule = (function() {
     /**
      * GPS Panel - Location tracking, breadcrumbs, and navigation
      */
+    /**
+     * Render Manual Position card for GPS panel
+     */
+    function renderManualPositionCard() {
+        if (typeof GPSModule === 'undefined') return '';
+        
+        const manualPos = GPSModule.getManualPosition();
+        const isUsingManual = GPSModule.isUsingManualPosition();
+        const preferManual = GPSModule.isPreferManual();
+        const gpsState = GPSModule.getState();
+        const hasGPSFix = gpsState.currentPosition !== null;
+        
+        return `
+            <div style="margin-bottom:16px">
+                <div class="section-label" style="display:flex;align-items:center;gap:8px">
+                    📌 Manual Position
+                    <span style="font-size:10px;color:rgba(255,255,255,0.3);font-weight:400">For use without GPS</span>
+                </div>
+                
+                <div style="padding:14px;background:${manualPos ? 'rgba(168,85,247,0.1)' : 'rgba(255,255,255,0.03)'};border:1px solid ${manualPos ? 'rgba(168,85,247,0.3)' : 'rgba(255,255,255,0.1)'};border-radius:12px">
+                    
+                    ${manualPos ? `
+                        <!-- Manual Position Set -->
+                        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                            <div style="width:40px;height:40px;border-radius:10px;background:rgba(168,85,247,0.2);display:flex;align-items:center;justify-content:center">
+                                <span style="font-size:18px">📌</span>
+                            </div>
+                            <div style="flex:1">
+                                <div style="font-size:13px;font-weight:600;color:#a855f7;font-family:monospace">
+                                    ${manualPos.lat.toFixed(6)}, ${manualPos.lon.toFixed(6)}
+                                </div>
+                                <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+                                    ${manualPos.name ? manualPos.name : 'Manual position'}
+                                    ${manualPos.altitude ? ` • ${Math.round(manualPos.altitude)}m alt` : ''}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Position Formats -->
+                        <div style="padding:10px;background:rgba(0,0,0,0.2);border-radius:8px;margin-bottom:12px;font-size:11px;font-family:monospace">
+                            ${typeof Coordinates !== 'undefined' ? `
+                                <div style="margin-bottom:4px"><span style="color:rgba(255,255,255,0.4)">DD:</span> ${Coordinates.toDD(manualPos.lat, manualPos.lon)}</div>
+                                <div style="margin-bottom:4px"><span style="color:rgba(255,255,255,0.4)">DMS:</span> ${Coordinates.toDMS(manualPos.lat, manualPos.lon)}</div>
+                                <div style="margin-bottom:4px"><span style="color:rgba(255,255,255,0.4)">UTM:</span> ${Coordinates.toUTM(manualPos.lat, manualPos.lon)}</div>
+                                <div><span style="color:rgba(255,255,255,0.4)">MGRS:</span> ${Coordinates.toMGRS(manualPos.lat, manualPos.lon)}</div>
+                            ` : `${manualPos.lat.toFixed(6)}, ${manualPos.lon.toFixed(6)}`}
+                        </div>
+                        
+                        <!-- Status Indicator -->
+                        <div style="padding:8px;background:${isUsingManual ? 'rgba(168,85,247,0.15)' : 'rgba(34,197,94,0.15)'};border-radius:6px;font-size:11px;text-align:center;margin-bottom:12px;color:${isUsingManual ? '#a855f7' : '#22c55e'}">
+                            ${isUsingManual 
+                                ? '✓ Using manual position' + (preferManual ? ' (preferred)' : ' (GPS inactive)')
+                                : '✓ GPS active - using GPS position'}
+                        </div>
+                        
+                        <!-- Prefer Manual Toggle -->
+                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:rgba(255,255,255,0.7);cursor:pointer;margin-bottom:12px;padding:8px;background:rgba(255,255,255,0.03);border-radius:6px">
+                            <input type="checkbox" id="gps-prefer-manual" ${preferManual ? 'checked' : ''} style="width:16px;height:16px">
+                            <span>Always prefer manual position over GPS</span>
+                        </label>
+                        
+                        <!-- Buttons -->
+                        <div style="display:flex;gap:8px">
+                            <button class="btn btn--secondary" id="gps-edit-manual" style="flex:1;font-size:12px">
+                                ✏️ Edit Position
+                            </button>
+                            <button class="btn btn--secondary" id="gps-clear-manual" style="font-size:12px;color:#ef4444">
+                                ✕ Clear
+                            </button>
+                        </div>
+                    ` : `
+                        <!-- No Manual Position -->
+                        <div style="text-align:center;padding:8px 0 12px 0">
+                            <div style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:4px">No manual position set</div>
+                            <div style="font-size:11px;color:rgba(255,255,255,0.4)">
+                                ${hasGPSFix 
+                                    ? 'Using GPS position. Set manual for GPS-denied environments.'
+                                    : 'Set a manual position when GPS is unavailable.'}
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn--primary btn--full" id="gps-set-manual" style="font-size:13px">
+                            📌 Set Manual Position
+                        </button>
+                        
+                        <div style="margin-top:10px;font-size:10px;color:rgba(255,255,255,0.4);text-align:center">
+                            Supports: Decimal, DMS, UTM, MGRS formats
+                        </div>
+                    `}
+                </div>
+            </div>
+            
+            <div class="divider"></div>
+        `;
+    }
+
     function renderGPS() {
         // Check GPS module availability
         if (typeof GPSModule === 'undefined') {
@@ -5946,6 +5950,9 @@ const PanelsModule = (function() {
                     </div>
                 </div>
             ` : ''}
+            
+            <!-- Manual Position Section -->
+            ${renderManualPositionCard()}
             
             <!-- Tracking Controls -->
             <div style="display:flex;gap:8px;margin-bottom:16px">
@@ -6245,6 +6252,38 @@ const PanelsModule = (function() {
                 GPSModule.startSimulation();
                 setupGPSUpdates();
                 ModalsModule.showToast('GPS simulation started', 'info');
+            };
+        }
+        
+        // Manual position handlers
+        const setManualBtn = container.querySelector('#gps-set-manual');
+        if (setManualBtn) {
+            setManualBtn.onclick = () => {
+                openManualPositionModal();
+            };
+        }
+        
+        const editManualBtn = container.querySelector('#gps-edit-manual');
+        if (editManualBtn) {
+            editManualBtn.onclick = () => {
+                openManualPositionModal();
+            };
+        }
+        
+        const clearManualBtn = container.querySelector('#gps-clear-manual');
+        if (clearManualBtn) {
+            clearManualBtn.onclick = () => {
+                GPSModule.clearManualPosition();
+                ModalsModule.showToast('Manual position cleared', 'info');
+                renderGPS();
+            };
+        }
+        
+        const preferManualCheckbox = container.querySelector('#gps-prefer-manual');
+        if (preferManualCheckbox) {
+            preferManualCheckbox.onchange = () => {
+                GPSModule.setPreferManual(preferManualCheckbox.checked);
+                renderGPS();
             };
         }
     }
