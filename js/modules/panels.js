@@ -2681,6 +2681,443 @@ const PanelsModule = (function() {
         });
     }
 
+    // ==================== RadiaCode Helper Functions ====================
+
+    /**
+     * Render RadiaCode section for Team panel
+     */
+    function renderRadiaCodeSection() {
+        if (typeof RadiaCodeModule === 'undefined') {
+            return `
+                <div class="section-label">☢️ RadiaCode (Radiation)</div>
+                <div style="padding:14px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);border-radius:12px;margin-bottom:16px">
+                    <div style="font-size:12px;color:rgba(255,255,255,0.5);text-align:center">
+                        RadiaCode module not loaded
+                    </div>
+                </div>
+            `;
+        }
+        
+        const isConnected = RadiaCodeModule.isConnected();
+        const isConnecting = RadiaCodeModule.isConnecting();
+        const isDemoMode = RadiaCodeModule.isDemoMode();
+        const reading = RadiaCodeModule.getCurrentReading();
+        const deviceInfo = RadiaCodeModule.getDeviceInfo();
+        const alertLevel = RadiaCodeModule.getAlertLevel();
+        const isRecording = RadiaCodeModule.isRecording();
+        const tracks = RadiaCodeModule.getTracks();
+        const stats = RadiaCodeModule.getStats();
+        
+        // Check for Web Bluetooth support
+        const hasBluetooth = 'bluetooth' in navigator;
+        
+        // Get alert color
+        const alertColors = {
+            normal: '#22c55e',
+            elevated: '#eab308',
+            warning: '#f97316',
+            alarm: '#ef4444'
+        };
+        const alertColor = alertColors[alertLevel] || alertColors.normal;
+        
+        return `
+            <div class="section-label" style="display:flex;align-items:center;gap:8px">
+                ☢️ RadiaCode (Radiation)
+                <span style="font-size:10px;color:rgba(255,255,255,0.3);font-weight:400">Gamma dosimeter</span>
+                ${isDemoMode ? '<span style="font-size:9px;padding:2px 6px;background:rgba(147,51,234,0.3);border-radius:4px;color:#a855f7">DEMO</span>' : ''}
+            </div>
+            
+            <!-- RadiaCode Connection Card -->
+            <div style="padding:14px;background:${isConnected ? (isDemoMode ? 'rgba(147,51,234,0.1)' : 'rgba(34,197,94,0.1)') : 'rgba(255,255,255,0.03)'};border:1px solid ${isConnected ? (isDemoMode ? 'rgba(147,51,234,0.3)' : 'rgba(34,197,94,0.3)') : 'rgba(255,255,255,0.1)'};border-radius:12px;margin-bottom:12px">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:${isConnected ? '12px' : '0'}">
+                    <div style="width:40px;height:40px;border-radius:10px;background:${isConnected ? (isDemoMode ? 'rgba(147,51,234,0.2)' : 'rgba(34,197,94,0.2)') : 'rgba(255,255,255,0.05)'};display:flex;align-items:center;justify-content:center">
+                        <span style="font-size:20px">${isConnected ? (isDemoMode ? '🧪' : '☢️') : isConnecting ? '⏳' : '📴'}</span>
+                    </div>
+                    <div style="flex:1">
+                        <div style="font-size:14px;font-weight:600;color:${isConnected ? (isDemoMode ? '#a855f7' : '#22c55e') : 'inherit'}">
+                            ${isConnected 
+                                ? (isDemoMode ? 'Demo Mode (Simulated)' : (deviceInfo.serialNumber || 'RadiaCode Connected'))
+                                : isConnecting ? 'Connecting...' : 'RadiaCode Not Connected'}
+                        </div>
+                        <div style="font-size:11px;color:rgba(255,255,255,0.5)">
+                            ${isConnected 
+                                ? (isDemoMode 
+                                    ? `Simulating RadiaCode-103 • ${stats.packetsReceived} readings`
+                                    : `FW: ${deviceInfo.firmwareVersion || 'Unknown'} • ${stats.packetsReceived} readings`)
+                                : hasBluetooth 
+                                    ? 'Connect RadiaCode via Bluetooth' 
+                                    : 'Web Bluetooth not supported'}
+                        </div>
+                    </div>
+                </div>
+                
+                ${isConnected ? `
+                    <!-- Live Reading Display -->
+                    <div style="background:rgba(0,0,0,0.3);border-radius:10px;padding:12px;margin-bottom:12px">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                            <span style="font-size:10px;color:rgba(255,255,255,0.4);text-transform:uppercase">Dose Rate</span>
+                            <span style="font-size:10px;padding:2px 6px;border-radius:4px;background:${alertColor};color:#000;font-weight:600">${alertLevel.toUpperCase()}</span>
+                        </div>
+                        <div style="font-size:28px;font-weight:700;color:${alertColor};font-family:'IBM Plex Mono',monospace;letter-spacing:-1px">
+                            ${RadiaCodeModule.formatDoseRate(reading.doseRate)}
+                        </div>
+                        <div style="display:flex;gap:16px;margin-top:8px;font-size:11px;color:rgba(255,255,255,0.5)">
+                            <span>CPS: ${RadiaCodeModule.formatCountRate(reading.countRate)}</span>
+                            <span>Total: ${reading.totalDose.toFixed(3)} μSv</span>
+                            <span>Temp: ${reading.temperature.toFixed(1)}°C</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Recording & Actions -->
+                    <div style="display:flex;gap:8px;margin-bottom:12px">
+                        <button class="btn ${isRecording ? 'btn--danger' : 'btn--secondary'} radiacode-record-btn" style="flex:1;font-size:12px;padding:8px">
+                            ${isRecording ? '⏹️ Stop Recording' : '⏺️ Record Track'}
+                        </button>
+                        <button class="btn btn--secondary radiacode-spectrum-btn" style="font-size:12px;padding:8px" title="View Spectrum">
+                            📊
+                        </button>
+                        <button class="btn btn--secondary radiacode-disconnect-btn" style="font-size:12px;padding:8px;color:#ef4444" title="Disconnect">
+                            ✕
+                        </button>
+                    </div>
+                    
+                    <!-- Recording Status -->
+                    ${isRecording ? `
+                        <div style="padding:8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;font-size:11px;color:rgba(255,255,255,0.7);margin-bottom:12px">
+                            <span style="color:#ef4444">●</span> Recording track • ${RadiaCodeModule.getCurrentTrack()?.points?.length || 0} points
+                        </div>
+                    ` : ''}
+                ` : `
+                    <!-- Not Connected -->
+                    ${!isConnecting ? `
+                        <button class="btn btn--primary btn--full radiacode-connect-btn" ${!hasBluetooth ? 'disabled' : ''}>
+                            ☢️ Connect RadiaCode
+                        </button>
+                        
+                        <button class="btn btn--secondary btn--full radiacode-demo-btn" style="margin-top:8px">
+                            🧪 Start Demo Mode
+                        </button>
+                        
+                        ${!hasBluetooth ? `
+                            <div style="margin-top:8px;padding:10px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:8px;font-size:12px;color:#ef4444">
+                                ⚠️ Web Bluetooth requires Chrome or Edge. Use Demo Mode to test.
+                            </div>
+                        ` : `
+                            <div style="margin-top:8px;font-size:10px;color:rgba(255,255,255,0.4);text-align:center">
+                                Supports RadiaCode 101/102/103/110 devices
+                            </div>
+                        `}
+                    ` : ''}
+                `}
+            </div>
+            
+            <!-- Radiation Tracks -->
+            ${tracks.length > 0 ? `
+                <div class="section-label" style="display:flex;justify-content:space-between;align-items:center">
+                    <span>📈 Radiation Tracks (${tracks.length})</span>
+                </div>
+                <div style="max-height:120px;overflow-y:auto;margin-bottom:12px">
+                    ${tracks.slice(-5).reverse().map(track => {
+                        const duration = track.stats.duration ? Math.round(track.stats.duration / 60000) : 0;
+                        const maxDose = track.stats.maxDoseRate || 0;
+                        const avgDose = track.stats.avgDoseRate || 0;
+                        const points = track.points?.length || 0;
+                        const maxColor = RadiaCodeModule.getDoseColor(maxDose);
+                        
+                        return `
+                            <div class="card" style="margin-bottom:6px;padding:10px" data-radiacode-track="${track.id}">
+                                <div style="display:flex;align-items:center;gap:10px">
+                                    <div style="width:36px;height:36px;border-radius:10px;background:rgba(34,197,94,0.15);display:flex;align-items:center;justify-content:center">
+                                        <span style="font-size:16px">☢️</span>
+                                    </div>
+                                    <div style="flex:1;min-width:0">
+                                        <div style="font-size:12px;font-weight:500">${track.name}</div>
+                                        <div style="font-size:10px;color:rgba(255,255,255,0.4)">
+                                            ${duration} min • ${points} points • ${track.stats.distance?.toFixed(2) || 0} mi
+                                        </div>
+                                    </div>
+                                    <div style="text-align:right">
+                                        <div style="font-size:12px;font-weight:600;color:${maxColor}">${maxDose.toFixed(2)} μSv/h</div>
+                                        <div style="font-size:10px;color:rgba(255,255,255,0.4)">max</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            ` : ''}
+            
+            <!-- Radiation Info Box -->
+            <details style="margin-bottom:12px">
+                <summary style="cursor:pointer;font-size:11px;color:rgba(255,255,255,0.5);padding:8px;background:rgba(255,255,255,0.03);border-radius:8px">
+                    ℹ️ Radiation Reference Levels
+                </summary>
+                <div style="padding:10px;font-size:11px;color:rgba(255,255,255,0.5);line-height:1.6">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                        <div><span style="color:#22c55e">●</span> Normal: &lt;0.3 μSv/h</div>
+                        <div><span style="color:#eab308">●</span> Elevated: 0.3-2.5 μSv/h</div>
+                        <div><span style="color:#f97316">●</span> Warning: 2.5-10 μSv/h</div>
+                        <div><span style="color:#ef4444">●</span> Alarm: &gt;10 μSv/h</div>
+                    </div>
+                    <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.1)">
+                        <strong>Reference:</strong> Natural background is typically 0.1-0.3 μSv/h. 
+                        Annual limit for public is 1 mSv (1000 μSv).
+                    </div>
+                </div>
+            </details>
+        `;
+    }
+    
+    /**
+     * Attach RadiaCode event handlers
+     */
+    function attachRadiaCodeHandlers() {
+        if (typeof RadiaCodeModule === 'undefined') return;
+        
+        // Connect button
+        const connectBtn = container.querySelector('.radiacode-connect-btn');
+        if (connectBtn) {
+            connectBtn.onclick = async () => {
+                try {
+                    await RadiaCodeModule.connect();
+                    renderTeam();
+                } catch (e) {
+                    console.error('RadiaCode connection failed:', e);
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('Connection failed: ' + e.message, 'error');
+                    }
+                }
+            };
+        }
+        
+        // Demo mode button
+        const demoBtn = container.querySelector('.radiacode-demo-btn');
+        if (demoBtn) {
+            demoBtn.onclick = () => {
+                RadiaCodeModule.startDemo();
+                renderTeam();
+            };
+        }
+        
+        // Disconnect button
+        const disconnectBtn = container.querySelector('.radiacode-disconnect-btn');
+        if (disconnectBtn) {
+            disconnectBtn.onclick = () => {
+                RadiaCodeModule.disconnect();
+                renderTeam();
+            };
+        }
+        
+        // Record button
+        const recordBtn = container.querySelector('.radiacode-record-btn');
+        if (recordBtn) {
+            recordBtn.onclick = () => {
+                if (RadiaCodeModule.isRecording()) {
+                    RadiaCodeModule.stopTrack();
+                } else {
+                    RadiaCodeModule.startTrack();
+                }
+                renderTeam();
+            };
+        }
+        
+        // Spectrum button
+        const spectrumBtn = container.querySelector('.radiacode-spectrum-btn');
+        if (spectrumBtn) {
+            spectrumBtn.onclick = () => {
+                openRadiaCodeSpectrumModal();
+            };
+        }
+        
+        // Track click handlers
+        container.querySelectorAll('[data-radiacode-track]').forEach(el => {
+            el.onclick = () => {
+                const trackId = parseInt(el.dataset.radiacodeTrack);
+                openRadiaCodeTrackModal(trackId);
+            };
+        });
+    }
+    
+    /**
+     * Open RadiaCode spectrum viewer modal
+     */
+    function openRadiaCodeSpectrumModal() {
+        if (typeof RadiaCodeModule === 'undefined' || typeof ModalsModule === 'undefined') return;
+        
+        const spectrum = RadiaCodeModule.getSpectrum();
+        const peaks = RadiaCodeModule.findPeaks();
+        const isotopes = RadiaCodeModule.identifyIsotopes();
+        
+        // Find max count for scaling
+        const maxCount = Math.max(...spectrum.counts, 1);
+        
+        ModalsModule.showModal({
+            title: '📊 Gamma Spectrum',
+            size: 'large',
+            content: `
+                <div style="padding:16px">
+                    <div style="margin-bottom:16px;display:flex;gap:16px;font-size:12px;color:rgba(255,255,255,0.6)">
+                        <span>Duration: ${spectrum.duration.toFixed(1)}s</span>
+                        <span>Peaks: ${peaks.length}</span>
+                        <span>Isotopes: ${isotopes.length}</span>
+                    </div>
+                    
+                    <!-- Spectrum Chart (simplified bar representation) -->
+                    <div style="height:200px;background:rgba(0,0,0,0.3);border-radius:8px;padding:8px;margin-bottom:16px;overflow:hidden;position:relative">
+                        <canvas id="spectrum-canvas" width="600" height="180" style="width:100%;height:100%"></canvas>
+                    </div>
+                    
+                    <!-- Identified Isotopes -->
+                    ${isotopes.length > 0 ? `
+                        <div class="section-label">Identified Isotopes</div>
+                        <div style="display:grid;gap:8px">
+                            ${isotopes.map(match => `
+                                <div style="padding:10px;background:rgba(255,255,255,0.05);border-radius:8px;display:flex;align-items:center;gap:12px">
+                                    <div style="width:40px;height:40px;border-radius:8px;background:rgba(34,197,94,0.2);display:flex;align-items:center;justify-content:center">
+                                        <span style="font-size:14px;font-weight:700">${match.isotope.name.split('-')[0]}</span>
+                                    </div>
+                                    <div style="flex:1">
+                                        <div style="font-weight:600">${match.isotope.name}</div>
+                                        <div style="font-size:11px;color:rgba(255,255,255,0.5)">${match.isotope.notes}</div>
+                                    </div>
+                                    <div style="text-align:right">
+                                        <div style="font-size:12px;font-family:monospace">${match.peak.energy.toFixed(1)} keV</div>
+                                        <div style="font-size:10px;color:rgba(255,255,255,0.4)">${(match.confidence * 100).toFixed(0)}% conf</div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div style="padding:20px;text-align:center;color:rgba(255,255,255,0.4)">
+                            No isotopes identified. Accumulate more counts for better analysis.
+                        </div>
+                    `}
+                    
+                    <div style="margin-top:16px;display:flex;gap:8px">
+                        <button class="btn btn--secondary" onclick="RadiaCodeModule.resetSpectrum(); ModalsModule.closeModal();" style="flex:1">
+                            🔄 Reset Spectrum
+                        </button>
+                        <button class="btn btn--secondary" onclick="RadiaCodeModule.requestSpectrum();" style="flex:1">
+                            📥 Refresh Data
+                        </button>
+                    </div>
+                </div>
+            `,
+            onOpen: () => {
+                // Draw spectrum on canvas
+                const canvas = document.getElementById('spectrum-canvas');
+                if (canvas) {
+                    const ctx = canvas.getContext('2d');
+                    const width = canvas.width;
+                    const height = canvas.height;
+                    
+                    // Clear
+                    ctx.fillStyle = 'transparent';
+                    ctx.fillRect(0, 0, width, height);
+                    
+                    // Draw spectrum bars
+                    const barWidth = width / 256; // Show 256 bins (downsample from 1024)
+                    ctx.fillStyle = '#22c55e';
+                    
+                    for (let i = 0; i < 256; i++) {
+                        // Average 4 channels per bin
+                        const sum = spectrum.counts[i*4] + spectrum.counts[i*4+1] + spectrum.counts[i*4+2] + spectrum.counts[i*4+3];
+                        const avg = sum / 4;
+                        const barHeight = (avg / maxCount) * height * 0.9;
+                        ctx.fillRect(i * barWidth, height - barHeight, barWidth - 1, barHeight);
+                    }
+                    
+                    // Mark peaks
+                    ctx.fillStyle = '#ef4444';
+                    peaks.forEach(peak => {
+                        const x = (peak.channel / 1024) * width;
+                        ctx.fillRect(x - 1, 0, 2, height);
+                    });
+                }
+            }
+        });
+    }
+    
+    /**
+     * Open RadiaCode track detail modal
+     */
+    function openRadiaCodeTrackModal(trackId) {
+        if (typeof RadiaCodeModule === 'undefined' || typeof ModalsModule === 'undefined') return;
+        
+        const track = RadiaCodeModule.getTrack(trackId);
+        if (!track) return;
+        
+        const duration = track.stats.duration ? Math.round(track.stats.duration / 60000) : 0;
+        
+        ModalsModule.showModal({
+            title: `☢️ ${track.name}`,
+            content: `
+                <div style="padding:16px">
+                    <!-- Track Stats -->
+                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px">
+                        <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
+                            <div style="font-size:20px;font-weight:700;color:#22c55e">${track.stats.avgDoseRate?.toFixed(2) || 0}</div>
+                            <div style="font-size:10px;color:rgba(255,255,255,0.5)">Avg μSv/h</div>
+                        </div>
+                        <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
+                            <div style="font-size:20px;font-weight:700;color:${RadiaCodeModule.getDoseColor(track.stats.maxDoseRate || 0)}">${track.stats.maxDoseRate?.toFixed(2) || 0}</div>
+                            <div style="font-size:10px;color:rgba(255,255,255,0.5)">Max μSv/h</div>
+                        </div>
+                        <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
+                            <div style="font-size:20px;font-weight:700">${track.stats.totalDose?.toFixed(3) || 0}</div>
+                            <div style="font-size:10px;color:rgba(255,255,255,0.5)">Total μSv</div>
+                        </div>
+                        <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
+                            <div style="font-size:20px;font-weight:700">${duration}</div>
+                            <div style="font-size:10px;color:rgba(255,255,255,0.5)">Minutes</div>
+                        </div>
+                    </div>
+                    
+                    <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:16px">
+                        ${track.points?.length || 0} data points • ${track.stats.distance?.toFixed(2) || 0} miles
+                    </div>
+                    
+                    ${track.notes ? `
+                        <div style="padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:16px;font-size:12px;font-style:italic">
+                            "${track.notes}"
+                        </div>
+                    ` : ''}
+                    
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn--secondary" id="export-track-geojson" style="flex:1">
+                            📤 Export GeoJSON
+                        </button>
+                        <button class="btn btn--danger" id="delete-track-btn" style="flex:1">
+                            🗑️ Delete Track
+                        </button>
+                    </div>
+                </div>
+            `,
+            onOpen: () => {
+                document.getElementById('export-track-geojson')?.addEventListener('click', () => {
+                    const geojson = RadiaCodeModule.exportTrackGeoJSON(trackId);
+                    if (geojson) {
+                        const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `radiation-track-${trackId}.geojson`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                    }
+                });
+                
+                document.getElementById('delete-track-btn')?.addEventListener('click', () => {
+                    if (confirm('Delete this radiation track?')) {
+                        RadiaCodeModule.deleteTrack(trackId);
+                        ModalsModule.closeModal();
+                        renderTeam();
+                    }
+                });
+            }
+        });
+    }
+
     /**
      * Render Team Management section
      */
@@ -3087,6 +3524,11 @@ const PanelsModule = (function() {
             
             <div class="divider"></div>
             
+            <!-- RadiaCode Section -->
+            ${renderRadiaCodeSection()}
+            
+            <div class="divider"></div>
+            
             <!-- Team Positions Section -->
             <div class="section-label" style="display:flex;justify-content:space-between;align-items:center">
                 <span>Team Positions (${team.length + getAPRSStationCount()})</span>
@@ -3432,6 +3874,9 @@ const PanelsModule = (function() {
         
         // === APRS EVENT HANDLERS ===
         attachAPRSHandlers();
+        
+        // === RADIACODE EVENT HANDLERS ===
+        attachRadiaCodeHandlers();
         
         // === EXISTING PLAN SHARING HANDLERS ===
         

@@ -792,6 +792,7 @@ const MapModule = (function() {
         renderWaypoints(width, height);
         renderTeamMembers(width, height);
         renderAPRSStations(width, height);
+        renderRadiaCodeOverlay(width, height);
         renderNavigationBreadcrumbs(width, height);
         renderGPSPosition(width, height);
         renderCrosshair(width, height);
@@ -1487,6 +1488,146 @@ const MapModule = (function() {
             }
             
             ctx.globalAlpha = 1;
+        });
+    }
+
+    /**
+     * Render RadiaCode radiation tracks and current position
+     */
+    function renderRadiaCodeOverlay(width, height) {
+        if (typeof RadiaCodeModule === 'undefined') return;
+        
+        // Get all completed tracks
+        const tracks = RadiaCodeModule.getTracks();
+        const currentTrack = RadiaCodeModule.getCurrentTrack();
+        const isConnected = RadiaCodeModule.isConnected();
+        const currentReading = RadiaCodeModule.getCurrentReading();
+        
+        // Render completed tracks
+        tracks.forEach(track => {
+            renderRadiationTrack(track, width, height, false);
+        });
+        
+        // Render current recording track
+        if (currentTrack) {
+            renderRadiationTrack(currentTrack, width, height, true);
+        }
+        
+        // Render current position indicator if connected and has GPS
+        if (isConnected && currentReading.doseRate > 0) {
+            let pos = null;
+            if (typeof GPSModule !== 'undefined') {
+                pos = GPSModule.getCurrentPosition();
+            }
+            
+            if (pos && pos.lat && pos.lon) {
+                const pixel = latLonToPixel(pos.lat, pos.lon);
+                
+                // Skip if offscreen
+                if (pixel.x >= -50 && pixel.x <= width + 50 && pixel.y >= -50 && pixel.y <= height + 50) {
+                    const doseRate = currentReading.doseRate;
+                    const color = RadiaCodeModule.getDoseColor(doseRate);
+                    
+                    // Pulsing radiation indicator
+                    const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
+                    const baseRadius = 18;
+                    const pulseRadius = baseRadius + pulse * 8;
+                    
+                    // Outer pulse ring
+                    ctx.beginPath();
+                    ctx.arc(pixel.x, pixel.y, pulseRadius, 0, Math.PI * 2);
+                    ctx.fillStyle = color.replace(')', ', 0.15)').replace('rgb', 'rgba').replace('#', '');
+                    // Convert hex to rgba
+                    if (color.startsWith('#')) {
+                        const r = parseInt(color.slice(1, 3), 16);
+                        const g = parseInt(color.slice(3, 5), 16);
+                        const b = parseInt(color.slice(5, 7), 16);
+                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.15)`;
+                    }
+                    ctx.fill();
+                    
+                    // Main circle
+                    ctx.beginPath();
+                    ctx.arc(pixel.x, pixel.y, baseRadius, 0, Math.PI * 2);
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    
+                    // Radiation symbol
+                    ctx.font = '12px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText('☢', pixel.x, pixel.y);
+                    
+                    // Dose rate label
+                    ctx.font = '10px system-ui, sans-serif';
+                    ctx.fillStyle = '#fff';
+                    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+                    ctx.lineWidth = 3;
+                    const label = RadiaCodeModule.formatDoseRate(doseRate);
+                    ctx.strokeText(label, pixel.x, pixel.y + baseRadius + 12);
+                    ctx.fillText(label, pixel.x, pixel.y + baseRadius + 12);
+                }
+            }
+        }
+    }
+    
+    /**
+     * Render a single radiation track
+     */
+    function renderRadiationTrack(track, width, height, isActive) {
+        const points = track.points.filter(p => p.latitude && p.longitude);
+        if (points.length === 0) return;
+        
+        // Draw track line
+        ctx.beginPath();
+        ctx.strokeStyle = isActive ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.4)';
+        ctx.lineWidth = isActive ? 3 : 2;
+        
+        let firstVisible = true;
+        points.forEach((point, i) => {
+            const pixel = latLonToPixel(point.latitude, point.longitude);
+            
+            // Check if visible
+            if (pixel.x < -100 || pixel.x > width + 100 || pixel.y < -100 || pixel.y > height + 100) {
+                return;
+            }
+            
+            if (firstVisible) {
+                ctx.moveTo(pixel.x, pixel.y);
+                firstVisible = false;
+            } else {
+                ctx.lineTo(pixel.x, pixel.y);
+            }
+        });
+        ctx.stroke();
+        
+        // Draw radiation-colored dots at each point (sample every few points for performance)
+        const sampleRate = Math.max(1, Math.floor(points.length / 100)); // Max 100 dots
+        
+        points.forEach((point, i) => {
+            if (i % sampleRate !== 0 && i !== points.length - 1) return;
+            
+            const pixel = latLonToPixel(point.latitude, point.longitude);
+            
+            // Check if visible
+            if (pixel.x < -20 || pixel.x > width + 20 || pixel.y < -20 || pixel.y > height + 20) {
+                return;
+            }
+            
+            const color = RadiaCodeModule.getDoseColor(point.doseRate);
+            const radius = isActive ? 5 : 4;
+            
+            ctx.beginPath();
+            ctx.arc(pixel.x, pixel.y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
         });
     }
 
