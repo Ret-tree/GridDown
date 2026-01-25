@@ -3255,7 +3255,10 @@ const PanelsModule = (function() {
      * Open RadiaCode spectrum viewer modal
      */
     function openRadiaCodeSpectrumModal() {
-        if (typeof RadiaCodeModule === 'undefined' || typeof ModalsModule === 'undefined') return;
+        if (typeof RadiaCodeModule === 'undefined') return;
+        
+        const modalContainer = document.getElementById('modal-container');
+        if (!modalContainer) return;
         
         const spectrum = RadiaCodeModule.getSpectrum();
         const peaks = RadiaCodeModule.findPeaks();
@@ -3264,171 +3267,234 @@ const PanelsModule = (function() {
         // Find max count for scaling
         const maxCount = Math.max(...spectrum.counts, 1);
         
-        ModalsModule.showModal({
-            title: '📊 Gamma Spectrum',
-            size: 'large',
-            content: `
-                <div style="padding:16px">
-                    <div style="margin-bottom:16px;display:flex;gap:16px;font-size:12px;color:rgba(255,255,255,0.6)">
-                        <span>Duration: ${spectrum.duration.toFixed(1)}s</span>
-                        <span>Peaks: ${peaks.length}</span>
-                        <span>Isotopes: ${isotopes.length}</span>
+        modalContainer.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop">
+                <div class="modal" style="max-width:600px;width:95%">
+                    <div class="modal__header">
+                        <h3 class="modal__title">📊 Gamma Spectrum</h3>
+                        <button class="modal__close" id="modal-close">&times;</button>
                     </div>
-                    
-                    <!-- Spectrum Chart (simplified bar representation) -->
-                    <div style="height:200px;background:rgba(0,0,0,0.3);border-radius:8px;padding:8px;margin-bottom:16px;overflow:hidden;position:relative">
-                        <canvas id="spectrum-canvas" width="600" height="180" style="width:100%;height:100%"></canvas>
+                    <div class="modal__body">
+                        <div style="margin-bottom:16px;display:flex;gap:16px;font-size:12px;color:rgba(255,255,255,0.6)">
+                            <span>Duration: ${spectrum.duration.toFixed(1)}s</span>
+                            <span>Peaks: ${peaks.length}</span>
+                            <span>Isotopes: ${isotopes.length}</span>
+                        </div>
+                        
+                        <!-- Spectrum Chart -->
+                        <div style="height:200px;background:rgba(0,0,0,0.3);border-radius:8px;padding:8px;margin-bottom:16px;overflow:hidden;position:relative">
+                            <canvas id="spectrum-canvas" width="600" height="180" style="width:100%;height:100%"></canvas>
+                        </div>
+                        
+                        <!-- Identified Isotopes -->
+                        ${isotopes.length > 0 ? `
+                            <div class="section-label">Identified Isotopes</div>
+                            <div style="display:grid;gap:8px;max-height:200px;overflow-y:auto">
+                                ${isotopes.map(match => `
+                                    <div style="padding:10px;background:rgba(255,255,255,0.05);border-radius:8px;display:flex;align-items:center;gap:12px">
+                                        <div style="width:40px;height:40px;border-radius:8px;background:rgba(34,197,94,0.2);display:flex;align-items:center;justify-content:center">
+                                            <span style="font-size:14px;font-weight:700">${match.isotope.name.split('-')[0]}</span>
+                                        </div>
+                                        <div style="flex:1">
+                                            <div style="font-weight:600">${match.isotope.name}</div>
+                                            <div style="font-size:11px;color:rgba(255,255,255,0.5)">${match.isotope.notes}</div>
+                                        </div>
+                                        <div style="text-align:right">
+                                            <div style="font-size:12px;font-family:monospace">${match.peak.energy.toFixed(1)} keV</div>
+                                            <div style="font-size:10px;color:rgba(255,255,255,0.4)">${(match.confidence * 100).toFixed(0)}% conf</div>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : `
+                            <div style="padding:20px;text-align:center;color:rgba(255,255,255,0.4)">
+                                No isotopes identified. Accumulate more counts for better analysis.
+                            </div>
+                        `}
                     </div>
-                    
-                    <!-- Identified Isotopes -->
-                    ${isotopes.length > 0 ? `
-                        <div class="section-label">Identified Isotopes</div>
-                        <div style="display:grid;gap:8px">
-                            ${isotopes.map(match => `
-                                <div style="padding:10px;background:rgba(255,255,255,0.05);border-radius:8px;display:flex;align-items:center;gap:12px">
-                                    <div style="width:40px;height:40px;border-radius:8px;background:rgba(34,197,94,0.2);display:flex;align-items:center;justify-content:center">
-                                        <span style="font-size:14px;font-weight:700">${match.isotope.name.split('-')[0]}</span>
-                                    </div>
-                                    <div style="flex:1">
-                                        <div style="font-weight:600">${match.isotope.name}</div>
-                                        <div style="font-size:11px;color:rgba(255,255,255,0.5)">${match.isotope.notes}</div>
-                                    </div>
-                                    <div style="text-align:right">
-                                        <div style="font-size:12px;font-family:monospace">${match.peak.energy.toFixed(1)} keV</div>
-                                        <div style="font-size:10px;color:rgba(255,255,255,0.4)">${(match.confidence * 100).toFixed(0)}% conf</div>
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    ` : `
-                        <div style="padding:20px;text-align:center;color:rgba(255,255,255,0.4)">
-                            No isotopes identified. Accumulate more counts for better analysis.
-                        </div>
-                    `}
-                    
-                    <div style="margin-top:16px;display:flex;gap:8px">
-                        <button class="btn btn--secondary" onclick="RadiaCodeModule.resetSpectrum(); ModalsModule.closeModal();" style="flex:1">
+                    <div class="modal__footer">
+                        <button class="btn btn--secondary" id="spectrum-reset-btn">
                             🔄 Reset Spectrum
                         </button>
-                        <button class="btn btn--secondary" onclick="RadiaCodeModule.requestSpectrum();" style="flex:1">
+                        <button class="btn btn--secondary" id="spectrum-refresh-btn">
                             📥 Refresh Data
                         </button>
+                        <button class="btn btn--primary" id="modal-close-btn">Close</button>
                     </div>
                 </div>
-            `,
-            onOpen: () => {
-                // Draw spectrum on canvas
-                const canvas = document.getElementById('spectrum-canvas');
-                if (canvas) {
-                    const ctx = canvas.getContext('2d');
-                    const width = canvas.width;
-                    const height = canvas.height;
-                    
-                    // Clear
-                    ctx.fillStyle = 'transparent';
-                    ctx.fillRect(0, 0, width, height);
-                    
-                    // Draw spectrum bars
-                    const barWidth = width / 256; // Show 256 bins (downsample from 1024)
-                    ctx.fillStyle = '#22c55e';
-                    
-                    for (let i = 0; i < 256; i++) {
-                        // Average 4 channels per bin
-                        const sum = spectrum.counts[i*4] + spectrum.counts[i*4+1] + spectrum.counts[i*4+2] + spectrum.counts[i*4+3];
-                        const avg = sum / 4;
-                        const barHeight = (avg / maxCount) * height * 0.9;
-                        ctx.fillRect(i * barWidth, height - barHeight, barWidth - 1, barHeight);
-                    }
-                    
-                    // Mark peaks
-                    ctx.fillStyle = '#ef4444';
-                    peaks.forEach(peak => {
-                        const x = (peak.channel / 1024) * width;
-                        ctx.fillRect(x - 1, 0, 2, height);
-                    });
-                }
+            </div>
+        `;
+        
+        const closeModal = () => { modalContainer.innerHTML = ''; };
+        
+        // Close handlers
+        modalContainer.querySelector('#modal-close').onclick = closeModal;
+        modalContainer.querySelector('#modal-close-btn').onclick = closeModal;
+        modalContainer.querySelector('#modal-backdrop').onclick = (e) => {
+            if (e.target.id === 'modal-backdrop') closeModal();
+        };
+        
+        // Reset spectrum button
+        modalContainer.querySelector('#spectrum-reset-btn').onclick = () => {
+            RadiaCodeModule.resetSpectrum();
+            closeModal();
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('Spectrum reset', 'info');
             }
-        });
+        };
+        
+        // Refresh data button
+        modalContainer.querySelector('#spectrum-refresh-btn').onclick = () => {
+            RadiaCodeModule.requestSpectrum();
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('Requesting spectrum data...', 'info');
+            }
+            // Re-open modal after a delay to show updated data
+            setTimeout(() => {
+                openRadiaCodeSpectrumModal();
+            }, 500);
+        };
+        
+        // Draw spectrum on canvas
+        const canvas = document.getElementById('spectrum-canvas');
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            // Clear
+            ctx.clearRect(0, 0, width, height);
+            
+            // Draw spectrum bars
+            const barWidth = width / 256; // Show 256 bins (downsample from 1024)
+            ctx.fillStyle = '#22c55e';
+            
+            for (let i = 0; i < 256; i++) {
+                // Average 4 channels per bin
+                const sum = spectrum.counts[i*4] + spectrum.counts[i*4+1] + spectrum.counts[i*4+2] + spectrum.counts[i*4+3];
+                const avg = sum / 4;
+                const barHeight = (avg / maxCount) * height * 0.9;
+                ctx.fillRect(i * barWidth, height - barHeight, barWidth - 1, barHeight);
+            }
+            
+            // Mark peaks
+            ctx.fillStyle = '#ef4444';
+            peaks.forEach(peak => {
+                const x = (peak.channel / 1024) * width;
+                ctx.fillRect(x - 1, 0, 2, height);
+            });
+            
+            // Energy axis labels
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
+            ctx.font = '10px system-ui';
+            ctx.textAlign = 'center';
+            for (let keV = 0; keV <= 3000; keV += 500) {
+                const x = (keV / 3000) * width;
+                ctx.fillText(`${keV}`, x, height - 2);
+            }
+        }
     }
     
     /**
      * Open RadiaCode track detail modal
      */
     function openRadiaCodeTrackModal(trackId) {
-        if (typeof RadiaCodeModule === 'undefined' || typeof ModalsModule === 'undefined') return;
+        if (typeof RadiaCodeModule === 'undefined') return;
+        
+        const modalContainer = document.getElementById('modal-container');
+        if (!modalContainer) return;
         
         const track = RadiaCodeModule.getTrack(trackId);
         if (!track) return;
         
         const duration = track.stats.duration ? Math.round(track.stats.duration / 60000) : 0;
         
-        ModalsModule.showModal({
-            title: `☢️ ${track.name}`,
-            content: `
-                <div style="padding:16px">
-                    <!-- Track Stats -->
-                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px">
-                        <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
-                            <div style="font-size:20px;font-weight:700;color:#22c55e">${track.stats.avgDoseRate?.toFixed(2) || 0}</div>
-                            <div style="font-size:10px;color:rgba(255,255,255,0.5)">Avg μSv/h</div>
-                        </div>
-                        <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
-                            <div style="font-size:20px;font-weight:700;color:${RadiaCodeModule.getDoseColor(track.stats.maxDoseRate || 0)}">${track.stats.maxDoseRate?.toFixed(2) || 0}</div>
-                            <div style="font-size:10px;color:rgba(255,255,255,0.5)">Max μSv/h</div>
-                        </div>
-                        <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
-                            <div style="font-size:20px;font-weight:700">${track.stats.totalDose?.toFixed(3) || 0}</div>
-                            <div style="font-size:10px;color:rgba(255,255,255,0.5)">Total μSv</div>
-                        </div>
-                        <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
-                            <div style="font-size:20px;font-weight:700">${duration}</div>
-                            <div style="font-size:10px;color:rgba(255,255,255,0.5)">Minutes</div>
-                        </div>
+        modalContainer.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop">
+                <div class="modal" style="max-width:450px;width:90%">
+                    <div class="modal__header">
+                        <h3 class="modal__title">☢️ ${track.name}</h3>
+                        <button class="modal__close" id="modal-close">&times;</button>
                     </div>
-                    
-                    <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:16px">
-                        ${track.points?.length || 0} data points • ${track.stats.distance?.toFixed(2) || 0} miles
-                    </div>
-                    
-                    ${track.notes ? `
-                        <div style="padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:16px;font-size:12px;font-style:italic">
-                            "${track.notes}"
+                    <div class="modal__body">
+                        <!-- Track Stats -->
+                        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:16px">
+                            <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
+                                <div style="font-size:20px;font-weight:700;color:#22c55e">${track.stats.avgDoseRate?.toFixed(2) || 0}</div>
+                                <div style="font-size:10px;color:rgba(255,255,255,0.5)">Avg μSv/h</div>
+                            </div>
+                            <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
+                                <div style="font-size:20px;font-weight:700;color:${RadiaCodeModule.getDoseColor(track.stats.maxDoseRate || 0)}">${track.stats.maxDoseRate?.toFixed(2) || 0}</div>
+                                <div style="font-size:10px;color:rgba(255,255,255,0.5)">Max μSv/h</div>
+                            </div>
+                            <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
+                                <div style="font-size:20px;font-weight:700">${track.stats.totalDose?.toFixed(3) || 0}</div>
+                                <div style="font-size:10px;color:rgba(255,255,255,0.5)">Total μSv</div>
+                            </div>
+                            <div style="padding:12px;background:rgba(255,255,255,0.05);border-radius:8px;text-align:center">
+                                <div style="font-size:20px;font-weight:700">${duration}</div>
+                                <div style="font-size:10px;color:rgba(255,255,255,0.5)">Minutes</div>
+                            </div>
                         </div>
-                    ` : ''}
-                    
-                    <div style="display:flex;gap:8px">
-                        <button class="btn btn--secondary" id="export-track-geojson" style="flex:1">
+                        
+                        <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:16px">
+                            ${track.points?.length || 0} data points • ${track.stats.distance?.toFixed(2) || 0} miles
+                        </div>
+                        
+                        ${track.notes ? `
+                            <div style="padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:16px;font-size:12px;font-style:italic">
+                                "${track.notes}"
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div class="modal__footer">
+                        <button class="btn btn--secondary" id="export-track-geojson">
                             📤 Export GeoJSON
                         </button>
-                        <button class="btn btn--danger" id="delete-track-btn" style="flex:1">
-                            🗑️ Delete Track
+                        <button class="btn btn--danger" id="delete-track-btn">
+                            🗑️ Delete
                         </button>
                     </div>
                 </div>
-            `,
-            onOpen: () => {
-                document.getElementById('export-track-geojson')?.addEventListener('click', () => {
-                    const geojson = RadiaCodeModule.exportTrackGeoJSON(trackId);
-                    if (geojson) {
-                        const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = `radiation-track-${trackId}.geojson`;
-                        a.click();
-                        URL.revokeObjectURL(url);
-                    }
-                });
-                
-                document.getElementById('delete-track-btn')?.addEventListener('click', () => {
-                    if (confirm('Delete this radiation track?')) {
-                        RadiaCodeModule.deleteTrack(trackId);
-                        ModalsModule.closeModal();
-                        renderTeam();
-                    }
-                });
+            </div>
+        `;
+        
+        const closeModal = () => { modalContainer.innerHTML = ''; };
+        
+        // Close handlers
+        modalContainer.querySelector('#modal-close').onclick = closeModal;
+        modalContainer.querySelector('#modal-backdrop').onclick = (e) => {
+            if (e.target.id === 'modal-backdrop') closeModal();
+        };
+        
+        // Export GeoJSON
+        modalContainer.querySelector('#export-track-geojson').onclick = () => {
+            const geojson = RadiaCodeModule.exportTrackGeoJSON(trackId);
+            if (geojson) {
+                const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `radiation-track-${trackId}.geojson`;
+                a.click();
+                URL.revokeObjectURL(url);
+                if (typeof ModalsModule !== 'undefined') {
+                    ModalsModule.showToast('Track exported', 'success');
+                }
             }
-        });
+        };
+        
+        // Delete track
+        modalContainer.querySelector('#delete-track-btn').onclick = () => {
+            if (confirm('Delete this radiation track?')) {
+                RadiaCodeModule.deleteTrack(trackId);
+                closeModal();
+                renderTeam();
+                if (typeof ModalsModule !== 'undefined') {
+                    ModalsModule.showToast('Track deleted', 'info');
+                }
+            }
+        };
     }
 
     /**
