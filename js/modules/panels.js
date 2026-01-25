@@ -2493,40 +2493,92 @@ const PanelsModule = (function() {
                     <span>📡 APRS Stations (${stations.length})</span>
                     <button class="btn btn--secondary aprs-clear-stations-btn" style="padding:4px 8px;font-size:10px">Clear</button>
                 </div>
-                <div style="max-height:150px;overflow-y:auto;margin-bottom:12px">
-                    ${stations.slice(0, 20).map(station => {
-                        const symbolInfo = APRSModule.getSymbolInfo(station.symbol);
-                        const age = Date.now() - station.lastHeard;
-                        const ageStr = age < 60000 ? 'now' : 
-                                      age < 3600000 ? Math.floor(age/60000) + 'm ago' : 
-                                      Math.floor(age/3600000) + 'h ago';
-                        const isFresh = age < 3600000;
+                <div style="max-height:200px;overflow-y:auto;margin-bottom:12px">
+                    ${(() => {
+                        // Get current GPS position for distance calculations
+                        let myPos = null;
+                        if (typeof GPSModule !== 'undefined') {
+                            const gpsPos = GPSModule.getCurrentPosition();
+                            if (gpsPos && gpsPos.lat && gpsPos.lon) {
+                                myPos = { lat: gpsPos.lat, lon: gpsPos.lon };
+                            }
+                        }
                         
-                        return `
-                            <div class="card" style="margin-bottom:6px;padding:8px;opacity:${isFresh ? 1 : 0.6}" data-aprs-station="${station.callsign}">
-                                <div style="display:flex;align-items:center;gap:8px">
-                                    <div style="width:32px;height:32px;border-radius:8px;background:rgba(59,130,246,0.15);display:flex;align-items:center;justify-content:center">
-                                        <span style="font-size:16px">${symbolInfo.icon}</span>
-                                    </div>
-                                    <div style="flex:1;min-width:0">
-                                        <div style="font-size:12px;font-weight:500;font-family:monospace">${station.callsign}</div>
-                                        <div style="font-size:10px;color:rgba(255,255,255,0.4)">
-                                            ${ageStr}${station.speedMph ? ' • ' + station.speedMph + ' mph' : ''}
+                        // Get stations with distance info (sorted by distance if GPS available)
+                        const stationsWithDist = myPos ? APRSModule.getStationsWithDistance(myPos) : stations;
+                        
+                        return stationsWithDist.slice(0, 25).map(station => {
+                            const symbolInfo = APRSModule.getSymbolInfo(station.symbol);
+                            const age = Date.now() - station.lastHeard;
+                            const ageStr = age < 60000 ? 'now' : 
+                                          age < 3600000 ? Math.floor(age/60000) + 'm ago' : 
+                                          Math.floor(age/3600000) + 'h ago';
+                            const isFresh = age < 3600000;
+                            
+                            // Get distance info (either from sorted list or calculate)
+                            let distInfo = station.distanceInfo;
+                            if (!distInfo && myPos && station.lat && station.lon) {
+                                distInfo = APRSModule.getDistanceToStation(station.callsign, myPos);
+                            }
+                            
+                            return `
+                                <div class="card" style="margin-bottom:6px;padding:10px;opacity:${isFresh ? 1 : 0.6}" data-aprs-station="${station.callsign}">
+                                    <div style="display:flex;align-items:center;gap:10px">
+                                        <div style="width:36px;height:36px;border-radius:10px;background:rgba(59,130,246,0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                                            <span style="font-size:18px">${symbolInfo.icon}</span>
                                         </div>
+                                        <div style="flex:1;min-width:0">
+                                            <div style="display:flex;align-items:center;gap:6px">
+                                                <span style="font-size:13px;font-weight:600;font-family:'IBM Plex Mono',monospace">${station.callsign}</span>
+                                                ${station.speed && station.speed > 2 ? `<span style="font-size:10px;color:#3b82f6">${Math.round(station.speed)} mph</span>` : ''}
+                                            </div>
+                                            <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px">
+                                                ${symbolInfo.name} • ${ageStr}
+                                            </div>
+                                            ${station.status ? `
+                                                <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:3px;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                                                    "${station.status.slice(0, 40)}"
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                        ${distInfo ? `
+                                            <div style="text-align:right;flex-shrink:0">
+                                                <div style="font-size:14px;font-weight:600;color:#3b82f6">${distInfo.formatted}</div>
+                                                <div style="font-size:10px;color:rgba(255,255,255,0.5)">${distInfo.compass} (${Math.round(distInfo.bearing)}°)</div>
+                                            </div>
+                                        ` : ''}
+                                        ${station.lat && station.lon ? `
+                                            <button class="btn btn--secondary" data-goto-aprs="${station.callsign}" style="padding:6px 8px;font-size:11px;margin-left:4px" title="Go to location">🎯</button>
+                                        ` : ''}
                                     </div>
-                                    ${station.lat && station.lon ? `
-                                        <button class="btn btn--secondary" data-goto-aprs="${station.callsign}" style="padding:4px 8px;font-size:10px">🎯</button>
-                                    ` : ''}
                                 </div>
-                            </div>
-                        `;
-                    }).join('')}
-                    ${stations.length > 20 ? `
+                            `;
+                        }).join('');
+                    })()}
+                    ${stations.length > 25 ? `
                         <div style="padding:8px;text-align:center;font-size:11px;color:rgba(255,255,255,0.4)">
-                            +${stations.length - 20} more stations
+                            +${stations.length - 25} more stations
                         </div>
                     ` : ''}
                 </div>
+                ${(() => {
+                    // GPS status message for distance display
+                    let myPos = null;
+                    if (typeof GPSModule !== 'undefined') {
+                        const gpsPos = GPSModule.getCurrentPosition();
+                        if (gpsPos && gpsPos.lat && gpsPos.lon) {
+                            myPos = gpsPos;
+                        }
+                    }
+                    if (!myPos) {
+                        return `
+                            <div style="padding:8px;background:rgba(59,130,246,0.1);border-radius:8px;font-size:11px;color:rgba(255,255,255,0.5);text-align:center;margin-bottom:12px">
+                                📍 Enable GPS to see distance/bearing to stations
+                            </div>
+                        `;
+                    }
+                    return '';
+                })()}
             ` : ''}
             
             <!-- APRS Info Box (collapsed by default) -->

@@ -1422,6 +1422,118 @@ const APRSModule = (function() {
         }
     }
 
+    // ==================== Distance & Bearing Calculations ====================
+
+    /**
+     * Calculate distance between two points using Haversine formula
+     * @returns {number} Distance in miles
+     */
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 3959; // Earth's radius in miles
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon / 2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    /**
+     * Calculate bearing from point 1 to point 2
+     * @returns {number} Bearing in degrees (0-360)
+     */
+    function calculateBearing(lat1, lon1, lat2, lon2) {
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const lat1Rad = lat1 * Math.PI / 180;
+        const lat2Rad = lat2 * Math.PI / 180;
+        
+        const y = Math.sin(dLon) * Math.cos(lat2Rad);
+        const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) -
+                  Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
+        
+        let bearing = Math.atan2(y, x) * 180 / Math.PI;
+        return (bearing + 360) % 360;
+    }
+
+    /**
+     * Convert bearing to compass direction
+     * @param {number} bearing - Bearing in degrees
+     * @returns {string} Compass direction (N, NE, E, etc.)
+     */
+    function bearingToCompass(bearing) {
+        const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+                           'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+        const index = Math.round(bearing / 22.5) % 16;
+        return directions[index];
+    }
+
+    /**
+     * Get distance and bearing info to an APRS station
+     * @param {string} callsign - Station callsign
+     * @param {Object} fromPosition - {lat, lon} of observer
+     * @returns {Object|null} Distance info or null if unavailable
+     */
+    function getDistanceToStation(callsign, fromPosition) {
+        if (!fromPosition || fromPosition.lat === undefined || fromPosition.lon === undefined) {
+            return null;
+        }
+        
+        const station = state.stations.get(callsign);
+        if (!station || station.lat === undefined || station.lon === undefined) {
+            return null;
+        }
+        
+        const distance = calculateDistance(fromPosition.lat, fromPosition.lon, station.lat, station.lon);
+        const bearing = calculateBearing(fromPosition.lat, fromPosition.lon, station.lat, station.lon);
+        const compass = bearingToCompass(bearing);
+        
+        return {
+            distance: distance,
+            bearing: bearing,
+            compass: compass,
+            formatted: distance < 0.1 ? `${Math.round(distance * 5280)} ft` : `${distance.toFixed(1)} mi`,
+            bearingFormatted: `${compass} (${Math.round(bearing)}°)`
+        };
+    }
+
+    /**
+     * Get all stations with distance info, sorted by distance
+     * @param {Object} fromPosition - {lat, lon} of observer
+     * @returns {Array} Stations with distance info, sorted nearest first
+     */
+    function getStationsWithDistance(fromPosition) {
+        if (!fromPosition || fromPosition.lat === undefined || fromPosition.lon === undefined) {
+            return Array.from(state.stations.values());
+        }
+        
+        const stationsWithDist = [];
+        
+        state.stations.forEach((station, callsign) => {
+            if (station.lat !== undefined && station.lon !== undefined) {
+                const distInfo = getDistanceToStation(callsign, fromPosition);
+                stationsWithDist.push({
+                    ...station,
+                    distanceInfo: distInfo
+                });
+            } else {
+                stationsWithDist.push({
+                    ...station,
+                    distanceInfo: null
+                });
+            }
+        });
+        
+        // Sort by distance (nearest first), stations without position at end
+        stationsWithDist.sort((a, b) => {
+            if (!a.distanceInfo && !b.distanceInfo) return 0;
+            if (!a.distanceInfo) return 1;
+            if (!b.distanceInfo) return -1;
+            return a.distanceInfo.distance - b.distanceInfo.distance;
+        });
+        
+        return stationsWithDist;
+    }
+
     // ==================== Utilities ====================
 
     /**
@@ -1617,6 +1729,13 @@ const APRSModule = (function() {
         getStations: () => Array.from(state.stations.values()),
         getStation: (callsign) => state.stations.get(callsign),
         clearStations: () => { state.stations.clear(); saveStations(); },
+        
+        // Distance & Bearing
+        calculateDistance,
+        calculateBearing,
+        bearingToCompass,
+        getDistanceToStation,
+        getStationsWithDistance,
         
         // Stats
         getStats: () => ({ ...state.stats }),
