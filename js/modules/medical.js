@@ -1743,6 +1743,124 @@ const MedicalModule = (function() {
         return meds;
     })();
 
+    /**
+     * Get quick reference tables for essential medical data
+     */
+    function getQuickReferences() {
+        return {
+            vitalSigns: {
+                title: '📊 Normal Vital Signs (Adults)',
+                content: [
+                    { label: 'Heart Rate', value: '60-100 bpm' },
+                    { label: 'Respiratory Rate', value: '12-20 breaths/min' },
+                    { label: 'Blood Pressure', value: '90-140 / 60-90 mmHg' },
+                    { label: 'Temperature', value: '97.8-99.1°F (36.5-37.3°C)' },
+                    { label: 'SpO2', value: '95-100%' },
+                    { label: 'Blood Glucose', value: '70-120 mg/dL' }
+                ]
+            },
+            cpr: {
+                title: '❤️ CPR Guidelines',
+                content: [
+                    { label: 'Compression Rate', value: '100-120/min' },
+                    { label: 'Compression Depth', value: '2-2.4 inches (5-6 cm)' },
+                    { label: 'Ratio (1 rescuer)', value: '30:2' },
+                    { label: 'Ratio (2 rescuer)', value: '30:2 (15:2 child)' },
+                    { label: 'AED Check', value: 'Every 2 minutes' },
+                    { label: 'Pulse Check', value: 'Max 10 seconds' }
+                ]
+            },
+            burns: {
+                title: '🔥 Rule of 9s (Burn Area)',
+                content: [
+                    { label: 'Head & Neck', value: '9%' },
+                    { label: 'Each Arm', value: '9%' },
+                    { label: 'Chest (front)', value: '9%' },
+                    { label: 'Abdomen (front)', value: '9%' },
+                    { label: 'Upper Back', value: '9%' },
+                    { label: 'Lower Back', value: '9%' },
+                    { label: 'Each Leg (front)', value: '9%' },
+                    { label: 'Each Leg (back)', value: '9%' },
+                    { label: 'Groin', value: '1%' },
+                    { label: 'Palm of Hand', value: '~1%' }
+                ]
+            },
+            gcs: {
+                title: '🧠 Glasgow Coma Scale',
+                content: [
+                    { label: 'Eye - Spontaneous', value: '4' },
+                    { label: 'Eye - To voice', value: '3' },
+                    { label: 'Eye - To pain', value: '2' },
+                    { label: 'Eye - None', value: '1' },
+                    { label: 'Verbal - Oriented', value: '5' },
+                    { label: 'Verbal - Confused', value: '4' },
+                    { label: 'Verbal - Inappropriate', value: '3' },
+                    { label: 'Verbal - Incomprehensible', value: '2' },
+                    { label: 'Verbal - None', value: '1' },
+                    { label: 'Motor - Obeys commands', value: '6' },
+                    { label: 'Motor - Localizes pain', value: '5' },
+                    { label: 'Motor - Withdraws', value: '4' },
+                    { label: 'Motor - Flexion', value: '3' },
+                    { label: 'Motor - Extension', value: '2' },
+                    { label: 'Motor - None', value: '1' },
+                    { label: 'TOTAL (Normal)', value: '15' },
+                    { label: 'Severe TBI', value: '≤8' }
+                ]
+            },
+            bloodLoss: {
+                title: '🩸 Hemorrhage Classification',
+                content: [
+                    { label: 'Class I - Blood Loss', value: '<750 mL (<15%)' },
+                    { label: 'Class I - Heart Rate', value: '<100' },
+                    { label: 'Class II - Blood Loss', value: '750-1500 mL (15-30%)' },
+                    { label: 'Class II - Heart Rate', value: '100-120' },
+                    { label: 'Class III - Blood Loss', value: '1500-2000 mL (30-40%)' },
+                    { label: 'Class III - Heart Rate', value: '120-140' },
+                    { label: 'Class IV - Blood Loss', value: '>2000 mL (>40%)' },
+                    { label: 'Class IV - Heart Rate', value: '>140' }
+                ]
+            },
+            painMeds: {
+                title: '💊 Pain Medication Quick Dosing',
+                content: [
+                    { label: 'Acetaminophen (Tylenol)', value: '325-650mg q4-6h (max 3g/day)' },
+                    { label: 'Ibuprofen (Advil)', value: '200-400mg q4-6h (max 1.2g/day)' },
+                    { label: 'Naproxen (Aleve)', value: '220-440mg q8-12h (max 660mg/day)' },
+                    { label: 'Aspirin', value: '325-650mg q4h (max 4g/day)' }
+                ]
+            },
+            allergyMeds: {
+                title: '🤧 Allergy Medication Dosing',
+                content: [
+                    { label: 'Diphenhydramine (Benadryl)', value: '25-50mg q4-6h (max 300mg/day)' },
+                    { label: 'Cetirizine (Zyrtec)', value: '10mg once daily' },
+                    { label: 'Loratadine (Claritin)', value: '10mg once daily' },
+                    { label: 'Epinephrine (EpiPen)', value: '0.3mg IM, may repeat x1' }
+                ]
+            },
+            hypothermia: {
+                title: '🥶 Hypothermia Stages',
+                content: [
+                    { label: 'Mild (90-95°F)', value: 'Shivering, alert, clumsy' },
+                    { label: 'Moderate (82-90°F)', value: 'Shivering stops, confused' },
+                    { label: 'Severe (<82°F)', value: 'Unconscious, rigid' },
+                    { label: 'Treatment', value: 'Remove wet, insulate, warm core' }
+                ]
+            },
+            altitude: {
+                title: '🏔️ Altitude Illness',
+                content: [
+                    { label: 'AMS begins', value: '>8,000 ft (2,400m)' },
+                    { label: 'High altitude', value: '8,000-12,000 ft' },
+                    { label: 'Very high altitude', value: '12,000-18,000 ft' },
+                    { label: 'Extreme altitude', value: '>18,000 ft' },
+                    { label: 'Safe ascent rate', value: '<1,000 ft/day above 10,000' },
+                    { label: 'Diamox prophylaxis', value: '125-250mg BID' }
+                ]
+            }
+        };
+    }
+
     // Public API
     return {
         init,
@@ -1765,6 +1883,7 @@ const MedicalModule = (function() {
         setActiveCategory,
         setExpandedItem,
         getDatabase,
+        getQuickReferences,
         MEDICAL_DATABASE,
         MEDICATIONS
     };
