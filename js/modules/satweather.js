@@ -32,114 +32,9 @@ const SatWeatherModule = (function() {
     const OFFLINE_CACHE_DURATION = 24 * 60 * 60 * 1000;  // 24 hours for offline
     const MAX_CACHED_FRAMES = 24;  // Animation frames to cache
     
-    // Available satellite products
+    // Available satellite products - all using IEM tile services
+    // IEM services are reliable and free for use
     const PRODUCTS = {
-        // GOES-East (GOES-19) products via GIBS
-        goes_geocolor: {
-            id: 'GOES-East_ABI_GeoColor',
-            name: 'GOES GeoColor',
-            description: 'True color day, multispectral IR night',
-            source: 'gibs',
-            format: 'jpg',
-            tileMatrixSet: 'GoogleMapsCompatible_Level9',
-            maxZoom: 9,
-            category: 'visible',
-            updateInterval: 10,  // minutes
-            coverage: 'americas'
-        },
-        goes_visible: {
-            id: 'GOES-East_ABI_Band2_Red_Visible_1km',
-            name: 'GOES Visible',
-            description: 'Visible band (daytime only)',
-            source: 'gibs',
-            format: 'png',
-            tileMatrixSet: 'GoogleMapsCompatible_Level9',
-            maxZoom: 9,
-            category: 'visible',
-            updateInterval: 10,
-            coverage: 'americas'
-        },
-        goes_ir: {
-            id: 'GOES-East_ABI_Band13_Clean_Longwave_Infrared',
-            name: 'GOES Infrared',
-            description: 'Longwave IR - cloud top temperatures',
-            source: 'gibs',
-            format: 'png',
-            tileMatrixSet: 'GoogleMapsCompatible_Level9',
-            maxZoom: 9,
-            category: 'infrared',
-            updateInterval: 10,
-            coverage: 'americas'
-        },
-        goes_watervapor: {
-            id: 'GOES-East_ABI_Band8_Upper_Level_Water_Vapor',
-            name: 'GOES Water Vapor',
-            description: 'Upper-level atmospheric moisture',
-            source: 'gibs',
-            format: 'png',
-            tileMatrixSet: 'GoogleMapsCompatible_Level9',
-            maxZoom: 9,
-            category: 'moisture',
-            updateInterval: 10,
-            coverage: 'americas'
-        },
-        
-        // VIIRS (Suomi NPP / NOAA-20) - higher resolution
-        viirs_truecolor: {
-            id: 'VIIRS_SNPP_CorrectedReflectance_TrueColor',
-            name: 'VIIRS True Color',
-            description: 'High-res true color (polar orbiting)',
-            source: 'gibs',
-            format: 'jpg',
-            tileMatrixSet: 'GoogleMapsCompatible_Level9',
-            maxZoom: 9,
-            category: 'visible',
-            updateInterval: 180,  // ~3 hours (polar orbit)
-            coverage: 'global'
-        },
-        
-        // MODIS (Terra/Aqua)
-        modis_terra: {
-            id: 'MODIS_Terra_CorrectedReflectance_TrueColor',
-            name: 'MODIS Terra',
-            description: 'True color from Terra satellite',
-            source: 'gibs',
-            format: 'jpg',
-            tileMatrixSet: 'GoogleMapsCompatible_Level9',
-            maxZoom: 9,
-            category: 'visible',
-            updateInterval: 180,
-            coverage: 'global'
-        },
-        
-        // Fire detection
-        viirs_fires: {
-            id: 'VIIRS_NOAA20_Thermal_Anomalies_375m_All',
-            name: 'Active Fires',
-            description: 'VIIRS fire/thermal anomaly detection',
-            source: 'gibs',
-            format: 'png',
-            tileMatrixSet: 'GoogleMapsCompatible_Level9',
-            maxZoom: 9,
-            category: 'fire',
-            updateInterval: 180,
-            coverage: 'global'
-        },
-        
-        // Precipitation estimates
-        imerg_rain: {
-            id: 'IMERG_Precipitation_Rate',
-            name: 'Precipitation Rate',
-            description: 'Global precipitation estimates',
-            source: 'gibs',
-            format: 'png',
-            tileMatrixSet: 'GoogleMapsCompatible_Level6',
-            maxZoom: 6,
-            category: 'precipitation',
-            updateInterval: 30,
-            coverage: 'global'
-        },
-        
         // === NEXRAD Radar (via Iowa Environmental Mesonet) ===
         // Free US Government data - no license restrictions
         nexrad_composite: {
@@ -148,7 +43,6 @@ const SatWeatherModule = (function() {
             description: 'US composite weather radar',
             source: 'iem',
             format: 'png',
-            // IEM XYZ tile service
             urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png',
             maxZoom: 8,
             category: 'radar',
@@ -157,18 +51,77 @@ const SatWeatherModule = (function() {
             attribution: '© Iowa Environmental Mesonet, NOAA NWS'
         },
         
-        nexrad_base: {
-            id: 'nexrad_base',
-            name: 'Base Reflectivity',
-            description: 'Low-level radar reflectivity',
+        // === MRMS Precipitation (via IEM) ===
+        mrms_precip: {
+            id: 'mrms_precip',
+            name: '1-Hour Precip',
+            description: 'Multi-Radar Multi-Sensor 1-hour precipitation',
             source: 'iem',
             format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png',
+            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/q2-n1p-900913/{z}/{x}/{y}.png',
             maxZoom: 8,
-            category: 'radar',
+            category: 'precipitation',
             updateInterval: 5,
             coverage: 'conus',
+            attribution: '© Iowa Environmental Mesonet, NOAA MRMS'
+        },
+        
+        // === NWS Warnings (via IEM) ===
+        nws_warnings: {
+            id: 'nws_warnings',
+            name: 'NWS Warnings',
+            description: 'Active watches, warnings, advisories',
+            source: 'iem',
+            format: 'png',
+            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/wwa-900913/{z}/{x}/{y}.png',
+            maxZoom: 10,
+            category: 'alerts',
+            updateInterval: 2,
+            coverage: 'conus',
             attribution: '© Iowa Environmental Mesonet, NOAA NWS'
+        },
+        
+        // === GOES West Satellite (via IEM - still operational) ===
+        goes_ir: {
+            id: 'goes_west_ir',
+            name: 'GOES Infrared',
+            description: 'GOES West infrared (day/night)',
+            source: 'iem',
+            format: 'png',
+            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-west-ir-900913/{z}/{x}/{y}.png',
+            maxZoom: 8,
+            category: 'infrared',
+            updateInterval: 15,
+            coverage: 'west_conus',
+            attribution: '© Iowa Environmental Mesonet, NOAA GOES'
+        },
+        
+        goes_wv: {
+            id: 'goes_west_wv',
+            name: 'GOES Water Vapor',
+            description: 'GOES West water vapor channel',
+            source: 'iem',
+            format: 'png',
+            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-west-wv-900913/{z}/{x}/{y}.png',
+            maxZoom: 8,
+            category: 'moisture',
+            updateInterval: 15,
+            coverage: 'west_conus',
+            attribution: '© Iowa Environmental Mesonet, NOAA GOES'
+        },
+        
+        goes_vis: {
+            id: 'goes_west_vis',
+            name: 'GOES Visible',
+            description: 'GOES West visible (daytime only)',
+            source: 'iem',
+            format: 'png',
+            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-west-vis-900913/{z}/{x}/{y}.png',
+            maxZoom: 8,
+            category: 'visible',
+            updateInterval: 15,
+            coverage: 'west_conus',
+            attribution: '© Iowa Environmental Mesonet, NOAA GOES'
         }
     };
     
@@ -177,9 +130,9 @@ const SatWeatherModule = (function() {
         visible: { name: 'Visible/Color', icon: '☀️', description: 'Daytime visible imagery' },
         infrared: { name: 'Infrared', icon: '🌡️', description: 'Cloud temperatures, night viewing' },
         moisture: { name: 'Water Vapor', icon: '💧', description: 'Atmospheric moisture' },
-        fire: { name: 'Fire Detection', icon: '🔥', description: 'Active fire/thermal anomalies' },
         precipitation: { name: 'Precipitation', icon: '🌧️', description: 'Rain/snow estimates' },
-        radar: { name: 'Weather Radar', icon: '📡', description: 'NEXRAD precipitation radar' }
+        radar: { name: 'Weather Radar', icon: '📡', description: 'NEXRAD precipitation radar' },
+        alerts: { name: 'NWS Alerts', icon: '⚠️', description: 'Watches, warnings, advisories' }
     };
     
     // Regional sectors (for NOAA STAR direct images)

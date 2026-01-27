@@ -6743,23 +6743,23 @@ const PanelsModule = (function() {
                             <span style="font-size:20px">📡</span>
                             <span style="font-size:11px">Radar</span>
                         </button>
-                        <button class="btn ${activeSatLayer === 'goes_geocolor' ? 'btn--primary' : 'btn--secondary'}" 
-                                data-sat-layer="goes_geocolor"
-                                style="padding:12px 10px;display:flex;flex-direction:column;align-items:center;gap:4px">
-                            <span style="font-size:20px">🛰️</span>
-                            <span style="font-size:11px">Satellite</span>
-                        </button>
                         <button class="btn ${activeSatLayer === 'goes_ir' ? 'btn--primary' : 'btn--secondary'}" 
                                 data-sat-layer="goes_ir"
                                 style="padding:12px 10px;display:flex;flex-direction:column;align-items:center;gap:4px">
                             <span style="font-size:20px">🌡️</span>
                             <span style="font-size:11px">Infrared</span>
                         </button>
-                        <button class="btn ${activeSatLayer === 'viirs_fires' ? 'btn--primary' : 'btn--secondary'}" 
-                                data-sat-layer="viirs_fires"
+                        <button class="btn ${activeSatLayer === 'mrms_precip' ? 'btn--primary' : 'btn--secondary'}" 
+                                data-sat-layer="mrms_precip"
                                 style="padding:12px 10px;display:flex;flex-direction:column;align-items:center;gap:4px">
-                            <span style="font-size:20px">🔥</span>
-                            <span style="font-size:11px">Fires</span>
+                            <span style="font-size:20px">🌧️</span>
+                            <span style="font-size:11px">Precip</span>
+                        </button>
+                        <button class="btn ${activeSatLayer === 'nws_warnings' ? 'btn--primary' : 'btn--secondary'}" 
+                                data-sat-layer="nws_warnings"
+                                style="padding:12px 10px;display:flex;flex-direction:column;align-items:center;gap:4px">
+                            <span style="font-size:20px">⚠️</span>
+                            <span style="font-size:11px">Warnings</span>
                         </button>
                     </div>
                     
