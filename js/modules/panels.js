@@ -6755,11 +6755,11 @@ const PanelsModule = (function() {
                             <span style="font-size:20px">🌧️</span>
                             <span style="font-size:11px">Precip</span>
                         </button>
-                        <button class="btn ${activeSatLayer === 'nexrad_eet' ? 'btn--primary' : 'btn--secondary'}" 
-                                data-sat-layer="nexrad_eet"
+                        <button class="btn ${activeSatLayer === 'nws_warnings' ? 'btn--primary' : 'btn--secondary'}" 
+                                data-sat-layer="nws_warnings"
                                 style="padding:12px 10px;display:flex;flex-direction:column;align-items:center;gap:4px">
-                            <span style="font-size:20px">📊</span>
-                            <span style="font-size:11px">Echo Tops</span>
+                            <span style="font-size:20px">⚠️</span>
+                            <span style="font-size:11px">Warnings</span>
                         </button>
                     </div>
                     
@@ -11010,6 +11010,7 @@ ${text}
             { id: 'meshtastic', label: '📡 Mesh', icon: 'broadcast' },
             { id: 'ham', label: '📻 Ham', icon: 'antenna' },
             { id: 'repeaters', label: '📍 Repeaters', icon: 'antenna' },
+            { id: 'rflos', label: '📡 LOS', icon: 'antenna' },
             { id: 'rally', label: '🎯 Rally', icon: 'target' },
             { id: 'custom', label: '⭐ Custom', icon: 'star' }
         ];
@@ -11100,6 +11101,7 @@ ${text}
             case 'meshtastic': return renderRadioMeshtastic();
             case 'ham': return renderRadioHam();
             case 'repeaters': return renderRadioRepeaters();
+            case 'rflos': return renderRadioRFLOS();
             case 'rally': return renderRadioRallyPoints();
             case 'custom': return renderRadioCustom();
             default: return renderRadioEmergency();
@@ -11492,6 +11494,20 @@ ${text}
         `;
     }
 
+    function renderRadioRFLOS() {
+        if (typeof RFLOSModule === 'undefined') {
+            return `
+                <div class="empty-state" style="padding:20px">
+                    <div class="empty-state__icon">📡</div>
+                    <div class="empty-state__title">RF LOS Module Not Loaded</div>
+                    <div class="empty-state__desc">Line of sight analysis is not available</div>
+                </div>
+            `;
+        }
+        
+        return `<div id="rflos-panel-container">${RFLOSModule.renderPanel()}</div>`;
+    }
+
     function renderRadioRallyPoints() {
         const rallyPoints = RadioModule.getRallyPoints();
         const waypoints = State.get('waypoints');
@@ -11657,6 +11673,27 @@ ${text}
                 }
             };
         });
+        
+        // RF LOS panel handlers
+        const rflosContainer = container.querySelector('#rflos-panel-container');
+        if (rflosContainer && typeof RFLOSModule !== 'undefined') {
+            RFLOSModule.attachHandlers(rflosContainer);
+            
+            // Subscribe to RFLOS events to re-render panel
+            RFLOSModule.subscribe((event, data) => {
+                if (event === 'update' || event === 'pointSet' || event === 'clear' || event === 'selecting') {
+                    const panelContainer = document.querySelector('#rflos-panel-container');
+                    if (panelContainer) {
+                        panelContainer.innerHTML = RFLOSModule.renderPanel();
+                        RFLOSModule.attachHandlers(panelContainer);
+                    }
+                    // Request map redraw for overlay
+                    if (typeof MapModule !== 'undefined' && MapModule.requestRender) {
+                        MapModule.requestRender();
+                    }
+                }
+            });
+        }
     }
 
     function showAddFrequencyModal() {

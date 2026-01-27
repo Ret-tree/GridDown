@@ -804,6 +804,7 @@ const MapModule = (function() {
         renderGPSPosition(width, height);
         renderCrosshair(width, height);
         renderDrawingRegion(width, height);
+        renderRFLOSOverlay(width, height);
         
         // Restore state (removes rotation)
         ctx.restore();
@@ -1987,6 +1988,18 @@ const MapModule = (function() {
         }
     }
 
+    /**
+     * Render RF Line-of-Sight overlay
+     */
+    function renderRFLOSOverlay(width, height) {
+        if (typeof RFLOSModule === 'undefined') return;
+        
+        const state = RFLOSModule.getState();
+        if (!state.pointA && !state.pointB) return;
+        
+        RFLOSModule.renderMapOverlay(ctx, latLonToPixel);
+    }
+
     function renderAttribution(width, height) {
         // Collect all attributions from active layers
         const attributions = new Set();
@@ -2389,6 +2402,14 @@ const MapModule = (function() {
         // Check if RouteBuilder is active and handle the click there first
         if (typeof RouteBuilderModule !== 'undefined' && RouteBuilderModule.getState().isBuilding) {
             if (RouteBuilderModule.handleMapClick(clickCoords)) {
+                render();
+                return;
+            }
+        }
+        
+        // Check if RFLOS is selecting a point
+        if (typeof RFLOSModule !== 'undefined' && RFLOSModule.isSelecting()) {
+            if (RFLOSModule.handleMapClick(clickCoords.lat, clickCoords.lon)) {
                 render();
                 return;
             }
