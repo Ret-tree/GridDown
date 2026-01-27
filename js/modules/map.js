@@ -803,6 +803,7 @@ const MapModule = (function() {
         renderTeamMembers(width, height);
         renderAPRSStations(width, height);
         renderRadiaCodeOverlay(width, height);
+        renderRFSentinelOverlay(width, height);
         renderNavigationBreadcrumbs(width, height);
         renderGPSPosition(width, height);
         renderCrosshair(width, height);
@@ -1900,6 +1901,17 @@ const MapModule = (function() {
             ctx.lineWidth = 1;
             ctx.stroke();
         });
+    }
+
+    /**
+     * Render RF Sentinel tracks (aircraft, ships, drones, etc.)
+     */
+    function renderRFSentinelOverlay(width, height) {
+        if (typeof RFSentinelModule === 'undefined') return;
+        if (!RFSentinelModule.isConnected()) return;
+        
+        // Use the module's built-in render function
+        RFSentinelModule.renderOnMap(ctx, width, height, latLonToPixel, mapState.zoom);
     }
 
     function renderCrosshair(width, height) {

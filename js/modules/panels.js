@@ -418,6 +418,7 @@ const PanelsModule = (function() {
             case 'logistics': renderLogistics(); break;
             case 'offline': renderOffline(); break;
             case 'team': renderTeam(); break;
+            case 'rfsentinel': renderRFSentinel(); break;
             case 'settings': renderSettings(); break;
             case 'gps': renderGPS(); break;
             case 'weather': renderWeather(); break;
@@ -13260,6 +13261,317 @@ After spreading:
                 const isNowBookmarked = FieldGuidesModule.toggleBookmark(id);
                 ModalsModule.showToast(isNowBookmarked ? 'Bookmarked!' : 'Bookmark removed', 'success');
                 renderFieldGuides();
+            };
+        }
+    }
+
+    // ==================== RF Sentinel Panel ====================
+    
+    function renderRFSentinel() {
+        const container = document.getElementById('panel-content');
+        if (!container) return;
+        
+        const isConnected = typeof RFSentinelModule !== 'undefined' && RFSentinelModule.isConnected();
+        const isConnecting = typeof RFSentinelModule !== 'undefined' && RFSentinelModule.isConnecting();
+        const connectionMode = isConnected ? RFSentinelModule.getConnectionMode() : null;
+        const trackCounts = isConnected ? RFSentinelModule.getTrackCounts() : { aircraft: 0, ship: 0, drone: 0, radiosonde: 0, aprs: 0 };
+        const trackTypeSettings = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getTrackTypeSettings() : {};
+        const weatherSource = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getWeatherSource() : 'internet';
+        const fisBData = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getFisBData() : { isStale: true };
+        const emergencyTracks = isConnected ? RFSentinelModule.getEmergencyTracks() : [];
+        const host = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getHost() : 'rfsentinel.local';
+        const port = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getPort() : 8000;
+        const stats = isConnected ? RFSentinelModule.getStats() : null;
+        
+        const totalTracks = Object.values(trackCounts).reduce((a, b) => a + b, 0);
+        
+        container.innerHTML = `
+            <div class="panel__header">
+                <h2 class="panel__title" id="panel-title">
+                    ${Icons.get('radar')}
+                    RF Sentinel
+                </h2>
+                <div class="flex items-center gap-2">
+                    ${isConnected ? `<span class="text-xs" style="color:#22c55e">● ${connectionMode?.toUpperCase()}</span>` : ''}
+                </div>
+            </div>
+            
+            <div class="panel__body" role="region" aria-label="RF Sentinel controls">
+                <!-- Connection Status -->
+                <div class="card" style="margin-bottom:1rem;${isConnected ? 'border-left:3px solid #22c55e' : emergencyTracks.length > 0 ? 'border-left:3px solid #ef4444' : ''}">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+                        <span style="font-weight:600;color:#f8fafc">Connection</span>
+                        <span style="font-size:0.75rem;padding:2px 8px;border-radius:4px;${isConnected ? 'background:#22c55e20;color:#22c55e' : isConnecting ? 'background:#f59e0b20;color:#f59e0b' : 'background:#64748b20;color:#64748b'}">
+                            ${isConnected ? 'Connected' : isConnecting ? 'Connecting...' : 'Disconnected'}
+                        </span>
+                    </div>
+                    
+                    ${!isConnected ? `
+                        <div style="margin-bottom:0.75rem">
+                            <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:0.25rem">Host / IP Address</label>
+                            <input type="text" id="rfs-host" value="${host}" placeholder="rfsentinel.local or 192.168.1.x" 
+                                   style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:0.875rem">
+                        </div>
+                        <div style="margin-bottom:0.75rem">
+                            <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:0.25rem">Port</label>
+                            <input type="number" id="rfs-port" value="${port}" placeholder="8000" 
+                                   style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:0.875rem">
+                        </div>
+                    ` : `
+                        <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem">
+                            ${host}:${port}
+                        </div>
+                    `}
+                    
+                    ${isConnected ? `
+                        <button id="rfs-disconnect" class="btn btn--secondary" style="width:100%">
+                            Disconnect
+                        </button>
+                    ` : `
+                        <button id="rfs-connect" class="btn btn--primary" style="width:100%" ${isConnecting ? 'disabled' : ''}>
+                            ${isConnecting ? 'Connecting...' : 'Connect'}
+                        </button>
+                    `}
+                </div>
+                
+                <!-- Emergency Alerts -->
+                ${emergencyTracks.length > 0 ? `
+                    <div class="card" style="margin-bottom:1rem;background:#ef444420;border:1px solid #ef4444">
+                        <div style="font-weight:600;color:#ef4444;margin-bottom:0.5rem;display:flex;align-items:center;gap:0.5rem">
+                            ${Icons.get('alertTriangle')}
+                            Emergency Alerts (${emergencyTracks.length})
+                        </div>
+                        ${emergencyTracks.slice(0, 3).map(e => `
+                            <div style="font-size:0.75rem;color:#fca5a5;padding:0.25rem 0;border-top:1px solid #ef444440">
+                                ${e.squawk ? `🚨 Squawk ${e.squawk} (${e.info.name})` : `🆘 AIS ${e.deviceType}`}
+                                - ${e.track.callsign || e.track.name || e.track.id?.slice(0, 8)}
+                            </div>
+                        `).join('')}
+                        ${emergencyTracks.length > 3 ? `<div style="font-size:0.7rem;color:#94a3b8">+${emergencyTracks.length - 3} more</div>` : ''}
+                    </div>
+                ` : ''}
+                
+                <!-- Track Statistics -->
+                ${isConnected ? `
+                    <div class="card" style="margin-bottom:1rem">
+                        <div style="font-weight:600;color:#f8fafc;margin-bottom:0.75rem">
+                            Active Tracks: ${totalTracks}
+                        </div>
+                        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.5rem">
+                            <div style="text-align:center;padding:0.5rem;background:#3b82f620;border-radius:6px">
+                                <div style="font-size:1.25rem">✈️</div>
+                                <div style="font-size:1.125rem;font-weight:600;color:#3b82f6">${trackCounts.aircraft}</div>
+                                <div style="font-size:0.65rem;color:#94a3b8">Aircraft</div>
+                            </div>
+                            <div style="text-align:center;padding:0.5rem;background:#06b6d420;border-radius:6px">
+                                <div style="font-size:1.25rem">🚢</div>
+                                <div style="font-size:1.125rem;font-weight:600;color:#06b6d4">${trackCounts.ship}</div>
+                                <div style="font-size:0.65rem;color:#94a3b8">Ships</div>
+                            </div>
+                            <div style="text-align:center;padding:0.5rem;background:#f59e0b20;border-radius:6px">
+                                <div style="font-size:1.25rem">🛸</div>
+                                <div style="font-size:1.125rem;font-weight:600;color:#f59e0b">${trackCounts.drone}</div>
+                                <div style="font-size:0.65rem;color:#94a3b8">Drones</div>
+                            </div>
+                            <div style="text-align:center;padding:0.5rem;background:#8b5cf620;border-radius:6px">
+                                <div style="font-size:1.25rem">🎈</div>
+                                <div style="font-size:1.125rem;font-weight:600;color:#8b5cf6">${trackCounts.radiosonde}</div>
+                                <div style="font-size:0.65rem;color:#94a3b8">Sondes</div>
+                            </div>
+                        </div>
+                        ${stats ? `
+                            <div style="font-size:0.7rem;color:#64748b;margin-top:0.5rem;text-align:right">
+                                Last update: ${stats.lastUpdate ? new Date(stats.lastUpdate).toLocaleTimeString() : 'N/A'}
+                            </div>
+                        ` : ''}
+                    </div>
+                ` : ''}
+                
+                <!-- Map Layer Toggles -->
+                <div class="card" style="margin-bottom:1rem">
+                    <div style="font-weight:600;color:#f8fafc;margin-bottom:0.75rem">
+                        Map Layers
+                    </div>
+                    <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.75rem">
+                        Toggle which detection types appear on the map
+                    </div>
+                    
+                    ${renderTrackTypeToggle('aircraft', '✈️', 'Aircraft', trackCounts.aircraft, trackTypeSettings.aircraft?.enabled, '#3b82f6', 'ADS-B 1090 MHz', isConnected)}
+                    ${renderTrackTypeToggle('ship', '🚢', 'Ships', trackCounts.ship, trackTypeSettings.ship?.enabled, '#06b6d4', 'AIS 162 MHz', isConnected)}
+                    ${renderTrackTypeToggle('drone', '🛸', 'Drones', trackCounts.drone, trackTypeSettings.drone?.enabled, '#f59e0b', 'Remote ID 2.4 GHz', isConnected)}
+                    ${renderTrackTypeToggle('radiosonde', '🎈', 'Radiosondes', trackCounts.radiosonde, trackTypeSettings.radiosonde?.enabled, '#8b5cf6', '400 MHz', isConnected)}
+                    ${renderTrackTypeToggle('aprs', '📻', 'APRS', trackCounts.aprs, trackTypeSettings.aprs?.enabled, '#22c55e', '144.39 MHz', isConnected)}
+                </div>
+                
+                <!-- Weather Source Toggle -->
+                <div class="card" style="margin-bottom:1rem">
+                    <div style="font-weight:600;color:#f8fafc;margin-bottom:0.75rem">
+                        Weather Data Source
+                    </div>
+                    <div style="font-size:0.7rem;color:#94a3b8;margin-bottom:0.75rem">
+                        Choose between internet weather services or off-grid FIS-B data
+                    </div>
+                    
+                    <div style="display:flex;flex-direction:column;gap:0.5rem">
+                        <label style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem;background:${weatherSource === 'internet' ? '#3b82f620' : '#1e293b'};border:1px solid ${weatherSource === 'internet' ? '#3b82f6' : '#334155'};border-radius:8px;cursor:pointer">
+                            <input type="radio" name="weather-source" value="internet" ${weatherSource === 'internet' ? 'checked' : ''} 
+                                   style="accent-color:#3b82f6" id="rfs-weather-internet">
+                            <div style="flex:1">
+                                <div style="font-weight:500;color:#f8fafc">🌐 Internet (NWS/IEM)</div>
+                                <div style="font-size:0.7rem;color:#94a3b8">Reliable, always available when online</div>
+                            </div>
+                        </label>
+                        
+                        <label style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem;background:${weatherSource === 'fisb' ? '#22c55e20' : '#1e293b'};border:1px solid ${weatherSource === 'fisb' ? '#22c55e' : '#334155'};border-radius:8px;cursor:pointer;${!isConnected ? 'opacity:0.5' : ''}">
+                            <input type="radio" name="weather-source" value="fisb" ${weatherSource === 'fisb' ? 'checked' : ''} 
+                                   style="accent-color:#22c55e" id="rfs-weather-fisb" ${!isConnected ? 'disabled' : ''}>
+                            <div style="flex:1">
+                                <div style="font-weight:500;color:#f8fafc">📡 RF Sentinel FIS-B</div>
+                                <div style="font-size:0.7rem;color:#94a3b8">Off-grid via 978 MHz UAT receiver</div>
+                            </div>
+                        </label>
+                    </div>
+                    
+                    ${weatherSource === 'fisb' && isConnected ? `
+                        <div style="margin-top:0.75rem;padding:0.5rem;background:#0f172a;border-radius:6px">
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span style="font-size:0.75rem;color:#94a3b8">FIS-B Status:</span>
+                                <span style="font-size:0.75rem;color:${fisBData.isStale ? '#f59e0b' : '#22c55e'}">
+                                    ${fisBData.isStale ? '⚠️ Stale' : '● Receiving'}
+                                </span>
+                            </div>
+                            ${fisBData.lastUpdate ? `
+                                <div style="font-size:0.65rem;color:#64748b;margin-top:0.25rem">
+                                    Last update: ${new Date(fisBData.lastUpdate).toLocaleTimeString()}
+                                </div>
+                            ` : ''}
+                            ${fisBData.isStale ? `
+                                <div style="font-size:0.65rem;color:#f59e0b;margin-top:0.25rem">
+                                    ⚠️ No FIS-B data received recently. Weather panel will use cached data or fall back to internet.
+                                </div>
+                            ` : ''}
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <!-- Help Info -->
+                <div class="card" style="background:#0f172a">
+                    <div style="font-weight:600;color:#f8fafc;margin-bottom:0.5rem">
+                        About RF Sentinel
+                    </div>
+                    <div style="font-size:0.75rem;color:#94a3b8;line-height:1.5">
+                        RF Sentinel is a separate SDR-based detection system that tracks aircraft, ships, drones, and other RF signals. 
+                        Connect GridDown to RF Sentinel running on your local network for real-time situational awareness without internet dependency.
+                    </div>
+                    <div style="font-size:0.7rem;color:#64748b;margin-top:0.5rem">
+                        Supported signals: ADS-B, AIS, Remote ID, 978 UAT (FIS-B weather), Radiosondes, APRS
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        attachRFSentinelHandlers();
+    }
+    
+    function renderTrackTypeToggle(type, icon, name, count, enabled, color, freq, isConnected) {
+        return `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid #1e293b">
+                <div style="display:flex;align-items:center;gap:0.5rem">
+                    <span style="font-size:1rem">${icon}</span>
+                    <div>
+                        <div style="font-size:0.875rem;color:#f8fafc">${name}</div>
+                        <div style="font-size:0.65rem;color:#64748b">${freq}</div>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:0.75rem">
+                    ${isConnected ? `<span style="font-size:0.75rem;color:${color};font-weight:500">${count}</span>` : ''}
+                    <label class="toggle-switch" style="--toggle-color:${color}">
+                        <input type="checkbox" id="rfs-toggle-${type}" ${enabled ? 'checked' : ''}>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+        `;
+    }
+    
+    function attachRFSentinelHandlers() {
+        // Connect button
+        const connectBtn = document.getElementById('rfs-connect');
+        if (connectBtn) {
+            connectBtn.onclick = async () => {
+                const hostInput = document.getElementById('rfs-host');
+                const portInput = document.getElementById('rfs-port');
+                const host = hostInput?.value || 'rfsentinel.local';
+                const port = parseInt(portInput?.value) || 8000;
+                
+                if (typeof RFSentinelModule !== 'undefined') {
+                    connectBtn.disabled = true;
+                    connectBtn.textContent = 'Connecting...';
+                    
+                    const success = await RFSentinelModule.connect(host, port);
+                    
+                    if (success) {
+                        ModalsModule.showToast('Connected to RF Sentinel', 'success');
+                    } else {
+                        ModalsModule.showToast('Failed to connect to RF Sentinel', 'error');
+                    }
+                    
+                    renderRFSentinel();
+                }
+            };
+        }
+        
+        // Disconnect button
+        const disconnectBtn = document.getElementById('rfs-disconnect');
+        if (disconnectBtn) {
+            disconnectBtn.onclick = () => {
+                if (typeof RFSentinelModule !== 'undefined') {
+                    RFSentinelModule.disconnect();
+                    ModalsModule.showToast('Disconnected from RF Sentinel', 'info');
+                    renderRFSentinel();
+                }
+            };
+        }
+        
+        // Track type toggles
+        ['aircraft', 'ship', 'drone', 'radiosonde', 'aprs'].forEach(type => {
+            const toggle = document.getElementById(`rfs-toggle-${type}`);
+            if (toggle) {
+                toggle.onchange = () => {
+                    if (typeof RFSentinelModule !== 'undefined') {
+                        RFSentinelModule.setTrackTypeEnabled(type, toggle.checked);
+                        // Don't re-render, just update map
+                        if (typeof MapModule !== 'undefined') {
+                            MapModule.render();
+                        }
+                    }
+                };
+            }
+        });
+        
+        // Weather source toggles
+        const weatherInternet = document.getElementById('rfs-weather-internet');
+        const weatherFisb = document.getElementById('rfs-weather-fisb');
+        
+        if (weatherInternet) {
+            weatherInternet.onchange = () => {
+                if (weatherInternet.checked && typeof RFSentinelModule !== 'undefined') {
+                    RFSentinelModule.setWeatherSource('internet');
+                    ModalsModule.showToast('Weather source: Internet (NWS/IEM)', 'info');
+                    renderRFSentinel();
+                }
+            };
+        }
+        
+        if (weatherFisb) {
+            weatherFisb.onchange = () => {
+                if (weatherFisb.checked && typeof RFSentinelModule !== 'undefined') {
+                    RFSentinelModule.setWeatherSource('fisb');
+                    ModalsModule.showToast('Weather source: RF Sentinel FIS-B (off-grid)', 'info');
+                    // Fetch current FIS-B data
+                    RFSentinelModule.fetchFisBWeather();
+                    renderRFSentinel();
+                }
             };
         }
     }
