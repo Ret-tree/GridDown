@@ -6204,6 +6204,18 @@ const PanelsModule = (function() {
             
             <div class="divider"></div>
             
+            <!-- Barometric Altimeter -->
+            <div class="section-label">📊 Barometric Altimeter</div>
+            <div id="barometer-section" style="margin-bottom:16px">
+                ${typeof BarometerModule !== 'undefined' ? BarometerModule.renderPanel() : `
+                    <div style="padding:12px;background:var(--color-bg-elevated);border-radius:8px;text-align:center;font-size:12px;color:rgba(255,255,255,0.5)">
+                        Barometer module not available
+                    </div>
+                `}
+            </div>
+            
+            <div class="divider"></div>
+            
             <!-- GPS Source Selection -->
             <div class="section-label">GPS Source</div>
             <div style="display:flex;flex-direction:column;gap:8px">
@@ -6309,6 +6321,20 @@ const PanelsModule = (function() {
                 renderGPS();
             };
         });
+        
+        // Barometer handlers
+        const baroSection = container.querySelector('#barometer-section');
+        if (baroSection && typeof BarometerModule !== 'undefined') {
+            BarometerModule.attachHandlers(baroSection);
+            
+            // Subscribe to barometer updates
+            BarometerModule.subscribe((event, data) => {
+                if (event === 'reading' || event === 'start' || event === 'stop' || event === 'calibrate' || event === 'error') {
+                    baroSection.innerHTML = BarometerModule.renderPanel();
+                    BarometerModule.attachHandlers(baroSection);
+                }
+            });
+        }
         
         // Stop navigation
         const navStopBtn = container.querySelector('#nav-stop');
