@@ -39,6 +39,12 @@ const App = (function() {
                 console.log('Network status module initialized');
             }
             
+            // Initialize update checker (early)
+            if (typeof UpdateModule !== 'undefined') {
+                UpdateModule.init();
+                console.log('Update module initialized');
+            }
+            
             updateLoadingStatus('Rendering UI...');
 
             // Initialize modules
