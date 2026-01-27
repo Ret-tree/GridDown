@@ -13274,6 +13274,7 @@ After spreading:
         const isConnected = typeof RFSentinelModule !== 'undefined' && RFSentinelModule.isConnected();
         const isConnecting = typeof RFSentinelModule !== 'undefined' && RFSentinelModule.isConnecting();
         const connectionMode = isConnected ? RFSentinelModule.getConnectionMode() : null;
+        const connectionMethod = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getConnectionMethod() : 'auto';
         const trackCounts = isConnected ? RFSentinelModule.getTrackCounts() : { aircraft: 0, ship: 0, drone: 0, radiosonde: 0, aprs: 0 };
         const trackTypeSettings = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getTrackTypeSettings() : {};
         const weatherSource = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getWeatherSource() : 'internet';
@@ -13281,6 +13282,7 @@ After spreading:
         const emergencyTracks = isConnected ? RFSentinelModule.getEmergencyTracks() : [];
         const host = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getHost() : 'rfsentinel.local';
         const port = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getPort() : 8000;
+        const mqttPort = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getMqttPort() : 9001;
         const stats = isConnected ? RFSentinelModule.getStats() : null;
         
         const totalTracks = Object.values(trackCounts).reduce((a, b) => a + b, 0);
@@ -13308,18 +13310,41 @@ After spreading:
                     
                     ${!isConnected ? `
                         <div style="margin-bottom:0.75rem">
+                            <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:0.25rem">Connection Method</label>
+                            <select id="rfs-connection-method" style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:0.875rem">
+                                <option value="auto" ${connectionMethod === 'auto' ? 'selected' : ''}>Auto (recommended)</option>
+                                <option value="websocket" ${connectionMethod === 'websocket' ? 'selected' : ''}>WebSocket</option>
+                                <option value="mqtt" ${connectionMethod === 'mqtt' ? 'selected' : ''}>MQTT</option>
+                                <option value="rest" ${connectionMethod === 'rest' ? 'selected' : ''}>REST Polling</option>
+                            </select>
+                            <div style="font-size:0.65rem;color:#64748b;margin-top:0.25rem">
+                                ${connectionMethod === 'auto' ? 'Tries WebSocket first, falls back to REST' :
+                                  connectionMethod === 'websocket' ? 'Real-time push via native WebSocket' :
+                                  connectionMethod === 'mqtt' ? 'Pub/sub via MQTT over WebSocket (requires broker on port ' + mqttPort + ')' :
+                                  'Periodic fetch every 5 seconds'}
+                            </div>
+                        </div>
+                        <div style="margin-bottom:0.75rem">
                             <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:0.25rem">Host / IP Address</label>
                             <input type="text" id="rfs-host" value="${host}" placeholder="rfsentinel.local or 192.168.1.x" 
                                    style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:0.875rem">
                         </div>
-                        <div style="margin-bottom:0.75rem">
-                            <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:0.25rem">Port</label>
-                            <input type="number" id="rfs-port" value="${port}" placeholder="8000" 
-                                   style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:0.875rem">
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.75rem">
+                            <div>
+                                <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:0.25rem">API Port</label>
+                                <input type="number" id="rfs-port" value="${port}" placeholder="8000" 
+                                       style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:0.875rem">
+                            </div>
+                            <div id="rfs-mqtt-port-container" style="${connectionMethod === 'mqtt' ? '' : 'opacity:0.5'}">
+                                <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:0.25rem">MQTT Port</label>
+                                <input type="number" id="rfs-mqtt-port" value="${mqttPort}" placeholder="9001" 
+                                       style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:0.875rem"
+                                       ${connectionMethod === 'mqtt' ? '' : 'disabled'}>
+                            </div>
                         </div>
                     ` : `
                         <div style="font-size:0.75rem;color:#94a3b8;margin-bottom:0.5rem">
-                            ${host}:${port}
+                            ${host}:${connectionMode === 'mqtt' ? mqttPort : port} (${connectionMode})
                         </div>
                     `}
                     
@@ -13495,23 +13520,55 @@ After spreading:
     }
     
     function attachRFSentinelHandlers() {
+        // Connection method dropdown
+        const methodSelect = document.getElementById('rfs-connection-method');
+        if (methodSelect) {
+            methodSelect.onchange = () => {
+                if (typeof RFSentinelModule !== 'undefined') {
+                    RFSentinelModule.setConnectionMethod(methodSelect.value);
+                    
+                    // Update MQTT port field visibility
+                    const mqttPortContainer = document.getElementById('rfs-mqtt-port-container');
+                    const mqttPortInput = document.getElementById('rfs-mqtt-port');
+                    if (mqttPortContainer && mqttPortInput) {
+                        if (methodSelect.value === 'mqtt') {
+                            mqttPortContainer.style.opacity = '1';
+                            mqttPortInput.disabled = false;
+                        } else {
+                            mqttPortContainer.style.opacity = '0.5';
+                            mqttPortInput.disabled = true;
+                        }
+                    }
+                    
+                    // Re-render to update description text
+                    renderRFSentinel();
+                }
+            };
+        }
+        
         // Connect button
         const connectBtn = document.getElementById('rfs-connect');
         if (connectBtn) {
             connectBtn.onclick = async () => {
                 const hostInput = document.getElementById('rfs-host');
                 const portInput = document.getElementById('rfs-port');
+                const mqttPortInput = document.getElementById('rfs-mqtt-port');
                 const host = hostInput?.value || 'rfsentinel.local';
                 const port = parseInt(portInput?.value) || 8000;
+                const mqttPort = parseInt(mqttPortInput?.value) || 9001;
                 
                 if (typeof RFSentinelModule !== 'undefined') {
                     connectBtn.disabled = true;
                     connectBtn.textContent = 'Connecting...';
                     
-                    const success = await RFSentinelModule.connect(host, port);
+                    // Set MQTT port before connecting
+                    RFSentinelModule.setMqttPort(mqttPort);
+                    
+                    const success = await RFSentinelModule.connect(host, port, mqttPort);
                     
                     if (success) {
-                        ModalsModule.showToast('Connected to RF Sentinel', 'success');
+                        const mode = RFSentinelModule.getConnectionMode();
+                        ModalsModule.showToast(`Connected to RF Sentinel (${mode})`, 'success');
                     } else {
                         ModalsModule.showToast('Failed to connect to RF Sentinel', 'error');
                     }
@@ -13579,5 +13636,3 @@ After spreading:
     return { init, render };
 })();
 window.PanelsModule = PanelsModule;
-
-

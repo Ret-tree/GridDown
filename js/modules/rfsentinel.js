@@ -12,10 +12,12 @@
  * to internet-based NWS/IEM weather sources.
  * 
  * Connection methods:
- * - WebSocket (preferred): Real-time push updates
- * - REST polling (fallback): Periodic fetch every 5 seconds
+ * - Auto (recommended): Tries WebSocket first, falls back to REST
+ * - WebSocket: Real-time push updates via native WebSocket
+ * - MQTT: Real-time pub/sub via MQTT over WebSocket (requires Mosquitto)
+ * - REST polling: Periodic fetch every 5 seconds (fallback)
  * 
- * @version 1.0.0
+ * @version 1.1.0
  */
 const RFSentinelModule = (function() {
     'use strict';
@@ -26,10 +28,24 @@ const RFSentinelModule = (function() {
         // Connection settings
         defaultHost: 'rfsentinel.local',
         defaultPort: 8000,
+        defaultConnectionMethod: 'auto',  // 'auto' | 'websocket' | 'mqtt' | 'rest'
         wsReconnectDelayMs: 5000,
         wsMaxReconnectAttempts: 10,
         restPollIntervalMs: 5000,
         healthCheckIntervalMs: 30000,
+        
+        // MQTT settings
+        mqttPort: 9001,  // WebSocket port for MQTT (Mosquitto default)
+        mqttReconnectDelayMs: 5000,
+        mqttMaxReconnectAttempts: 10,
+        mqttTopics: {
+            tracks: 'rfsentinel/tracks/#',
+            trackUpdate: 'rfsentinel/tracks/update',
+            trackLost: 'rfsentinel/tracks/lost',
+            weather: 'rfsentinel/weather/#',
+            alerts: 'rfsentinel/alerts',
+            emergency: 'rfsentinel/emergency'
+        },
         
         // Track display settings
         trackMaxAgeSeconds: 300,  // 5 minutes
@@ -42,6 +58,30 @@ const RFSentinelModule = (function() {
         // Map rendering
         maxRenderedTracks: 500,
         labelMinZoom: 10
+    };
+
+    // Connection method options
+    const CONNECTION_METHODS = {
+        auto: {
+            id: 'auto',
+            name: 'Auto (recommended)',
+            description: 'Tries WebSocket first, falls back to REST'
+        },
+        websocket: {
+            id: 'websocket',
+            name: 'WebSocket',
+            description: 'Real-time push via native WebSocket'
+        },
+        mqtt: {
+            id: 'mqtt',
+            name: 'MQTT',
+            description: 'Pub/sub via MQTT over WebSocket (requires broker)'
+        },
+        rest: {
+            id: 'rest',
+            name: 'REST Polling',
+            description: 'Periodic fetch every 5 seconds'
+        }
     };
 
     // Track type definitions with display properties
@@ -120,14 +160,22 @@ const RFSentinelModule = (function() {
         // Connection
         connected: false,
         connecting: false,
-        connectionMode: null,  // 'websocket' | 'rest' | null
+        connectionMethod: CONFIG.defaultConnectionMethod,  // 'auto' | 'websocket' | 'mqtt' | 'rest'
+        connectionMode: null,  // Actual mode used: 'websocket' | 'mqtt' | 'rest' | null
         host: CONFIG.defaultHost,
         port: CONFIG.defaultPort,
+        mqttPort: CONFIG.mqttPort,
         
         // WebSocket
         ws: null,
         wsReconnectAttempts: 0,
         wsReconnectTimer: null,
+        
+        // MQTT
+        mqttClient: null,
+        mqttReconnectAttempts: 0,
+        mqttReconnectTimer: null,
+        mqttSubscriptions: [],
         
         // REST polling
         restPollTimer: null,
@@ -183,6 +231,7 @@ const RFSentinelModule = (function() {
 
     // Module-scoped event manager
     let rfSentinelEvents = null;
+    let mqttLibLoaded = false;
     let initialized = false;
 
     // ==================== Initialization ====================
@@ -227,6 +276,8 @@ const RFSentinelModule = (function() {
             if (settings) {
                 state.host = settings.host || CONFIG.defaultHost;
                 state.port = settings.port || CONFIG.defaultPort;
+                state.mqttPort = settings.mqttPort || CONFIG.mqttPort;
+                state.connectionMethod = settings.connectionMethod || CONFIG.defaultConnectionMethod;
                 state.weatherSource = settings.weatherSource || 'internet';
                 
                 // Load track type toggles
@@ -250,6 +301,8 @@ const RFSentinelModule = (function() {
             await Storage.Settings.set('rfsentinel_settings', {
                 host: state.host,
                 port: state.port,
+                mqttPort: state.mqttPort,
+                connectionMethod: state.connectionMethod,
                 weatherSource: state.weatherSource,
                 trackTypeSettings: state.trackTypeSettings
             });
@@ -268,11 +321,26 @@ const RFSentinelModule = (function() {
         return `ws://${state.host}:${state.port}/ws`;
     }
 
+    function getMqttWsUrl() {
+        return `ws://${state.host}:${state.mqttPort}/mqtt`;
+    }
+
+    /**
+     * Set connection method
+     * @param {string} method - 'auto' | 'websocket' | 'mqtt' | 'rest'
+     */
+    function setConnectionMethod(method) {
+        if (!CONNECTION_METHODS[method]) return false;
+        state.connectionMethod = method;
+        saveSettings();
+        return true;
+    }
+
     /**
      * Connect to RF Sentinel server
-     * Attempts WebSocket first, falls back to REST polling
+     * Uses the configured connection method (auto, websocket, mqtt, or rest)
      */
-    async function connect(host = null, port = null) {
+    async function connect(host = null, port = null, mqttPort = null) {
         if (state.connected || state.connecting) {
             console.log('RFSentinel: Already connected or connecting');
             return false;
@@ -282,27 +350,52 @@ const RFSentinelModule = (function() {
         
         if (host) state.host = host;
         if (port) state.port = port;
+        if (mqttPort) state.mqttPort = mqttPort;
         
         // Save connection settings
         saveSettings();
         
-        console.log(`RFSentinel: Connecting to ${state.host}:${state.port}...`);
-        emitEvent('connecting', { host: state.host, port: state.port });
+        const method = state.connectionMethod;
+        console.log(`RFSentinel: Connecting to ${state.host}:${state.port} using method: ${method}`);
+        emitEvent('connecting', { host: state.host, port: state.port, method });
         
-        // First, verify server is reachable via health check
-        try {
-            const health = await checkHealth();
-            if (!health || health.status !== 'ok') {
-                throw new Error('Server health check failed');
+        // For non-MQTT methods, verify server is reachable via health check
+        if (method !== 'mqtt') {
+            try {
+                const health = await checkHealth();
+                if (!health || health.status !== 'ok') {
+                    throw new Error('Server health check failed');
+                }
+            } catch (e) {
+                console.error('RFSentinel: Server not reachable:', e);
+                state.connecting = false;
+                emitEvent('error', { message: 'Server not reachable', error: e });
+                return false;
             }
-        } catch (e) {
-            console.error('RFSentinel: Server not reachable:', e);
-            state.connecting = false;
-            emitEvent('error', { message: 'Server not reachable', error: e });
-            return false;
         }
         
-        // Try WebSocket connection
+        // Connect based on selected method
+        switch (method) {
+            case 'websocket':
+                return await connectWithWebSocket();
+                
+            case 'mqtt':
+                return await connectWithMqtt();
+                
+            case 'rest':
+                return connectWithRest();
+                
+            case 'auto':
+            default:
+                return await connectAuto();
+        }
+    }
+
+    /**
+     * Auto connection - tries WebSocket first, then REST
+     */
+    async function connectAuto() {
+        // Try WebSocket first
         try {
             await connectWebSocket();
             return true;
@@ -323,6 +416,51 @@ const RFSentinelModule = (function() {
     }
 
     /**
+     * WebSocket-only connection
+     */
+    async function connectWithWebSocket() {
+        try {
+            await connectWebSocket();
+            return true;
+        } catch (e) {
+            console.error('RFSentinel: WebSocket connection failed:', e);
+            state.connecting = false;
+            emitEvent('error', { message: 'WebSocket connection failed', error: e });
+            return false;
+        }
+    }
+
+    /**
+     * MQTT-only connection
+     */
+    async function connectWithMqtt() {
+        try {
+            await connectMqtt();
+            return true;
+        } catch (e) {
+            console.error('RFSentinel: MQTT connection failed:', e);
+            state.connecting = false;
+            emitEvent('error', { message: 'MQTT connection failed. Ensure MQTT broker is running with WebSocket support.', error: e });
+            return false;
+        }
+    }
+
+    /**
+     * REST-only connection
+     */
+    function connectWithRest() {
+        try {
+            startRestPolling();
+            return true;
+        } catch (e) {
+            console.error('RFSentinel: REST polling failed:', e);
+            state.connecting = false;
+            emitEvent('error', { message: 'REST connection failed', error: e });
+            return false;
+        }
+    }
+
+    /**
      * Disconnect from RF Sentinel server
      */
     function disconnect() {
@@ -334,10 +472,25 @@ const RFSentinelModule = (function() {
             state.ws = null;
         }
         
+        // Close MQTT
+        if (state.mqttClient) {
+            try {
+                state.mqttClient.end(true);
+            } catch (e) {
+                console.warn('RFSentinel: Error closing MQTT client:', e);
+            }
+            state.mqttClient = null;
+        }
+        
         // Clear timers
         if (state.wsReconnectTimer) {
             clearTimeout(state.wsReconnectTimer);
             state.wsReconnectTimer = null;
+        }
+        
+        if (state.mqttReconnectTimer) {
+            clearTimeout(state.mqttReconnectTimer);
+            state.mqttReconnectTimer = null;
         }
         
         if (state.restPollTimer) {
@@ -355,6 +508,8 @@ const RFSentinelModule = (function() {
         state.connecting = false;
         state.connectionMode = null;
         state.wsReconnectAttempts = 0;
+        state.mqttReconnectAttempts = 0;
+        state.mqttSubscriptions = [];
         state.tracks.clear();
         state.trackCounts = { aircraft: 0, ship: 0, drone: 0, radiosonde: 0, aprs: 0 };
         
@@ -493,6 +648,219 @@ const RFSentinelModule = (function() {
         } catch (e) {
             console.warn('RFSentinel: Failed to parse WebSocket message:', e);
         }
+    }
+
+    // ==================== MQTT Connection ====================
+
+    /**
+     * Load MQTT.js library dynamically from CDN
+     * Only loaded when user selects MQTT connection method
+     */
+    async function loadMqttLibrary() {
+        if (mqttLibLoaded || typeof mqtt !== 'undefined') {
+            mqttLibLoaded = true;
+            return true;
+        }
+        
+        return new Promise((resolve, reject) => {
+            console.log('RFSentinel: Loading MQTT.js library...');
+            
+            const script = document.createElement('script');
+            script.src = 'https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js';
+            script.async = true;
+            
+            script.onload = () => {
+                console.log('RFSentinel: MQTT.js library loaded');
+                mqttLibLoaded = true;
+                resolve(true);
+            };
+            
+            script.onerror = () => {
+                console.error('RFSentinel: Failed to load MQTT.js library');
+                reject(new Error('Failed to load MQTT.js library. Check network connection.'));
+            };
+            
+            document.head.appendChild(script);
+        });
+    }
+
+    /**
+     * Connect via MQTT over WebSocket
+     */
+    async function connectMqtt() {
+        // First, load the MQTT library
+        try {
+            await loadMqttLibrary();
+        } catch (e) {
+            throw new Error('MQTT library not available: ' + e.message);
+        }
+        
+        if (typeof mqtt === 'undefined') {
+            throw new Error('MQTT library not loaded');
+        }
+        
+        return new Promise((resolve, reject) => {
+            const mqttUrl = getMqttWsUrl();
+            console.log('RFSentinel: Connecting MQTT to', mqttUrl);
+            
+            const connectTimeout = setTimeout(() => {
+                reject(new Error('MQTT connection timeout'));
+            }, 15000);
+            
+            try {
+                state.mqttClient = mqtt.connect(mqttUrl, {
+                    clientId: `griddown_${Math.random().toString(16).slice(2, 10)}`,
+                    keepalive: 30,
+                    reconnectPeriod: 0,  // We handle reconnection ourselves
+                    connectTimeout: 10000
+                });
+            } catch (e) {
+                clearTimeout(connectTimeout);
+                reject(e);
+                return;
+            }
+            
+            state.mqttClient.on('connect', () => {
+                clearTimeout(connectTimeout);
+                console.log('RFSentinel: MQTT connected');
+                
+                state.connected = true;
+                state.connecting = false;
+                state.connectionMode = 'mqtt';
+                state.mqttReconnectAttempts = 0;
+                state.stats.connectionTime = Date.now();
+                
+                // Subscribe to topics
+                subscribeMqttTopics();
+                
+                // Start health check interval
+                startHealthCheckInterval();
+                
+                emitEvent('connected', { mode: 'mqtt' });
+                resolve();
+            });
+            
+            state.mqttClient.on('message', (topic, message) => {
+                handleMqttMessage(topic, message);
+            });
+            
+            state.mqttClient.on('close', () => {
+                console.log('RFSentinel: MQTT connection closed');
+                
+                if (state.connected && state.connectionMode === 'mqtt') {
+                    state.connected = false;
+                    emitEvent('disconnected', { reason: 'MQTT connection closed' });
+                    
+                    // Attempt reconnect
+                    scheduleMqttReconnect();
+                }
+            });
+            
+            state.mqttClient.on('error', (error) => {
+                console.error('RFSentinel: MQTT error:', error);
+                clearTimeout(connectTimeout);
+                
+                if (state.connecting) {
+                    state.connecting = false;
+                    reject(error);
+                } else {
+                    emitEvent('error', { message: 'MQTT error', error });
+                }
+            });
+            
+            state.mqttClient.on('offline', () => {
+                console.warn('RFSentinel: MQTT client offline');
+                if (state.connected && state.connectionMode === 'mqtt') {
+                    emitEvent('error', { message: 'MQTT connection lost' });
+                }
+            });
+        });
+    }
+
+    /**
+     * Subscribe to RF Sentinel MQTT topics
+     */
+    function subscribeMqttTopics() {
+        if (!state.mqttClient || !state.mqttClient.connected) return;
+        
+        const topics = [
+            CONFIG.mqttTopics.tracks,
+            CONFIG.mqttTopics.weather,
+            CONFIG.mqttTopics.alerts,
+            CONFIG.mqttTopics.emergency
+        ];
+        
+        topics.forEach(topic => {
+            state.mqttClient.subscribe(topic, { qos: 0 }, (err) => {
+                if (err) {
+                    console.warn(`RFSentinel: Failed to subscribe to ${topic}:`, err);
+                } else {
+                    console.log(`RFSentinel: Subscribed to ${topic}`);
+                    state.mqttSubscriptions.push(topic);
+                }
+            });
+        });
+    }
+
+    /**
+     * Handle incoming MQTT messages
+     */
+    function handleMqttMessage(topic, message) {
+        try {
+            const data = JSON.parse(message.toString());
+            state.stats.messagesReceived++;
+            state.stats.lastUpdate = Date.now();
+            
+            // Route based on topic
+            if (topic.startsWith('rfsentinel/tracks')) {
+                if (topic.includes('/lost')) {
+                    handleTrackLost(data.id || data);
+                } else {
+                    handleTrackUpdate(data);
+                }
+            } else if (topic.startsWith('rfsentinel/weather')) {
+                handleWeatherUpdate(data);
+            } else if (topic === CONFIG.mqttTopics.alerts) {
+                handleAlert(data);
+            } else if (topic === CONFIG.mqttTopics.emergency) {
+                // Emergency message - treat as alert with high priority
+                handleAlert({ ...data, severity: 'critical' });
+            }
+        } catch (e) {
+            console.warn('RFSentinel: Failed to parse MQTT message:', e, 'Topic:', topic);
+        }
+    }
+
+    /**
+     * Schedule MQTT reconnection attempt
+     */
+    function scheduleMqttReconnect() {
+        if (state.mqttReconnectAttempts >= CONFIG.mqttMaxReconnectAttempts) {
+            console.log('RFSentinel: Max MQTT reconnect attempts reached');
+            emitEvent('error', { message: 'MQTT reconnection failed. Max attempts reached.' });
+            return;
+        }
+        
+        state.mqttReconnectAttempts++;
+        const delay = CONFIG.mqttReconnectDelayMs * state.mqttReconnectAttempts;
+        
+        console.log(`RFSentinel: MQTT reconnecting in ${delay}ms (attempt ${state.mqttReconnectAttempts})`);
+        
+        state.mqttReconnectTimer = setTimeout(async () => {
+            try {
+                await connectMqtt();
+            } catch (e) {
+                console.warn('RFSentinel: MQTT reconnect failed:', e);
+                scheduleMqttReconnect();
+            }
+        }, delay);
+    }
+
+    /**
+     * Check if MQTT is available (library loaded and can connect)
+     */
+    function isMqttAvailable() {
+        return mqttLibLoaded || typeof mqtt !== 'undefined';
     }
 
     // ==================== REST Polling ====================
@@ -1093,11 +1461,17 @@ const RFSentinelModule = (function() {
         isConnected: () => state.connected,
         isConnecting: () => state.connecting,
         getConnectionMode: () => state.connectionMode,
+        getConnectionMethod: () => state.connectionMethod,
+        setConnectionMethod,
+        getConnectionMethods: () => ({ ...CONNECTION_METHODS }),
         getHost: () => state.host,
         getPort: () => state.port,
+        getMqttPort: () => state.mqttPort,
         setHost: (host) => { state.host = host; saveSettings(); },
         setPort: (port) => { state.port = port; saveSettings(); },
+        setMqttPort: (port) => { state.mqttPort = port; saveSettings(); },
         checkHealth,
+        isMqttAvailable,
         
         // Tracks
         getTracks: () => [...state.tracks.values()],
@@ -1138,6 +1512,7 @@ const RFSentinelModule = (function() {
         TRACK_TYPES,
         WEATHER_SOURCES,
         EMERGENCY_SQUAWKS,
+        CONNECTION_METHODS,
         CONFIG
     };
 })();
