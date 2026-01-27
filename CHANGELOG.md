@@ -2,6 +2,99 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.10.0] - 2025-01-27
+
+### Added
+- **RF Line-of-Sight Analysis Tool** - Comprehensive radio path analysis:
+  - **Point-to-point LOS analysis** between two map locations
+  - **Fresnel zone calculation** with clearance percentage
+  - **Earth curvature correction** using 4/3 atmospheric refraction model
+  - **Free-space path loss** estimation in dB
+  - **Obstruction detection** with visual markers
+
+- **Interactive Map Integration**:
+  - Click-to-select point A and point B on map
+  - Visual path overlay with status colors (green=clear, yellow=marginal, red=obstructed)
+  - Obstruction markers displayed on map path
+  - Antenna markers at endpoints
+
+- **Elevation Profile Chart**:
+  - Terrain profile visualization
+  - Fresnel zone ellipse overlay
+  - LOS line with earth curvature
+  - Obstruction highlighting
+  - Distance and elevation scales
+
+- **Frequency Presets** for common radio services:
+  - Meshtastic US (915 MHz), EU (868 MHz)
+  - 2m Amateur (146 MHz), 70cm (446 MHz)
+  - GMRS (462 MHz), FRS (467 MHz)
+  - MURS (151 MHz), Marine VHF (156.8 MHz)
+  - CB Radio (27 MHz)
+  - Custom frequency input
+
+- **Analysis Results Display**:
+  - Distance in km and bearing
+  - Fresnel zone clearance percentage
+  - Free-space and estimated path loss
+  - Status indicator (Clear/Marginal/Obstructed)
+
+### Technical
+- New module: `js/modules/rflos.js` (~450 lines)
+- Integration with existing ElevationModule for terrain data
+- Added to Radio Reference panel as "📡 LOS" tab
+- Map click interception for point selection
+- Real-time map overlay rendering
+
+### Data Sources
+- **Elevation**: Copernicus DEM GLO-90 via Open-Meteo API (free, commercial use OK)
+- **Calculations**: Published physics formulas (Fresnel zone, FSPL, earth curvature)
+- No proprietary algorithms or GPL dependencies
+
+## [6.9.0] - 2025-01-27
+
+### Added
+- **Weather Radar & Satellite Overlays** - Live weather data on map:
+  - **NEXRAD Radar** - US composite weather radar reflectivity (5-min refresh)
+  - **GOES Infrared** - GOES West infrared satellite imagery (day/night)
+  - **MRMS Precipitation** - Multi-Radar Multi-Sensor 1-hour precipitation estimates
+  - **NWS Warnings** - Active watches, warnings, and advisories overlay
+  - One-click toggle buttons in Weather panel
+  - Per-layer opacity slider control
+  - Tiles cached by service worker for offline viewing
+
+- **Custom Tile Layer API** - MapModule extension for overlay management:
+  - `addCustomTileLayer()` - Add XYZ tile overlays
+  - `removeCustomTileLayer()` - Remove overlays
+  - `setCustomLayerOpacity()` - Adjust transparency
+  - Supports `{z}/{x}/{y}` URL templates
+  - Automatic tile caching and error handling
+
+### Enhanced
+- **Weather Panel** - New "Satellite & Radar Imagery" section with:
+  - 4 quick-toggle overlay buttons (Radar, Infrared, Precip, Warnings)
+  - Active layer indicator with name display
+  - Opacity control slider (10-100%)
+  - Clear button to remove overlay
+  - Data source attribution
+
+### Data Sources (All Iowa Environmental Mesonet / NOAA)
+All data comes from Iowa Environmental Mesonet - free for use with attribution:
+- **NEXRAD Radar**: `mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913`
+- **MRMS Precipitation**: `mesonet.agron.iastate.edu/cache/tile.py/1.0.0/q2-n1p-900913`
+- **NWS Warnings**: `mesonet.agron.iastate.edu/cache/tile.py/1.0.0/wwa-900913`
+- **GOES West IR**: `mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-west-ir-900913`
+
+### Technical
+- Added weather tile domain to service worker cache:
+  - `mesonet.agron.iastate.edu` (Iowa Environmental Mesonet)
+- SatWeatherModule initialization added to app.js
+- satweather.js added to index.html and service worker cache
+- Custom tile layers render between base map and markers (zIndex 50-55)
+- Service worker cache version updated to v6.9.0
+
+---
+
 ## [6.8.0] - 2025-01-25
 
 ### Added

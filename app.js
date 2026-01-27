@@ -44,6 +44,11 @@ const App = (function() {
                 SatWeatherModule.init();
             }
             
+            // Initialize RF Line-of-Sight analysis module
+            if (typeof RFLOSModule !== 'undefined') {
+                RFLOSModule.init();
+            }
+            
             ContingencyModule.init();
             MeasureModule.init();
             SunMoonModule.init();
