@@ -406,6 +406,7 @@ const Constants = (function() {
         { id: 'radio', icon: 'antenna', label: 'Radio' },
         { id: 'comms', icon: 'radio', label: 'Comms' },
         { id: 'medical', icon: 'medical', label: 'Medical' },
+        { id: 'fieldguides', icon: 'book', label: 'Field Guides' },
         { id: 'terrain', icon: 'mountain', label: 'Terrain' },
         { id: 'offline', icon: 'download', label: 'Offline' },
         { id: 'team', icon: 'team', label: 'Team' }
