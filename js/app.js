@@ -223,6 +223,43 @@ const App = (function() {
                 });
             }
             
+            // Initialize RF Sentinel module
+            if (typeof RFSentinelModule !== 'undefined') {
+                RFSentinelModule.init();
+                console.log('RF Sentinel module initialized');
+                
+                // Setup event listeners for RF Sentinel events
+                Events.on('rfsentinel:connected', () => {
+                    if (State.get('activePanel') === 'rfsentinel') {
+                        PanelsModule.render();
+                    }
+                    MapModule.render();
+                });
+                
+                Events.on('rfsentinel:disconnected', () => {
+                    if (State.get('activePanel') === 'rfsentinel') {
+                        PanelsModule.render();
+                    }
+                    MapModule.render();
+                });
+                
+                Events.on('rfsentinel:track:new', () => {
+                    MapModule.render();
+                });
+                
+                Events.on('rfsentinel:emergency:squawk', (data) => {
+                    if (State.get('activePanel') === 'rfsentinel') {
+                        PanelsModule.render();
+                    }
+                });
+                
+                Events.on('rfsentinel:emergency:ais', (data) => {
+                    if (State.get('activePanel') === 'rfsentinel') {
+                        PanelsModule.render();
+                    }
+                });
+            }
+            
             // Initialize Global Search module
             if (typeof SearchModule !== 'undefined') {
                 SearchModule.init();
