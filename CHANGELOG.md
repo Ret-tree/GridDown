@@ -2,6 +2,48 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.13.0] - 2025-01-27
+
+### Added
+- **Barometric Altimeter** - High-precision altitude and weather prediction:
+  
+  **Altitude Features**:
+  - Real-time barometric altitude (±1-3m accuracy vs GPS ±10-50m)
+  - Display in feet and meters
+  - Works indoors and in canyons where GPS struggles
+  - Low power consumption
+
+  **Weather Prediction**:
+  - Pressure trend analysis over 3-6 hours
+  - Weather tendency indicator with icons
+  - Rate of change display (hPa/hour)
+  - Storm warning for rapid pressure drops
+  - Historical pressure chart
+
+  **Calibration Options**:
+  - Sync to GPS altitude (one-click)
+  - Manual altitude entry
+  - Adjustable sea-level reference (QNH)
+  - Persistent calibration storage
+
+  **Trend Classifications**:
+  - ⛈️ Storm approaching (rapid fall >2 hPa/hr)
+  - 🌧️ Weather deteriorating (slow fall)
+  - ➡️ Stable conditions
+  - 🌤️ Weather improving (slow rise)
+  - ☀️ High pressure building (rapid rise)
+
+### Technical
+- New module: `js/modules/barometer.js` (~700 lines)
+- Generic Sensor API (Chrome Android)
+- 1Hz sensor polling with 1-minute history intervals
+- 6-hour pressure history with SVG mini-chart
+- LocalStorage persistence for calibration and history
+
+### Platform Support
+- ✅ Android Chrome (Samsung Tab Active, most Android devices)
+- ❌ iOS Safari (Apple restricts barometer API to native apps)
+
 ## [6.12.0] - 2025-01-27
 
 ### Added
