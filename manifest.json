@@ -1,7 +1,7 @@
 {
     "name": "GridDown - Offline Tactical Navigation",
     "short_name": "GridDown",
-    "version": "6.9.0",
+    "version": "6.9.1",
     "description": "Professional-grade offline navigation and tactical mapping for operational planning",
     "start_url": "/",
     "display": "standalone",
