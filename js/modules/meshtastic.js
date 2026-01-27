@@ -133,15 +133,20 @@ const MeshtasticModule = (function() {
     
     /**
      * Check browser API support
+     * Result is cached since API availability never changes during a session
      */
+    let _cachedApiSupport = null;
+    
     function checkApiSupport() {
-        const support = {
-            bluetooth: 'bluetooth' in navigator,
-            serial: 'serial' in navigator
-        };
-        
-        console.log('Meshtastic API support:', support);
-        return support;
+        if (_cachedApiSupport === null) {
+            _cachedApiSupport = {
+                bluetooth: 'bluetooth' in navigator,
+                serial: 'serial' in navigator
+            };
+            // Log once on first check
+            console.log('Meshtastic API support:', _cachedApiSupport);
+        }
+        return _cachedApiSupport;
     }
     
     /**
