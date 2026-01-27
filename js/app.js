@@ -27,6 +27,12 @@ const App = (function() {
                 await Coordinates.loadPreference();
             }
             
+            // Initialize browser compatibility check (early)
+            if (typeof CompatibilityModule !== 'undefined') {
+                CompatibilityModule.init();
+                console.log('Compatibility module initialized');
+            }
+            
             updateLoadingStatus('Rendering UI...');
 
             // Initialize modules
