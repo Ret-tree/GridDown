@@ -409,7 +409,8 @@ const Constants = (function() {
         { id: 'fieldguides', icon: 'book', label: 'Field Guides' },
         { id: 'terrain', icon: 'mountain', label: 'Terrain' },
         { id: 'offline', icon: 'download', label: 'Offline' },
-        { id: 'team', icon: 'team', label: 'Team' }
+        { id: 'team', icon: 'team', label: 'Team' },
+        { id: 'rfsentinel', icon: 'radar', label: 'RF Sentinel' }
     ];
 
     const MAP_LAYERS = [
