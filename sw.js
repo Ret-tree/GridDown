@@ -1,4 +1,4 @@
-const CACHE_NAME = 'griddown-v6.8.0';
+const CACHE_NAME = 'griddown-v6.9.0';
 const TILE_CACHE_NAME = 'griddown-tiles-v1';
 const STATIC_ASSETS = [
     './', 'index.html', 'manifest.json', 'favicon.ico', 'css/app.css',
@@ -11,7 +11,7 @@ const STATIC_ASSETS = [
     'js/modules/modals.js', 'js/modules/logistics.js', 'js/modules/gpx.js',
     'js/modules/kml.js', 'js/modules/routebuilder.js', 'js/modules/elevation.js', 
     'js/modules/offline.js', 'js/modules/gps.js', 'js/modules/navigation.js',
-    'js/modules/weather.js', 'js/modules/contingency.js', 'js/modules/measure.js', 
+    'js/modules/weather.js', 'js/modules/satweather.js', 'js/modules/contingency.js', 'js/modules/measure.js', 
     'js/modules/sunmoon.js', 'js/modules/commplan.js', 'js/modules/terrain.js',
     'js/modules/nightmode.js', 'js/modules/sos.js', 'js/modules/radio.js',
     'js/modules/plansharing.js',
@@ -35,7 +35,11 @@ const TILE_DOMAINS = [
     'server.arcgisonline.com',          // Esri (satellite, labels, hillshade)
     'basemap.nationalmap.gov',          // USGS (topo, imagery, hydro)
     'apps.fs.usda.gov',                 // USFS (topo, roads, trails, recreation)
-    'gis.blm.gov'                       // BLM (surface management, grazing)
+    'gis.blm.gov',                      // BLM (surface management, grazing)
+    // Weather satellite imagery (US Government - free for commercial use)
+    'gibs.earthdata.nasa.gov',          // NASA GIBS - GOES, VIIRS, MODIS satellite
+    'mesonet.agron.iastate.edu',        // Iowa Environmental Mesonet - NEXRAD radar
+    'cdn.star.nesdis.noaa.gov'          // NOAA STAR - GOES satellite imagery
 ];
 
 // Background sync configuration

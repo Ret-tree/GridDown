@@ -38,6 +38,12 @@ const App = (function() {
             await OfflineModule.init();
             await GPSModule.init();
             WeatherModule.init();
+            
+            // Initialize satellite weather imagery module
+            if (typeof SatWeatherModule !== 'undefined') {
+                SatWeatherModule.init();
+            }
+            
             ContingencyModule.init();
             MeasureModule.init();
             SunMoonModule.init();
@@ -83,42 +89,6 @@ const App = (function() {
             if (typeof MedicalModule !== 'undefined') {
                 MedicalModule.init();
                 console.log('Medical reference module initialized');
-            }
-            
-            // Initialize RadiaCode module
-            if (typeof RadiaCodeModule !== 'undefined') {
-                RadiaCodeModule.init();
-                console.log('RadiaCode module initialized');
-                
-                // Setup event listeners to refresh Team panel on RadiaCode events
-                Events.on('radiacode:reading', () => {
-                    if (State.get('activePanel') === 'team') {
-                        PanelsModule.render();
-                    }
-                    MapModule.render();
-                });
-                
-                Events.on('radiacode:track_started', () => {
-                    if (State.get('activePanel') === 'team') {
-                        PanelsModule.render();
-                    }
-                });
-                
-                Events.on('radiacode:track_stopped', () => {
-                    if (State.get('activePanel') === 'team') {
-                        PanelsModule.render();
-                    }
-                    MapModule.render();
-                });
-                
-                Events.on('radiacode:alert', (alert) => {
-                    // Show toast for radiation alerts
-                    if (typeof ModalsModule !== 'undefined') {
-                        const level = alert.level;
-                        const type = level === 'alarm' ? 'error' : level === 'warning' ? 'warning' : 'info';
-                        ModalsModule.showToast(alert.message, type);
-                    }
-                });
             }
             
             // Initialize Meshtastic module
