@@ -188,6 +188,13 @@ const MeshtasticModule = (function() {
      * Connect to Meshtastic device via Web Bluetooth
      */
     async function connectBluetooth() {
+        // Check browser compatibility first
+        if (typeof CompatibilityModule !== 'undefined') {
+            if (!CompatibilityModule.requireFeature('webBluetooth', true)) {
+                throw new Error('Web Bluetooth not supported on this browser.');
+            }
+        }
+        
         if (!navigator.bluetooth) {
             throw new Error('Web Bluetooth not supported. Use Chrome or Edge.');
         }
@@ -248,6 +255,13 @@ const MeshtasticModule = (function() {
      * Connect to Meshtastic device via Web Serial
      */
     async function connectSerial() {
+        // Check browser compatibility first
+        if (typeof CompatibilityModule !== 'undefined') {
+            if (!CompatibilityModule.requireFeature('webSerial', true)) {
+                throw new Error('Web Serial not supported on this browser.');
+            }
+        }
+        
         if (!navigator.serial) {
             throw new Error('Web Serial not supported. Use Chrome or Edge.');
         }

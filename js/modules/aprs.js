@@ -290,6 +290,13 @@ const APRSModule = (function() {
      * Connect to Bluetooth TNC (Mobilinkd)
      */
     async function connectBluetooth() {
+        // Check browser compatibility first
+        if (typeof CompatibilityModule !== 'undefined') {
+            if (!CompatibilityModule.requireFeature('webBluetooth', true)) {
+                throw new Error('Web Bluetooth not supported on this browser.');
+            }
+        }
+        
         if (!navigator.bluetooth) {
             throw new Error('Web Bluetooth not supported in this browser');
         }

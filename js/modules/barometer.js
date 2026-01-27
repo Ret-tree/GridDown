@@ -92,6 +92,12 @@ const BarometerModule = (function() {
      * Start barometer readings
      */
     async function start() {
+        // Check browser compatibility first with visual warning
+        if (typeof CompatibilityModule !== 'undefined' && !isSupported) {
+            CompatibilityModule.requireFeature('barometer', true);
+            return false;
+        }
+        
         if (!isSupported) {
             error = 'Barometer not supported on this device';
             notifySubscribers('error', error);

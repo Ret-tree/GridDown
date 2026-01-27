@@ -432,6 +432,13 @@ const RadiaCodeModule = (function() {
      * Uses proprietary RadiaCode BLE service UUIDs from mkgeiger library
      */
     async function connect() {
+        // Check browser compatibility first
+        if (typeof CompatibilityModule !== 'undefined') {
+            if (!CompatibilityModule.requireFeature('webBluetooth', true)) {
+                throw new Error('Web Bluetooth not supported on this browser.');
+            }
+        }
+        
         if (!navigator.bluetooth) {
             throw new Error('Web Bluetooth not supported. Use Chrome, Edge, or Opera.');
         }
