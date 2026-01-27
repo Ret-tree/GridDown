@@ -2,6 +2,37 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.18.1] - 2025-01-27
+
+### Added
+- **MQTT Connection Support** - RF Sentinel now supports MQTT over WebSocket:
+  
+  **Connection Method Selector**:
+  - Auto (recommended) - Tries WebSocket first, falls back to REST
+  - WebSocket - Real-time push via native WebSocket
+  - MQTT - Pub/sub via MQTT over WebSocket (requires Mosquitto broker)
+  - REST Polling - Periodic fetch every 5 seconds
+  
+  **MQTT Implementation**:
+  - Dynamically loads MQTT.js library from CDN when MQTT is selected
+  - Configurable MQTT WebSocket port (default: 9001)
+  - Subscribes to topic hierarchy: `rfsentinel/tracks/#`, `rfsentinel/weather/#`, `rfsentinel/alerts`, `rfsentinel/emergency`
+  - Automatic reconnection with exponential backoff
+  - Graceful error handling when broker unavailable
+  
+  **UI Updates**:
+  - Connection method dropdown in RF Sentinel panel
+  - MQTT port input field (enabled when MQTT selected)
+  - Dynamic description text based on selected method
+  - Connection mode displayed when connected (WEBSOCKET/MQTT/REST)
+
+### Technical Notes
+- MQTT only works over WebSocket (browsers cannot use raw TCP)
+- Requires Mosquitto or compatible broker with WebSocket listener enabled
+- MQTT.js library loaded on-demand to avoid bloating initial page load
+- Existing WebSocket and REST code paths remain unchanged
+- Settings persist: connectionMethod, mqttPort stored in IndexedDB
+
 ## [6.18.0] - 2025-01-27
 
 ### Added
