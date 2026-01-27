@@ -102,6 +102,12 @@ const App = (function() {
                 console.log('Field guides module initialized');
             }
             
+            // Initialize Stream Gauge module
+            if (typeof StreamGaugeModule !== 'undefined') {
+                StreamGaugeModule.init();
+                console.log('Stream gauge module initialized');
+            }
+            
             // Initialize Meshtastic module
             if (typeof MeshtasticModule !== 'undefined') {
                 MeshtasticModule.init();
