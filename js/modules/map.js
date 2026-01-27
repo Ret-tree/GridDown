@@ -805,6 +805,7 @@ const MapModule = (function() {
         renderCrosshair(width, height);
         renderDrawingRegion(width, height);
         renderRFLOSOverlay(width, height);
+        renderStreamGaugeOverlay(width, height);
         
         // Restore state (removes rotation)
         ctx.restore();
@@ -2000,6 +2001,19 @@ const MapModule = (function() {
         RFLOSModule.renderMapOverlay(ctx, latLonToPixel);
     }
 
+    /**
+     * Render USGS stream gauge markers on map
+     */
+    function renderStreamGaugeOverlay(width, height) {
+        if (typeof StreamGaugeModule === 'undefined') return;
+        if (!StreamGaugeModule.isShowingOnMap()) return;
+        
+        const stations = StreamGaugeModule.getStations();
+        if (stations.length === 0) return;
+        
+        StreamGaugeModule.renderMapOverlay(ctx, latLonToPixel);
+    }
+
     function renderAttribution(width, height) {
         // Collect all attributions from active layers
         const attributions = new Set();
@@ -2410,6 +2424,23 @@ const MapModule = (function() {
         // Check if RFLOS is selecting a point
         if (typeof RFLOSModule !== 'undefined' && RFLOSModule.isSelecting()) {
             if (RFLOSModule.handleMapClick(clickCoords.lat, clickCoords.lon)) {
+                render();
+                return;
+            }
+        }
+        
+        // Check if clicked on a stream gauge marker
+        if (typeof StreamGaugeModule !== 'undefined' && StreamGaugeModule.isShowingOnMap()) {
+            const station = StreamGaugeModule.hitTest(x, y, latLonToPixel);
+            if (station) {
+                StreamGaugeModule.setSelectedStation(station);
+                // Switch to weather panel to show station details
+                if (typeof State !== 'undefined') {
+                    State.set('activePanel', 'weather');
+                    if (typeof PanelsModule !== 'undefined') {
+                        PanelsModule.render();
+                    }
+                }
                 render();
                 return;
             }

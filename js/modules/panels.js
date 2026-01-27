@@ -6795,9 +6795,21 @@ const PanelsModule = (function() {
                 `}
             </div>
             
+            <div class="divider"></div>
+            
+            <!-- USGS Stream Gauges -->
+            <div class="section-label">💧 USGS Stream Gauges</div>
+            <div id="stream-gauge-section" style="margin-bottom:16px">
+                ${typeof StreamGaugeModule !== 'undefined' ? StreamGaugeModule.renderPanel() : `
+                    <div style="padding:16px;background:var(--color-bg-elevated);border-radius:8px;text-align:center">
+                        <span style="color:rgba(255,255,255,0.5)">Stream gauge module not available</span>
+                    </div>
+                `}
+            </div>
+            
             <div style="margin-top:20px;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;text-align:center">
                 <div style="font-size:11px;color:rgba(255,255,255,0.4)">
-                    Weather data from Open-Meteo • Updates every 30 minutes
+                    Weather data from Open-Meteo • Stream data from USGS NWIS
                 </div>
             </div>
         `;
@@ -6905,6 +6917,20 @@ const PanelsModule = (function() {
                     display.textContent = `${Math.round(satLayerOpacity * 100)}%`;
                 }
             };
+        }
+        
+        // Stream Gauge handlers
+        const streamGaugeSection = container.querySelector('#stream-gauge-section');
+        if (streamGaugeSection && typeof StreamGaugeModule !== 'undefined') {
+            StreamGaugeModule.attachHandlers(streamGaugeSection);
+            
+            // Subscribe to updates to re-render section
+            StreamGaugeModule.subscribe((event, data) => {
+                if (event === 'update' || event === 'select' || event === 'stations' || event === 'error') {
+                    streamGaugeSection.innerHTML = StreamGaugeModule.renderPanel();
+                    StreamGaugeModule.attachHandlers(streamGaugeSection);
+                }
+            });
         }
     }
 
