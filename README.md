@@ -12,6 +12,7 @@ GridDown is a feature-rich Progressive Web App (PWA) designed for operational pl
 - **Paper Backup**: Comprehensive print/PDF export when electronics fail
 - **Field-Ready**: Designed for real-world tactical and emergency scenarios
 - **Self-Reliant**: No cloud dependencies, no accounts required
+- **Infrastructure Independent**: Works when the grid goes down
 
 ---
 
@@ -39,7 +40,7 @@ GridDown is a feature-rich Progressive Web App (PWA) designed for operational pl
 - Off-route alerts and breadcrumb tracking
 - Compass bearing display
 
-### 📥 Offline Maps
+### 🔥 Offline Maps
 - Download entire regions by drawing polygons
 - Multiple zoom level selection (10-17)
 - Storage management dashboard with usage stats
@@ -59,6 +60,46 @@ GridDown is a feature-rich Progressive Web App (PWA) designed for operational pl
 - Checkpoint generation along routes at configurable intervals
 - Alternative route comparison
 - Risk assessment and mitigation planning
+
+---
+
+## 📡 RF Sentinel Integration (NEW in v6.18)
+
+Connect to [RF Sentinel](https://github.com/yourrepo/rf-sentinel) for comprehensive off-grid situational awareness using software-defined radio.
+
+### Multi-Protocol RF Detection
+| Detection Type | Frequency | Symbol | Description |
+|----------------|-----------|--------|-------------|
+| **Aircraft** | ADS-B 1090 MHz | ✈️ Blue | Commercial and GA aircraft |
+| **Ships** | AIS 162 MHz | 🚢 Cyan | Maritime vessels |
+| **Drones** | Remote ID 2.4 GHz | 🛸 Amber | UAVs with Remote ID |
+| **Radiosondes** | 400 MHz | 🎈 Purple | Weather balloons |
+| **APRS** | 144.39 MHz | 📻 Green | Amateur radio stations |
+
+### Connection Methods
+- **Auto (recommended)** - Tries WebSocket first, falls back to REST
+- **WebSocket** - Real-time push updates via native WebSocket
+- **MQTT** - Pub/sub via MQTT over WebSocket (requires Mosquitto broker)
+- **REST Polling** - Periodic fetch every 5 seconds
+
+### Off-Grid Weather via FIS-B
+- Switch weather source from Internet (NWS/IEM) to RF Sentinel FIS-B
+- Receives METARs, TAFs, SIGMETs, TFRs, PIREPs via 978 MHz UAT
+- Stale data detection with 15-minute threshold
+- True infrastructure-independent weather intelligence
+
+### Emergency Detection
+- **Aircraft Squawk Codes**: 7500 (Hijack), 7600 (Radio Fail), 7700 (Emergency)
+- **AIS Emergency Devices**: SART, MOB, EPIRB
+- Visual alerts with pulsing red indicators on map
+- Toast notifications for critical emergencies
+
+### Map Rendering
+- Track symbols with heading rotation
+- Age-based alpha fade for stale tracks
+- Labels shown at zoom level 10+
+- Maximum 500 tracks for performance
+- Individual layer toggles for each detection type
 
 ---
 
@@ -96,7 +137,7 @@ GridDown is a feature-rich Progressive Web App (PWA) designed for operational pl
 
 ## ☢️ RadiaCode Gamma Spectrometer Integration
 
-### Real Device Connection (v6.6.0)
+### Real Device Connection
 - **Web Bluetooth** connection to RadiaCode 101/102/103/110 devices
 - Real-time **dose rate** (μSv/h) and **count rate** (CPS) display
 - Live radiation level indicator with color-coded alerts
@@ -125,7 +166,29 @@ GridDown is a feature-rich Progressive Web App (PWA) designed for operational pl
 
 ---
 
-## 🏥 Medical Reference
+## 🥾 Field Guides (NEW in v6.13)
+
+Comprehensive offline reference library with **600+ entries** covering:
+
+### Categories
+- **Foraging**: 150+ edible plants, mushrooms, and wild foods
+- **Medicinal Plants**: 100+ species with preparation methods
+- **Wildlife**: Mammals, birds, reptiles, and insects
+- **Hazards**: Dangerous plants, animals, and environmental risks
+- **Survival Skills**: Fire, shelter, water, navigation techniques
+- **Knots & Lashing**: 50+ knot tutorials with use cases
+
+### Features
+- Full-text search across all guides
+- Favorites system for quick access
+- Offline-first with IndexedDB storage
+- Regional filtering (North America, Europe, etc.)
+- Seasonal availability indicators
+- Nutritional and toxicity information
+
+---
+
+## 🥼 Medical Reference
 
 ### Protocol Database (50+ Protocols)
 - **Trauma**: Hemorrhage control, fractures, burns, head injury
@@ -156,6 +219,7 @@ GridDown is a feature-rich Progressive Web App (PWA) designed for operational pl
 - 7-day forecast with temperature and precipitation
 - Weather alerts and warnings
 - Automatic logistics adjustment for temperature
+- **Off-grid weather via RF Sentinel FIS-B** (NEW)
 
 ### Sun/Moon Calculator
 - Rise and set times for current location
@@ -170,13 +234,57 @@ GridDown is a feature-rich Progressive Web App (PWA) designed for operational pl
 - True vs magnetic bearing conversion
 - Annual change rate display
 
+### Barometric Altimeter (NEW in v6.14)
+- Uses device pressure sensor when available
+- Calibrate to known elevation or GPS
+- Pressure trend monitoring
+- Altitude history graph
+
 ### Terrain Analysis
 - **Slope analysis** with trafficability assessment
 - Aspect (direction slope faces)
 - **Viewshed calculation** for observation posts
+- **RF Line-of-Sight** analysis (NEW in v6.12)
 - Solar exposure scoring for camp site selection
 - Flood risk assessment
 - Cover and concealment analysis
+
+### USGS Stream Gauges (NEW in v6.11)
+- Real-time water level data from 10,000+ gauges
+- Current flow rate (CFS) and gauge height
+- Flood stage indicators
+- Historical data trends
+
+---
+
+## 📊 System Monitoring (NEW in v6.15-6.17)
+
+### Offline Status Indicator
+- Persistent banner when offline with duration counter
+- "Back online" notification when connection restored
+- Real-time connectivity verification
+
+### Network Quality Indicator
+- Signal strength bars (Excellent/Good/Fair/Poor)
+- Connection type detection (4G/3G/2G/WiFi)
+- Latency measurement
+- Tile download time estimation
+
+### Storage Quota Warning
+- Browser storage usage monitoring
+- Warning at 80%, 90%, 95% thresholds
+- Visual progress bar with remaining space
+- Quick link to manage offline tiles
+
+### Update Notifications
+- Automatic new version detection
+- "Refresh Now" button for instant update
+- Non-intrusive toast notification
+
+### Browser Compatibility Detection
+- Feature-specific warnings (Web Bluetooth, Web Serial, etc.)
+- Recommends optimal browser for full functionality
+- Graceful degradation for unsupported features
 
 ---
 
@@ -220,7 +328,7 @@ GridDown is a feature-rich Progressive Web App (PWA) designed for operational pl
 - **Blackout mode** minimal screen glow
 
 ### Accessibility (WCAG 2.1)
-- Comprehensive ARIA attributes
+- Comprehensive ARIA attributes (417 attributes)
 - Skip-to-content navigation
 - Keyboard navigation support
 - Reduced motion option
@@ -245,7 +353,7 @@ GridDown is a feature-rich Progressive Web App (PWA) designed for operational pl
 
 ```bash
 git clone https://github.com/BlackDotTechnology/GridDown.git
-cd GridDown/griddown
+cd GridDown
 
 # Serve with any static server
 npx serve .
@@ -266,6 +374,7 @@ Open `http://localhost:8000` in your browser.
 Upload contents to any static hosting:
 - GitHub Pages
 - Netlify / Vercel
+- Cloudflare Pages
 - Firebase Hosting
 - Any web server (Apache, Nginx, etc.)
 
@@ -274,7 +383,7 @@ Upload contents to any static hosting:
 ## 📁 Project Structure
 
 ```
-griddown/
+GridDown/
 ├── index.html              # App entry point
 ├── manifest.json           # PWA manifest
 ├── sw.js                   # Service worker (offline caching)
@@ -319,9 +428,14 @@ griddown/
         ├── commplan.js     # Communication planning
         ├── aprs.js         # APRS integration
         ├── meshtastic.js   # Mesh networking
-        ├── radiacode.js    # Gamma spectrometer (NEW)
-        ├── team.js         # Team management (NEW)
-        ├── medical.js      # Medical reference (NEW)
+        ├── radiacode.js    # Gamma spectrometer
+        ├── rfsentinel.js   # RF Sentinel integration (NEW)
+        ├── team.js         # Team management
+        ├── medical.js      # Medical reference
+        ├── fieldguides.js  # Offline field guides (NEW)
+        ├── streamgauges.js # USGS water data (NEW)
+        ├── barometer.js    # Barometric altimeter (NEW)
+        ├── rflos.js        # RF line-of-sight (NEW)
         ├── sos.js          # Emergency features
         ├── measure.js      # Distance/area tool
         ├── search.js       # Location search
@@ -329,7 +443,12 @@ griddown/
         ├── plansharing.js  # Encrypted sharing
         ├── nightmode.js    # Night vision modes
         ├── onboarding.js   # First-run tour
-        └── undo.js         # Undo/redo
+        ├── undo.js         # Undo/redo
+        ├── networkstatus.js    # Offline indicator (NEW)
+        ├── networkquality.js   # Connection quality (NEW)
+        ├── storagemonitor.js   # Storage quota (NEW)
+        ├── update.js           # Update notifications (NEW)
+        └── compatibility.js    # Browser detection (NEW)
 ```
 
 ---
@@ -338,15 +457,15 @@ griddown/
 
 | Browser | Version | Notes |
 |---------|---------|-------|
-| Chrome | 80+ | Full support including Web Bluetooth |
-| Edge | 80+ | Full support including Web Bluetooth |
-| Opera | 67+ | Full support including Web Bluetooth |
-| Firefox | 75+ | No Web Bluetooth (APRS/Meshtastic/RadiaCode unavailable) |
-| Safari | 13.1+ | No Web Bluetooth |
-| Chrome Android | 80+ | Full support |
-| Safari iOS | 13+ | Limited - no Web Bluetooth |
+| Chrome | 80+ | ✅ Full support including Web Bluetooth |
+| Edge | 80+ | ✅ Full support including Web Bluetooth |
+| Opera | 67+ | ✅ Full support including Web Bluetooth |
+| Firefox | 75+ | ⚠️ No Web Bluetooth (APRS/Meshtastic/RadiaCode unavailable) |
+| Safari | 13.1+ | ⚠️ No Web Bluetooth |
+| Chrome Android | 80+ | ✅ Full support |
+| Safari iOS | 13+ | ⚠️ Limited - no Web Bluetooth |
 
-**Note**: Web Bluetooth features (APRS, Meshtastic, RadiaCode) require Chrome, Edge, or Opera.
+**Note**: Web Bluetooth features (APRS, Meshtastic, RadiaCode, RF Sentinel via BLE) require Chrome, Edge, or Opera.
 
 ---
 
@@ -418,6 +537,22 @@ griddown/
 }
 ```
 
+### RF Sentinel Track
+```json
+{
+    "id": "ac_A1B2C3",
+    "type": "aircraft",
+    "lat": 37.7749,
+    "lon": -122.4194,
+    "altitude": 35000,
+    "heading": 270,
+    "speed": 450,
+    "callsign": "UAL123",
+    "squawk": "1200",
+    "lastSeen": 1706234567890
+}
+```
+
 ---
 
 ## 🤝 Contributing
@@ -443,6 +578,7 @@ MIT License - See [LICENSE](LICENSE) for details.
 - Weather and elevation data from [Open-Meteo](https://open-meteo.com/)
 - RadiaCode BLE protocol from [cdump/radiacode](https://github.com/cdump/radiacode) and [mkgeiger/RadiaCode](https://github.com/mkgeiger/RadiaCode) (MIT)
 - Icons inspired by Lucide/Feather icon sets
+- MQTT.js for browser-based MQTT over WebSocket
 
 ---
 
@@ -450,7 +586,18 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
-**Current Version: 6.6.0** (January 2025)
+**Current Version: 6.18.1** (January 2025)
+
+### Recent Highlights
+- **v6.18.1** - MQTT connection support for RF Sentinel
+- **v6.18.0** - RF Sentinel integration with multi-protocol RF detection
+- **v6.17.x** - Storage quota monitoring, network quality indicator, map layer audit
+- **v6.16.0** - Update notifications, feature-specific browser warnings
+- **v6.15.0** - Offline status indicator with duration tracking
+- **v6.14.0** - Barometric altimeter with pressure trends
+- **v6.13.0** - Offline field guides (600+ entries)
+- **v6.12.0** - RF Line-of-Sight analysis
+- **v6.11.0** - USGS stream gauge integration
 
 ---
 
