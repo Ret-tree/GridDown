@@ -2,6 +2,47 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.11.0] - 2025-01-27
+
+### Added
+- **Offline Field Guides** - Comprehensive survival reference database:
+  
+  **Survival Skills**:
+  - Fire starting (fire triangle, bow drill, ferro rod, flint & steel)
+  - Water (finding sources, purification methods, solar still construction)
+  - Shelter (priorities, debris hut, tarp configurations, snow shelter/quinzee)
+  - Navigation (compass basics, navigation without compass, STOP protocol when lost)
+  - Signaling (ground-to-air signals, signal mirror, signal fire)
+
+  **Knots Reference**:
+  - Essential knots (bowline, clove hitch, taut line, sheet bend, trucker's hitch, prusik)
+  - Hitches (two half hitches, timber hitch)
+  - Lashings (square lashing, diagonal lashing, tripod lashing)
+  - ASCII art diagrams for each knot
+
+  **Edible Plants Database**:
+  - Common edibles (dandelion, cattail, clover, plantain, chickweed)
+  - Nuts & seeds (acorns with leaching instructions, pine nuts)
+  - Berries (blackberry/raspberry, safety rules)
+  - Universal edibility test procedure
+
+- **Field Guides UI Features**:
+  - Category/subcategory navigation
+  - Full-text search across all guides
+  - Bookmark system with persistent storage
+  - Detailed content with tips and warnings
+  - ASCII diagrams for knots and shelters
+
+### Technical
+- New module: `js/modules/fieldguides.js` (~1900 lines)
+- Added to navigation as "📚 Field Guides" panel
+- Integrated with existing bookmark/search patterns
+- All content bundled offline - no external dependencies
+
+### Content Sources
+All content is original educational material based on widely-published survival knowledge.
+Includes appropriate safety disclaimers for plant identification.
+
 ## [6.10.0] - 2025-01-27
 
 ### Added
