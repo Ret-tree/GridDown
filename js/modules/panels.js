@@ -6755,11 +6755,11 @@ const PanelsModule = (function() {
                             <span style="font-size:20px">🌧️</span>
                             <span style="font-size:11px">Precip</span>
                         </button>
-                        <button class="btn ${activeSatLayer === 'nws_warnings' ? 'btn--primary' : 'btn--secondary'}" 
-                                data-sat-layer="nws_warnings"
+                        <button class="btn ${activeSatLayer === 'nexrad_eet' ? 'btn--primary' : 'btn--secondary'}" 
+                                data-sat-layer="nexrad_eet"
                                 style="padding:12px 10px;display:flex;flex-direction:column;align-items:center;gap:4px">
-                            <span style="font-size:20px">⚠️</span>
-                            <span style="font-size:11px">Warnings</span>
+                            <span style="font-size:20px">📊</span>
+                            <span style="font-size:11px">Echo Tops</span>
                         </button>
                     </div>
                     

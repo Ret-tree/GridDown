@@ -43,7 +43,7 @@ const SatWeatherModule = (function() {
             description: 'US composite weather radar',
             source: 'iem',
             format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png',
+            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q/{z}/{x}/{y}.png',
             maxZoom: 8,
             category: 'radar',
             updateInterval: 5,  // 5 minutes
@@ -58,7 +58,7 @@ const SatWeatherModule = (function() {
             description: 'Multi-Radar Multi-Sensor 1-hour precipitation',
             source: 'iem',
             format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/q2-n1p-900913/{z}/{x}/{y}.png',
+            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/q2-n1p/{z}/{x}/{y}.png',
             maxZoom: 8,
             category: 'precipitation',
             updateInterval: 5,
@@ -66,61 +66,61 @@ const SatWeatherModule = (function() {
             attribution: '© Iowa Environmental Mesonet, NOAA MRMS'
         },
         
-        // === NWS Warnings (via IEM) ===
-        nws_warnings: {
-            id: 'nws_warnings',
-            name: 'NWS Warnings',
-            description: 'Active watches, warnings, advisories',
+        // === NEXRAD Echo Tops (via IEM) ===
+        nexrad_eet: {
+            id: 'nexrad_eet',
+            name: 'Echo Tops',
+            description: 'NEXRAD Echo Top heights',
             source: 'iem',
             format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/wwa-900913/{z}/{x}/{y}.png',
-            maxZoom: 10,
-            category: 'alerts',
-            updateInterval: 2,
+            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-eet/{z}/{x}/{y}.png',
+            maxZoom: 8,
+            category: 'radar',
+            updateInterval: 5,
             coverage: 'conus',
             attribution: '© Iowa Environmental Mesonet, NOAA NWS'
         },
         
-        // === GOES West Satellite (via IEM - still operational) ===
+        // === GOES East Satellite (via IEM - still operational) ===
         goes_ir: {
-            id: 'goes_west_ir',
+            id: 'goes_ir',
             name: 'GOES Infrared',
-            description: 'GOES West infrared (day/night)',
+            description: 'GOES East infrared (day/night)',
             source: 'iem',
             format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-west-ir-900913/{z}/{x}/{y}.png',
+            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-ir-4km/{z}/{x}/{y}.png',
             maxZoom: 8,
             category: 'infrared',
             updateInterval: 15,
-            coverage: 'west_conus',
+            coverage: 'conus',
             attribution: '© Iowa Environmental Mesonet, NOAA GOES'
         },
         
         goes_wv: {
-            id: 'goes_west_wv',
+            id: 'goes_wv',
             name: 'GOES Water Vapor',
-            description: 'GOES West water vapor channel',
+            description: 'GOES East water vapor channel',
             source: 'iem',
             format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-west-wv-900913/{z}/{x}/{y}.png',
+            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-wv-4km/{z}/{x}/{y}.png',
             maxZoom: 8,
             category: 'moisture',
             updateInterval: 15,
-            coverage: 'west_conus',
+            coverage: 'conus',
             attribution: '© Iowa Environmental Mesonet, NOAA GOES'
         },
         
         goes_vis: {
-            id: 'goes_west_vis',
+            id: 'goes_vis',
             name: 'GOES Visible',
-            description: 'GOES West visible (daytime only)',
+            description: 'GOES East visible (daytime only)',
             source: 'iem',
             format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-west-vis-900913/{z}/{x}/{y}.png',
+            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-vis-1km/{z}/{x}/{y}.png',
             maxZoom: 8,
             category: 'visible',
             updateInterval: 15,
-            coverage: 'west_conus',
+            coverage: 'conus',
             attribution: '© Iowa Environmental Mesonet, NOAA GOES'
         }
     };
@@ -131,8 +131,7 @@ const SatWeatherModule = (function() {
         infrared: { name: 'Infrared', icon: '🌡️', description: 'Cloud temperatures, night viewing' },
         moisture: { name: 'Water Vapor', icon: '💧', description: 'Atmospheric moisture' },
         precipitation: { name: 'Precipitation', icon: '🌧️', description: 'Rain/snow estimates' },
-        radar: { name: 'Weather Radar', icon: '📡', description: 'NEXRAD precipitation radar' },
-        alerts: { name: 'NWS Alerts', icon: '⚠️', description: 'Watches, warnings, advisories' }
+        radar: { name: 'Weather Radar', icon: '📡', description: 'NEXRAD radar products' }
     };
     
     // Regional sectors (for NOAA STAR direct images)
