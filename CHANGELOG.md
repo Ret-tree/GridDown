@@ -2,6 +2,28 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.17.1] - 2025-01-27
+
+### Fixed
+- **BLM Surface Management Layer** - Updated to new URL after BLM service reorganization
+  - Changed from `BLM_Natl_SMA_Cached` to `BLM_Natl_SMA_Cached_with_PriUnk`
+  - Fixes 404 errors when viewing federal land ownership
+
+### Removed
+- **World Topo Map** - Removed deprecated Esri service (no longer maintained)
+- **BLM Grazing Allotments** - Removed (requires dynamic ArcGIS export API, not tile cache)
+
+### Changed
+- Renamed "USFS / Topo Maps" category to "Esri Topo Maps" for clarity
+- Marked Nat Geo basemap as "(legacy)" - still works but in mature support
+
+### Notes
+All remaining map layers verified working:
+- General: OpenStreetMap, OpenTopoMap, Esri Satellite ✓
+- USGS: Topo, Imagery, Imagery+Topo, Hydro ✓ (refreshed Oct/Feb 2025)
+- Esri: USA Topo, Nat Geo, Hillshade, Labels, Roads ✓
+- BLM: Surface Management ✓
+
 ## [6.17.0] - 2025-01-27
 
 ### Added
