@@ -2,6 +2,19 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.18.4] - 2025-01-28
+
+### Added
+- **Privacy Policy** - Added PRIVACY.md documenting data handling practices:
+  - No personal data collection
+  - All data stored locally on device
+  - External service connections documented
+  - Hardware connection privacy explained
+
+### Changed
+- Updated README with privacy policy link
+- Version consistency check across all files
+
 ## [6.18.3] - 2025-01-28
 
 ### Fixed

@@ -569,6 +569,10 @@ GridDown/
 
 MIT License - See [LICENSE](LICENSE) for details.
 
+## 🔒 Privacy
+
+GridDown collects no personal data and operates offline-first. See [PRIVACY.md](PRIVACY.md) for details.
+
 ---
 
 ## 🙏 Acknowledgments
@@ -586,9 +590,12 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
-**Current Version: 6.18.1** (January 2025)
+**Current Version: 6.18.4** (January 2025)
 
 ### Recent Highlights
+- **v6.18.4** - Pre-launch polish, privacy policy
+- **v6.18.3** - Modal accessibility fix, offline mode console cleanup
+- **v6.18.2** - Touch support for offline map region drawing
 - **v6.18.1** - MQTT connection support for RF Sentinel
 - **v6.18.0** - RF Sentinel integration with multi-protocol RF detection
 - **v6.17.x** - Storage quota monitoring, network quality indicator, map layer audit
