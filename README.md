@@ -590,9 +590,10 @@ GridDown collects no personal data and operates offline-first. See [PRIVACY.md](
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
-**Current Version: 6.18.4** (January 2025)
+**Current Version: 6.18.5** (January 2025)
 
 ### Recent Highlights
+- **v6.18.5** - Settings version display fix, About section branding
 - **v6.18.4** - Pre-launch polish, privacy policy
 - **v6.18.3** - Modal accessibility fix, offline mode console cleanup
 - **v6.18.2** - Touch support for offline map region drawing

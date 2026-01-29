@@ -2,6 +2,49 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.19.0] - 2025-01-29
+
+### Added
+- **SSTV Module** - Slow Scan Television integration for amateur radio image transmission:
+  - **Receive Support**: Decode SSTV signals from radio audio input
+    - Robot36, Robot72 modes
+    - Martin M1, M2 modes
+    - Scottie S1, S2 modes
+    - PD-90, PD-120 modes
+    - Auto VIS code detection
+    - Real-time decode progress display
+    - Signal strength meter
+  - **Transmit Support**: Encode and transmit images via audio output
+    - All supported modes available
+    - Camera capture integration
+    - Gallery image selection
+    - Map view capture for tactical sharing
+    - Automatic callsign overlay
+    - Grid square auto-calculation from GPS
+  - **DSP Implementation**: 
+    - Goertzel algorithm for efficient frequency detection
+    - VIS code encoding/decoding
+    - YCrCb and GBR color mode support
+  - **Image History**: Store and manage received images
+  - **Settings Panel**: Callsign, grid square, default mode, audio settings
+  - **Legal Compliance**: License acknowledgment workflow, mandatory callsign for TX
+  - **Connection Guide**: Hardware setup instructions for audio cable interface
+
+### Technical
+- Web Audio API for audio I/O
+- getUserMedia for microphone access
+- IndexedDB storage for received images
+- Event-driven architecture for decode progress
+
+## [6.18.5] - 2025-01-28
+
+### Fixed
+- **Settings Version Display** - Version number now reads dynamically from manifest.json instead of being hardcoded
+- **About Section** - Added BlackDot Technology branding and GitHub link
+
+### Added
+- **Security Headers Template** - Added .htaccess file with CSP and security headers for Apache hosting
+
 ## [6.18.4] - 2025-01-28
 
 ### Added
