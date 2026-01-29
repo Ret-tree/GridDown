@@ -14381,10 +14381,42 @@ ${text}
 
     async function loadCameraForTransmit() {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: 'environment',
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                } 
+            });
+            
             const video = document.createElement('video');
             video.srcObject = stream;
+            video.setAttribute('playsinline', 'true'); // Required for iOS
+            video.muted = true;
+            
+            // Wait for video metadata to load
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Video metadata timeout'));
+                }, 10000);
+                
+                video.onloadedmetadata = () => {
+                    clearTimeout(timeout);
+                    resolve();
+                };
+                
+                video.onerror = (e) => {
+                    clearTimeout(timeout);
+                    reject(new Error('Video error: ' + (e.message || 'Unknown')));
+                };
+            });
+            
             await video.play();
+            
+            // Ensure we have valid dimensions
+            if (video.videoWidth === 0 || video.videoHeight === 0) {
+                throw new Error('Invalid video dimensions');
+            }
             
             // Capture frame
             const canvas = document.createElement('canvas');
@@ -14397,10 +14429,13 @@ ${text}
             
             const imageData = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
             displayTransmitPreview(imageData);
+            
+            console.log(`[SSTV] Camera capture: ${canvas.width}x${canvas.height}`);
+            
         } catch (err) {
             console.error('[SSTV] Failed to access camera:', err);
             if (typeof ModalsModule !== 'undefined') {
-                ModalsModule.showToast('Camera access denied', 'error');
+                ModalsModule.showToast('Camera access failed: ' + err.message, 'error');
             }
         }
     }
@@ -14426,9 +14461,28 @@ ${text}
         const canvas = document.getElementById('sstv-tx-canvas');
         const placeholder = document.getElementById('sstv-tx-placeholder');
         
-        if (canvas && placeholder) {
-            // Get target dimensions from selected mode
-            const mode = SSTVModule.MODES[sstvTransmitMode];
+        // Validate inputs
+        if (!canvas || !placeholder) {
+            console.error('[SSTV] TX canvas elements not found');
+            return;
+        }
+        
+        if (!imageData || !imageData.width || !imageData.height || imageData.width === 0 || imageData.height === 0) {
+            console.error('[SSTV] Invalid image data:', imageData?.width, 'x', imageData?.height);
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('Invalid image data', 'error');
+            }
+            return;
+        }
+        
+        // Get target dimensions from selected mode
+        const mode = typeof SSTVModule !== 'undefined' ? SSTVModule.MODES[sstvTransmitMode] : null;
+        if (!mode) {
+            console.error('[SSTV] Invalid mode:', sstvTransmitMode);
+            return;
+        }
+        
+        try {
             canvas.width = mode.width;
             canvas.height = mode.height;
             
@@ -14445,6 +14499,14 @@ ${text}
             
             // Initialize annotation canvas
             setTimeout(() => initAnnotationCanvas(), 50);
+            
+            console.log(`[SSTV] Preview loaded: ${imageData.width}x${imageData.height} → ${mode.width}x${mode.height}`);
+            
+        } catch (err) {
+            console.error('[SSTV] Failed to display preview:', err);
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('Failed to load image preview', 'error');
+            }
         }
     }
 
