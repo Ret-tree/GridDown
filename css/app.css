@@ -170,6 +170,8 @@ input::placeholder { color: var(--color-text-muted); }
 
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 12px; border-radius: 20px; background: var(--color-bg-hover); color: var(--color-text-muted); cursor: pointer; border: none; transition: all 0.2s; }
 .chip--active { background: rgba(249,115,22,0.2); color: var(--color-primary); }
+.sstv-tool-btn { min-width: 36px; }
+.sstv-tool-active { background: var(--color-primary) !important; color: #fff !important; }
 .filter-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
 
 .stat-grid { display: grid; gap: 12px; }
