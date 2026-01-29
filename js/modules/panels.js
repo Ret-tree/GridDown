@@ -12054,6 +12054,15 @@ ${text}
     let sstvEnhanceProcessing = false;
     let sstvTransmitMode = 'Robot36';
     let sstvTransmitSource = 'camera';
+    
+    // Annotation state
+    let sstvAnnotationTool = 'pen';
+    let sstvAnnotationColor = '#ff0000';
+    let sstvAnnotationWidth = 4;
+    let sstvAnnotationHistory = []; // For undo
+    let sstvIsDrawing = false;
+    let sstvDrawStart = { x: 0, y: 0 };
+    let sstvLastPoint = { x: 0, y: 0 };
 
     async function renderSSTV() {
         // Initialize SSTVModule if needed
@@ -12198,9 +12207,12 @@ ${text}
                                 <option value="thermal">Thermal</option>
                                 <option value="grayscale">Grayscale</option>
                             </select>
+                            <button id="sstv-waterfall-expand" class="btn btn--icon btn--small" title="Expand waterfall" style="padding:4px 6px;min-width:auto">
+                                ⛶
+                            </button>
                         </div>
                     </div>
-                    <div style="background:#000;border-radius:8px;padding:4px;position:relative">
+                    <div id="sstv-waterfall-container" style="background:#000;border-radius:8px;padding:4px;position:relative">
                         <canvas id="sstv-waterfall-canvas" width="400" height="150" style="width:100%;height:150px;display:block;border-radius:4px"></canvas>
                         <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-secondary);margin-top:4px;padding:0 4px">
                             <span>1100 Hz</span>
@@ -12233,9 +12245,15 @@ ${text}
                 </div>
 
                 <!-- Preview -->
-                <div id="sstv-rx-preview" style="background:#000;border-radius:8px;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;margin-bottom:16px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <span style="font-size:12px;font-weight:500">🖼️ Received Image</span>
+                    <button id="sstv-preview-expand" class="btn btn--icon btn--small" title="Expand image" style="padding:4px 6px;min-width:auto">
+                        ⛶
+                    </button>
+                </div>
+                <div id="sstv-rx-preview" style="background:#000;border-radius:8px;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;margin-bottom:16px;position:relative">
                     <canvas id="sstv-rx-canvas" style="max-width:100%;max-height:100%;display:none"></canvas>
-                    <span style="color:var(--text-secondary)">No image</span>
+                    <span id="sstv-rx-placeholder" style="color:var(--text-secondary)">No image</span>
                 </div>
 
                 <!-- Controls -->
@@ -12409,12 +12427,53 @@ ${text}
                     </div>
                 </div>
 
-                <!-- Image Preview -->
-                <div id="sstv-tx-preview" style="background:#000;border-radius:8px;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;margin-bottom:16px;position:relative">
-                    <canvas id="sstv-tx-canvas" style="max-width:100%;max-height:100%;display:none"></canvas>
+                <!-- Annotation Toolbar -->
+                <div id="sstv-annotation-toolbar" style="background:var(--bg-secondary);border-radius:8px;padding:8px;margin-bottom:8px;display:none">
+                    <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+                        <!-- Drawing Tools -->
+                        <button class="btn btn--small sstv-tool-btn sstv-tool-active" data-tool="pen" title="Pen">✏️</button>
+                        <button class="btn btn--small sstv-tool-btn" data-tool="arrow" title="Arrow">➡️</button>
+                        <button class="btn btn--small sstv-tool-btn" data-tool="circle" title="Circle">⭕</button>
+                        <button class="btn btn--small sstv-tool-btn" data-tool="rect" title="Rectangle">▢</button>
+                        <button class="btn btn--small sstv-tool-btn" data-tool="text" title="Text">T</button>
+                        <button class="btn btn--small sstv-tool-btn" data-tool="eraser" title="Eraser">🧹</button>
+                        
+                        <div style="width:1px;height:24px;background:var(--border);margin:0 4px"></div>
+                        
+                        <!-- Color Picker -->
+                        <input type="color" id="sstv-annotation-color" value="#ff0000" title="Color" 
+                            style="width:32px;height:28px;padding:0;border:none;cursor:pointer;border-radius:4px">
+                        
+                        <!-- Line Width -->
+                        <select id="sstv-annotation-width" title="Line width" 
+                            style="padding:4px;border-radius:4px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border)">
+                            <option value="2">Thin</option>
+                            <option value="4" selected>Medium</option>
+                            <option value="8">Thick</option>
+                            <option value="12">Bold</option>
+                        </select>
+                        
+                        <div style="width:1px;height:24px;background:var(--border);margin:0 4px"></div>
+                        
+                        <!-- Actions -->
+                        <button class="btn btn--small btn--secondary" id="sstv-annotation-undo" title="Undo">↩️</button>
+                        <button class="btn btn--small btn--secondary" id="sstv-annotation-clear" title="Clear all">🗑️</button>
+                    </div>
+                    
+                    <!-- Text input (shown when text tool selected) -->
+                    <div id="sstv-text-input-container" style="display:none;margin-top:8px">
+                        <input type="text" id="sstv-annotation-text" placeholder="Enter text, then click on image" 
+                            style="width:100%;padding:6px 8px;border-radius:4px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border)">
+                    </div>
+                </div>
+
+                <!-- Image Preview with Annotation Layer -->
+                <div id="sstv-tx-preview" style="background:#000;border-radius:8px;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;margin-bottom:16px;position:relative;overflow:hidden">
+                    <canvas id="sstv-tx-canvas" style="max-width:100%;max-height:100%;display:none;position:absolute"></canvas>
+                    <canvas id="sstv-annotation-canvas" style="max-width:100%;max-height:100%;display:none;position:absolute;cursor:crosshair"></canvas>
                     <span id="sstv-tx-placeholder" style="color:var(--text-secondary)">Select image source</span>
                     ${settings.callsign && settings.autoCallsignOverlay ? `
-                        <div style="position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,0.6);padding:4px 8px;border-radius:4px;font-family:monospace;font-size:12px">
+                        <div style="position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,0.6);padding:4px 8px;border-radius:4px;font-family:monospace;font-size:12px;z-index:10;pointer-events:none">
                             ${settings.callsign}${settings.gridSquare ? ' ' + settings.gridSquare : ''}
                         </div>
                     ` : ''}
@@ -13229,6 +13288,689 @@ ${text}
         }
     }
 
+    // SSTV Expanded View state
+    let sstvExpandedModal = null;
+    let sstvExpandedCanvas = null;
+    let sstvExpandedType = null;
+    let sstvExpandedUpdateInterval = null;
+
+    /**
+     * Open SSTV expanded view modal
+     * @param {string} type - 'waterfall' or 'preview'
+     */
+    function openSSTVExpandedView(type) {
+        // Close any existing expanded view
+        closeSSTVExpandedView();
+        
+        sstvExpandedType = type;
+        
+        // Create modal overlay
+        sstvExpandedModal = document.createElement('div');
+        sstvExpandedModal.id = 'sstv-expanded-modal';
+        sstvExpandedModal.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        `;
+        
+        // Create header
+        const header = document.createElement('div');
+        header.style.cssText = `
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            max-width: 1200px;
+            margin-bottom: 16px;
+            color: #fff;
+        `;
+        
+        const title = document.createElement('span');
+        title.style.cssText = 'font-size: 18px; font-weight: 500;';
+        title.textContent = type === 'waterfall' ? '📊 Waterfall Display' : '🖼️ Received Image';
+        
+        const closeBtn = document.createElement('button');
+        closeBtn.style.cssText = `
+            background: var(--bg-secondary, #2a2a3e);
+            border: 1px solid var(--border, #444);
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        `;
+        closeBtn.innerHTML = '✕ Close (Esc)';
+        closeBtn.onclick = closeSSTVExpandedView;
+        
+        header.appendChild(title);
+        header.appendChild(closeBtn);
+        
+        // Create canvas container
+        const canvasContainer = document.createElement('div');
+        canvasContainer.style.cssText = `
+            background: #000;
+            border-radius: 8px;
+            padding: 8px;
+            max-width: 100%;
+            max-height: calc(100vh - 150px);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        `;
+        
+        // Create expanded canvas
+        sstvExpandedCanvas = document.createElement('canvas');
+        
+        if (type === 'waterfall') {
+            // Larger waterfall canvas
+            sstvExpandedCanvas.width = 800;
+            sstvExpandedCanvas.height = 300;
+            sstvExpandedCanvas.style.cssText = `
+                width: 100%;
+                max-width: 800px;
+                height: auto;
+                border-radius: 4px;
+            `;
+            
+            // Add frequency scale
+            const freqScale = document.createElement('div');
+            freqScale.style.cssText = `
+                display: flex;
+                justify-content: space-between;
+                width: 100%;
+                max-width: 800px;
+                padding: 8px 4px 0;
+                font-size: 12px;
+                color: #888;
+            `;
+            freqScale.innerHTML = `
+                <span>1100 Hz</span>
+                <span style="color:#f44">SYNC</span>
+                <span style="color:#44f">BLACK</span>
+                <span style="color:#ff0">VIS</span>
+                <span style="color:#0f0">WHITE</span>
+                <span>2400 Hz</span>
+            `;
+            
+            canvasContainer.appendChild(sstvExpandedCanvas);
+            canvasContainer.appendChild(freqScale);
+            
+            // Add info row
+            const infoRow = document.createElement('div');
+            infoRow.style.cssText = `
+                display: flex;
+                gap: 24px;
+                margin-top: 12px;
+                font-size: 14px;
+                color: #fff;
+            `;
+            infoRow.innerHTML = `
+                <span>Dominant Freq: <span id="sstv-expanded-freq" style="color:var(--accent,#4da6ff)">--</span></span>
+                <span>Status: <span id="sstv-expanded-status" style="color:#888">--</span></span>
+            `;
+            canvasContainer.appendChild(infoRow);
+            
+            // Start expanded waterfall updates
+            startExpandedWaterfallUpdates();
+            
+        } else {
+            // Preview canvas - copy from original
+            const originalCanvas = document.getElementById('sstv-rx-canvas');
+            if (originalCanvas && originalCanvas.width > 0) {
+                sstvExpandedCanvas.width = originalCanvas.width;
+                sstvExpandedCanvas.height = originalCanvas.height;
+                sstvExpandedCanvas.style.cssText = `
+                    max-width: 100%;
+                    max-height: calc(100vh - 200px);
+                    object-fit: contain;
+                    border-radius: 4px;
+                `;
+                
+                // Copy image data
+                const ctx = sstvExpandedCanvas.getContext('2d');
+                ctx.drawImage(originalCanvas, 0, 0);
+                
+                // Add image info
+                const infoRow = document.createElement('div');
+                infoRow.style.cssText = `
+                    display: flex;
+                    gap: 24px;
+                    margin-top: 12px;
+                    font-size: 14px;
+                    color: #fff;
+                `;
+                
+                const decoderState = typeof SSTVModule !== 'undefined' ? SSTVModule.getDecoderState() : {};
+                const mode = decoderState.mode || '--';
+                const dimensions = originalCanvas.width > 0 ? 
+                    `${originalCanvas.width}×${originalCanvas.height}` : '--';
+                
+                infoRow.innerHTML = `
+                    <span>Mode: <span style="color:var(--accent,#4da6ff)">${mode}</span></span>
+                    <span>Size: <span style="color:#888">${dimensions}</span></span>
+                `;
+                canvasContainer.appendChild(sstvExpandedCanvas);
+                canvasContainer.appendChild(infoRow);
+                
+                // Start preview update interval (to track live decode progress)
+                startExpandedPreviewUpdates();
+            } else {
+                // No image to display
+                const noImage = document.createElement('div');
+                noImage.style.cssText = `
+                    color: #666;
+                    font-size: 16px;
+                    padding: 60px;
+                `;
+                noImage.textContent = 'No image to display';
+                canvasContainer.appendChild(noImage);
+            }
+        }
+        
+        sstvExpandedModal.appendChild(header);
+        sstvExpandedModal.appendChild(canvasContainer);
+        
+        // Add keyboard handler
+        sstvExpandedModal._keyHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeSSTVExpandedView();
+            }
+        };
+        document.addEventListener('keydown', sstvExpandedModal._keyHandler);
+        
+        // Click outside to close
+        sstvExpandedModal.onclick = (e) => {
+            if (e.target === sstvExpandedModal) {
+                closeSSTVExpandedView();
+            }
+        };
+        
+        document.body.appendChild(sstvExpandedModal);
+        
+        // Prevent body scroll
+        document.body.style.overflow = 'hidden';
+    }
+
+    /**
+     * Close SSTV expanded view
+     */
+    function closeSSTVExpandedView() {
+        if (sstvExpandedUpdateInterval) {
+            clearInterval(sstvExpandedUpdateInterval);
+            sstvExpandedUpdateInterval = null;
+        }
+        
+        if (sstvExpandedModal) {
+            if (sstvExpandedModal._keyHandler) {
+                document.removeEventListener('keydown', sstvExpandedModal._keyHandler);
+            }
+            sstvExpandedModal.remove();
+            sstvExpandedModal = null;
+        }
+        
+        sstvExpandedCanvas = null;
+        sstvExpandedType = null;
+        document.body.style.overflow = '';
+    }
+
+    /**
+     * Start waterfall updates in expanded view
+     */
+    function startExpandedWaterfallUpdates() {
+        if (!sstvExpandedCanvas || sstvExpandedType !== 'waterfall') return;
+        
+        const ctx = sstvExpandedCanvas.getContext('2d');
+        const width = sstvExpandedCanvas.width;
+        const height = sstvExpandedCanvas.height;
+        
+        // Get colormap
+        const colormapSelect = document.getElementById('sstv-waterfall-colormap');
+        const colormap = colormapSelect?.value || 'viridis';
+        
+        sstvExpandedUpdateInterval = setInterval(() => {
+            if (!sstvExpandedCanvas || typeof SSTVDSPModule === 'undefined') {
+                clearInterval(sstvExpandedUpdateInterval);
+                return;
+            }
+            
+            // Scroll down
+            const imageData = ctx.getImageData(0, 0, width, height);
+            ctx.putImageData(imageData, 0, 1);
+            
+            // Draw new line from DSP module
+            const freqInfo = SSTVDSPModule.getDominantFrequency();
+            const signalQuality = SSTVDSPModule.analyzeSignalQuality();
+            
+            // Update info display
+            const freqEl = document.getElementById('sstv-expanded-freq');
+            const statusEl = document.getElementById('sstv-expanded-status');
+            
+            if (freqEl && freqInfo) {
+                freqEl.textContent = `${freqInfo.frequency.toFixed(0)} Hz (${(freqInfo.amplitude * 100).toFixed(0)}%)`;
+            }
+            if (statusEl && signalQuality) {
+                statusEl.textContent = signalQuality.guidance;
+                const colors = {
+                    none: '#666', weak: '#f90', overload: '#f44',
+                    noise: '#888', signal: '#4da6ff', sstv: '#4c4'
+                };
+                statusEl.style.color = colors[signalQuality.status] || '#888';
+            }
+            
+            // Draw spectrum line (simplified - in real implementation would use FFT data)
+            for (let x = 0; x < width; x++) {
+                const freq = 1100 + (x / width) * 1300;
+                let value = Math.random() * 0.3;
+                
+                // Boost at key frequencies if signal present
+                if (signalQuality?.levels) {
+                    if (Math.abs(freq - 1200) < 50) value += signalQuality.levels.sync * 0.7;
+                    if (Math.abs(freq - 1500) < 30) value += signalQuality.levels.black * 0.5;
+                    if (Math.abs(freq - 1900) < 40) value += signalQuality.levels.vis * 0.6;
+                    if (Math.abs(freq - 2300) < 30) value += signalQuality.levels.white * 0.5;
+                }
+                
+                value = Math.min(1, value);
+                const color = getColormapColor(value, colormap);
+                ctx.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`;
+                ctx.fillRect(x, 0, 1, 1);
+            }
+        }, 50);
+    }
+
+    /**
+     * Start preview updates in expanded view (for live decode)
+     */
+    function startExpandedPreviewUpdates() {
+        if (!sstvExpandedCanvas || sstvExpandedType !== 'preview') return;
+        
+        sstvExpandedUpdateInterval = setInterval(() => {
+            if (!sstvExpandedCanvas) {
+                clearInterval(sstvExpandedUpdateInterval);
+                return;
+            }
+            
+            const originalCanvas = document.getElementById('sstv-rx-canvas');
+            if (originalCanvas && originalCanvas.width > 0) {
+                // Check if dimensions changed
+                if (sstvExpandedCanvas.width !== originalCanvas.width ||
+                    sstvExpandedCanvas.height !== originalCanvas.height) {
+                    sstvExpandedCanvas.width = originalCanvas.width;
+                    sstvExpandedCanvas.height = originalCanvas.height;
+                }
+                
+                // Copy latest image
+                const ctx = sstvExpandedCanvas.getContext('2d');
+                ctx.drawImage(originalCanvas, 0, 0);
+            }
+        }, 100);
+    }
+
+    /**
+     * Get color from colormap
+     */
+    function getColormapColor(value, colormap) {
+        const t = Math.max(0, Math.min(1, value));
+        let r, g, b;
+        
+        if (colormap === 'viridis') {
+            r = Math.round(255 * Math.max(0, Math.min(1, 0.267 + 0.003*t + 2.79*t*t - 3.55*t*t*t + 1.5*t*t*t*t)));
+            g = Math.round(255 * Math.max(0, Math.min(1, 0.004 + 1.42*t - 1.12*t*t + 0.62*t*t*t)));
+            b = Math.round(255 * Math.max(0, Math.min(1, 0.329 + 1.42*t - 2.32*t*t + 1.56*t*t*t)));
+        } else if (colormap === 'plasma') {
+            r = Math.round(255 * Math.max(0, Math.min(1, 0.05 + 2.86*t - 2.13*t*t)));
+            g = Math.round(255 * Math.max(0, Math.min(1, 0.02 + 0.74*t + 0.27*t*t)));
+            b = Math.round(255 * Math.max(0, Math.min(1, 0.53 + 0.87*t - 1.64*t*t + 0.74*t*t*t)));
+        } else if (colormap === 'thermal') {
+            if (t < 0.33) { r = 0; g = 0; b = Math.round(255*(t/0.33)); }
+            else if (t < 0.66) { const u = (t-0.33)/0.33; r = Math.round(255*u); g = 0; b = Math.round(255*(1-u)); }
+            else { const u = (t-0.66)/0.34; r = 255; g = Math.round(255*u); b = Math.round(255*u*0.5); }
+        } else {
+            r = g = b = Math.round(t * 255);
+        }
+        
+        return [r, g, b];
+    }
+
+    // ==========================================
+    // SSTV ANNOTATION FUNCTIONS
+    // ==========================================
+
+    /**
+     * Initialize annotation canvas to match base canvas
+     */
+    function initAnnotationCanvas() {
+        const baseCanvas = document.getElementById('sstv-tx-canvas');
+        const annotationCanvas = document.getElementById('sstv-annotation-canvas');
+        const toolbar = document.getElementById('sstv-annotation-toolbar');
+        
+        if (!baseCanvas || !annotationCanvas) return;
+        
+        // Match dimensions
+        annotationCanvas.width = baseCanvas.width;
+        annotationCanvas.height = baseCanvas.height;
+        annotationCanvas.style.display = baseCanvas.style.display;
+        
+        // Clear annotation canvas
+        const ctx = annotationCanvas.getContext('2d');
+        ctx.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
+        
+        // Show toolbar if image is loaded
+        if (toolbar && baseCanvas.style.display !== 'none') {
+            toolbar.style.display = 'block';
+        }
+        
+        // Reset history
+        sstvAnnotationHistory = [];
+        
+        // Attach drawing handlers
+        attachAnnotationHandlers(annotationCanvas);
+    }
+
+    /**
+     * Attach mouse/touch handlers for drawing
+     */
+    function attachAnnotationHandlers(canvas) {
+        if (!canvas) return;
+        
+        const ctx = canvas.getContext('2d');
+        
+        // Get coordinates relative to canvas
+        function getCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            
+            let clientX, clientY;
+            if (e.touches && e.touches.length > 0) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+            
+            return {
+                x: (clientX - rect.left) * scaleX,
+                y: (clientY - rect.top) * scaleY
+            };
+        }
+        
+        // Save current state for undo
+        function saveState() {
+            sstvAnnotationHistory.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+            // Limit history size
+            if (sstvAnnotationHistory.length > 20) {
+                sstvAnnotationHistory.shift();
+            }
+        }
+        
+        // Start drawing
+        function startDraw(e) {
+            e.preventDefault();
+            const coords = getCoords(e);
+            sstvIsDrawing = true;
+            sstvDrawStart = coords;
+            sstvLastPoint = coords;
+            
+            // Save state before drawing (for undo)
+            saveState();
+            
+            // For text tool, place text immediately
+            if (sstvAnnotationTool === 'text') {
+                const textInput = document.getElementById('sstv-annotation-text');
+                const text = textInput?.value || 'Text';
+                if (text) {
+                    ctx.font = `bold ${sstvAnnotationWidth * 4}px sans-serif`;
+                    ctx.fillStyle = sstvAnnotationColor;
+                    ctx.fillText(text, coords.x, coords.y);
+                }
+                sstvIsDrawing = false;
+            }
+            
+            // For pen/eraser, start path
+            if (sstvAnnotationTool === 'pen' || sstvAnnotationTool === 'eraser') {
+                ctx.beginPath();
+                ctx.moveTo(coords.x, coords.y);
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.lineWidth = sstvAnnotationTool === 'eraser' ? sstvAnnotationWidth * 3 : sstvAnnotationWidth;
+                ctx.strokeStyle = sstvAnnotationTool === 'eraser' ? 'rgba(0,0,0,1)' : sstvAnnotationColor;
+                
+                if (sstvAnnotationTool === 'eraser') {
+                    ctx.globalCompositeOperation = 'destination-out';
+                } else {
+                    ctx.globalCompositeOperation = 'source-over';
+                }
+            }
+        }
+        
+        // Continue drawing
+        function draw(e) {
+            if (!sstvIsDrawing) return;
+            e.preventDefault();
+            
+            const coords = getCoords(e);
+            
+            if (sstvAnnotationTool === 'pen' || sstvAnnotationTool === 'eraser') {
+                ctx.lineTo(coords.x, coords.y);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(coords.x, coords.y);
+            }
+            
+            // For shapes, show preview (redraw from saved state)
+            if (['arrow', 'circle', 'rect'].includes(sstvAnnotationTool)) {
+                // Restore to pre-draw state
+                if (sstvAnnotationHistory.length > 0) {
+                    ctx.putImageData(sstvAnnotationHistory[sstvAnnotationHistory.length - 1], 0, 0);
+                }
+                
+                ctx.strokeStyle = sstvAnnotationColor;
+                ctx.fillStyle = sstvAnnotationColor;
+                ctx.lineWidth = sstvAnnotationWidth;
+                ctx.lineCap = 'round';
+                ctx.globalCompositeOperation = 'source-over';
+                
+                drawShape(ctx, sstvAnnotationTool, sstvDrawStart, coords);
+            }
+            
+            sstvLastPoint = coords;
+        }
+        
+        // End drawing
+        function endDraw(e) {
+            if (!sstvIsDrawing) return;
+            
+            const coords = e ? getCoords(e) : sstvLastPoint;
+            
+            // Finalize shapes
+            if (['arrow', 'circle', 'rect'].includes(sstvAnnotationTool)) {
+                // Already drawn in preview, state is saved
+            }
+            
+            sstvIsDrawing = false;
+            ctx.globalCompositeOperation = 'source-over';
+        }
+        
+        // Remove existing handlers
+        canvas.onmousedown = null;
+        canvas.onmousemove = null;
+        canvas.onmouseup = null;
+        canvas.onmouseleave = null;
+        canvas.ontouchstart = null;
+        canvas.ontouchmove = null;
+        canvas.ontouchend = null;
+        
+        // Add handlers
+        canvas.onmousedown = startDraw;
+        canvas.onmousemove = draw;
+        canvas.onmouseup = endDraw;
+        canvas.onmouseleave = endDraw;
+        
+        canvas.ontouchstart = startDraw;
+        canvas.ontouchmove = draw;
+        canvas.ontouchend = endDraw;
+    }
+
+    /**
+     * Draw a shape on the canvas
+     */
+    function drawShape(ctx, tool, start, end) {
+        ctx.beginPath();
+        
+        if (tool === 'arrow') {
+            // Line
+            ctx.moveTo(start.x, start.y);
+            ctx.lineTo(end.x, end.y);
+            ctx.stroke();
+            
+            // Arrowhead
+            const angle = Math.atan2(end.y - start.y, end.x - start.x);
+            const headLen = sstvAnnotationWidth * 4;
+            
+            ctx.beginPath();
+            ctx.moveTo(end.x, end.y);
+            ctx.lineTo(
+                end.x - headLen * Math.cos(angle - Math.PI / 6),
+                end.y - headLen * Math.sin(angle - Math.PI / 6)
+            );
+            ctx.moveTo(end.x, end.y);
+            ctx.lineTo(
+                end.x - headLen * Math.cos(angle + Math.PI / 6),
+                end.y - headLen * Math.sin(angle + Math.PI / 6)
+            );
+            ctx.stroke();
+            
+        } else if (tool === 'circle') {
+            const radiusX = Math.abs(end.x - start.x) / 2;
+            const radiusY = Math.abs(end.y - start.y) / 2;
+            const centerX = (start.x + end.x) / 2;
+            const centerY = (start.y + end.y) / 2;
+            
+            ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            
+        } else if (tool === 'rect') {
+            const width = end.x - start.x;
+            const height = end.y - start.y;
+            ctx.strokeRect(start.x, start.y, width, height);
+        }
+    }
+
+    /**
+     * Undo last annotation
+     */
+    function undoAnnotation() {
+        const canvas = document.getElementById('sstv-annotation-canvas');
+        if (!canvas || sstvAnnotationHistory.length === 0) return;
+        
+        const ctx = canvas.getContext('2d');
+        
+        // Pop current state and restore previous
+        sstvAnnotationHistory.pop();
+        
+        if (sstvAnnotationHistory.length > 0) {
+            ctx.putImageData(sstvAnnotationHistory[sstvAnnotationHistory.length - 1], 0, 0);
+        } else {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+    }
+
+    /**
+     * Clear all annotations
+     */
+    function clearAnnotations() {
+        const canvas = document.getElementById('sstv-annotation-canvas');
+        if (!canvas) return;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        sstvAnnotationHistory = [];
+    }
+
+    /**
+     * Flatten annotation layer onto base canvas
+     * Called before transmit to merge annotations
+     */
+    function flattenAnnotations() {
+        const baseCanvas = document.getElementById('sstv-tx-canvas');
+        const annotationCanvas = document.getElementById('sstv-annotation-canvas');
+        
+        if (!baseCanvas || !annotationCanvas) return false;
+        
+        const baseCtx = baseCanvas.getContext('2d');
+        
+        // Draw annotation layer on top of base
+        baseCtx.drawImage(annotationCanvas, 0, 0);
+        
+        // Clear annotation layer after flattening
+        const annotationCtx = annotationCanvas.getContext('2d');
+        annotationCtx.clearRect(0, 0, annotationCanvas.width, annotationCanvas.height);
+        sstvAnnotationHistory = [];
+        
+        console.log('[SSTV] Annotations flattened to base canvas');
+        return true;
+    }
+
+    /**
+     * Check if there are annotations to flatten
+     */
+    function hasAnnotations() {
+        const canvas = document.getElementById('sstv-annotation-canvas');
+        if (!canvas) return false;
+        
+        const ctx = canvas.getContext('2d');
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        
+        // Check if any pixel has alpha > 0
+        for (let i = 3; i < imageData.data.length; i += 4) {
+            if (imageData.data[i] > 0) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Open received image in annotation editor
+     */
+    function openImageForAnnotation(imageData) {
+        if (!imageData) return;
+        
+        // Switch to transmit tab
+        sstvCurrentTab = 'transmit';
+        document.getElementById('sstv-content').innerHTML = renderSSTVTabContent();
+        attachSSTVHandlers();
+        
+        // Load image to TX canvas
+        const canvas = document.getElementById('sstv-tx-canvas');
+        const placeholder = document.getElementById('sstv-tx-placeholder');
+        
+        if (canvas) {
+            canvas.width = imageData.width;
+            canvas.height = imageData.height;
+            const ctx = canvas.getContext('2d');
+            ctx.putImageData(imageData, 0, 0);
+            canvas.style.display = 'block';
+            if (placeholder) placeholder.style.display = 'none';
+            
+            // Initialize annotation layer
+            setTimeout(() => initAnnotationCanvas(), 50);
+        }
+    }
+
     function attachSSTVHandlers() {
         // Receive handlers
         const startRxBtn = container.querySelector('#sstv-start-rx');
@@ -13325,6 +14067,22 @@ ${text}
             };
         }
 
+        // Expand waterfall button
+        const waterfallExpandBtn = container.querySelector('#sstv-waterfall-expand');
+        if (waterfallExpandBtn) {
+            waterfallExpandBtn.onclick = () => {
+                openSSTVExpandedView('waterfall');
+            };
+        }
+
+        // Expand preview button
+        const previewExpandBtn = container.querySelector('#sstv-preview-expand');
+        if (previewExpandBtn) {
+            previewExpandBtn.onclick = () => {
+                openSSTVExpandedView('preview');
+            };
+        }
+
         // Start waterfall update loop if receiving
         if (typeof SSTVModule !== 'undefined' && SSTVModule.isReceiving()) {
             startWaterfallUpdateLoop();
@@ -13374,12 +14132,85 @@ ${text}
             transmitBtn.onclick = async () => {
                 const canvas = document.getElementById('sstv-tx-canvas');
                 if (canvas && canvas.style.display !== 'none') {
+                    // Auto-flatten annotations before transmit
+                    if (hasAnnotations()) {
+                        flattenAnnotations();
+                        if (typeof ModalsModule !== 'undefined') {
+                            ModalsModule.showToast('Annotations merged', 'info');
+                        }
+                    }
                     await SSTVModule.transmit(canvas, sstvTransmitMode);
                     renderSSTV();
                 } else {
                     if (typeof ModalsModule !== 'undefined') {
                         ModalsModule.showToast('Select an image first', 'error');
                     }
+                }
+            };
+        }
+
+        // Annotation toolbar handlers
+        const toolButtons = container.querySelectorAll('.sstv-tool-btn');
+        toolButtons.forEach(btn => {
+            btn.onclick = () => {
+                const tool = btn.dataset.tool;
+                sstvAnnotationTool = tool;
+                
+                // Update active state
+                toolButtons.forEach(b => b.classList.remove('sstv-tool-active'));
+                btn.classList.add('sstv-tool-active');
+                
+                // Show/hide text input
+                const textContainer = document.getElementById('sstv-text-input-container');
+                if (textContainer) {
+                    textContainer.style.display = tool === 'text' ? 'block' : 'none';
+                }
+                
+                // Update cursor
+                const annotationCanvas = document.getElementById('sstv-annotation-canvas');
+                if (annotationCanvas) {
+                    annotationCanvas.style.cursor = tool === 'eraser' ? 'cell' : 'crosshair';
+                }
+            };
+        });
+
+        // Color picker
+        const colorPicker = container.querySelector('#sstv-annotation-color');
+        if (colorPicker) {
+            colorPicker.oninput = () => {
+                sstvAnnotationColor = colorPicker.value;
+            };
+        }
+
+        // Line width
+        const widthSelect = container.querySelector('#sstv-annotation-width');
+        if (widthSelect) {
+            widthSelect.onchange = () => {
+                sstvAnnotationWidth = parseInt(widthSelect.value);
+            };
+        }
+
+        // Undo button
+        const undoBtn = container.querySelector('#sstv-annotation-undo');
+        if (undoBtn) {
+            undoBtn.onclick = undoAnnotation;
+        }
+
+        // Clear button
+        const clearBtn = container.querySelector('#sstv-annotation-clear');
+        if (clearBtn) {
+            clearBtn.onclick = () => {
+                if (typeof ModalsModule !== 'undefined') {
+                    ModalsModule.confirm({
+                        title: 'Clear Annotations',
+                        message: 'Remove all annotations from the image?',
+                        confirmText: 'Clear',
+                        onConfirm: () => {
+                            clearAnnotations();
+                        }
+                    });
+                } else {
+                    clearAnnotations();
                 }
             };
         }
@@ -13611,6 +14442,9 @@ ${text}
             
             canvas.style.display = 'block';
             placeholder.style.display = 'none';
+            
+            // Initialize annotation canvas
+            setTimeout(() => initAnnotationCanvas(), 50);
         }
     }
 
@@ -13635,8 +14469,21 @@ ${text}
                 `,
                 buttons: [
                     {
-                        label: 'Export PNG',
+                        label: '✏️ Annotate & TX',
                         class: 'btn--primary',
+                        onClick: () => {
+                            // Clone image data to avoid modifying original
+                            const clonedData = new ImageData(
+                                new Uint8ClampedArray(img.imageData.data),
+                                img.imageData.width,
+                                img.imageData.height
+                            );
+                            openImageForAnnotation(clonedData);
+                        }
+                    },
+                    {
+                        label: 'Export PNG',
+                        class: 'btn--secondary',
                         onClick: () => {
                             SSTVModule.exportImage(id);
                         }
