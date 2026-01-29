@@ -260,6 +260,32 @@ const App = (function() {
                 });
             }
             
+            // Initialize SARSAT module (PLB/ELT beacon receiver)
+            if (typeof SarsatModule !== 'undefined') {
+                SarsatModule.init();
+                console.log('SARSAT module initialized');
+                
+                // Setup event listeners for SARSAT events
+                Events.on('sarsat:connected', () => {
+                    if (State.get('activePanel') === 'sarsat') {
+                        PanelsModule.render();
+                    }
+                });
+                
+                Events.on('sarsat:disconnected', () => {
+                    if (State.get('activePanel') === 'sarsat') {
+                        PanelsModule.render();
+                    }
+                });
+                
+                Events.on('sarsat:beacon_received', (data) => {
+                    MapModule.render();
+                    if (State.get('activePanel') === 'sarsat') {
+                        PanelsModule.render();
+                    }
+                });
+            }
+            
             // Initialize Global Search module
             if (typeof SearchModule !== 'undefined') {
                 SearchModule.init();
