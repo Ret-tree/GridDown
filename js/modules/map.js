@@ -804,6 +804,7 @@ const MapModule = (function() {
         renderAPRSStations(width, height);
         renderRadiaCodeOverlay(width, height);
         renderRFSentinelOverlay(width, height);
+        renderSarsatOverlay(width, height);
         renderNavigationBreadcrumbs(width, height);
         renderGPSPosition(width, height);
         renderCrosshair(width, height);
@@ -1912,6 +1913,19 @@ const MapModule = (function() {
         
         // Use the module's built-in render function
         RFSentinelModule.renderOnMap(ctx, width, height, latLonToPixel, mapState.zoom);
+    }
+    
+    function renderSarsatOverlay(width, height) {
+        // Render SARSAT PLB/ELT/EPIRB beacons on map
+        if (typeof SarsatModule === 'undefined') return;
+        
+        const beacons = SarsatModule.getBeacons();
+        if (!beacons || beacons.length === 0) return;
+        
+        // Use module's built-in render function if available
+        if (typeof SarsatModule.renderOnMap === 'function') {
+            SarsatModule.renderOnMap(ctx, width, height, latLonToPixel);
+        }
     }
 
     function renderCrosshair(width, height) {
