@@ -1,21 +1,204 @@
-MIT License
+# GridDown Dual License
 
-Copyright (c) 2025 BlackDot Technology
+**Version 1.0 | January 2025**
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+GridDown is dual-licensed software. You may choose to use it under either:
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. **Community License (GNU GPL v3)** - Free for personal, educational, and non-commercial use
+2. **Commercial License** - Required for business use, hardware bundling, and commercial distribution
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+---
+
+## Quick Reference
+
+| Your Use Case | License Required | Cost |
+|---------------|------------------|------|
+| Personal use on your own devices | Community (GPL v3) | Free |
+| Educational/academic use | Community (GPL v3) | Free |
+| Non-profit organization use | Community (GPL v3) | Free |
+| HAM radio / emergency preparedness | Community (GPL v3) | Free |
+| Selling devices with GridDown pre-installed | **Commercial** | Paid |
+| Enterprise/business deployment | **Commercial** | Paid |
+| Bundling with hardware products | **Commercial** | Paid |
+| Government/military deployment | **Commercial** | Paid |
+| White-label/OEM distribution | **Commercial** | Paid |
+
+---
+
+## Community License (GNU GPL v3)
+
+### You CAN:
+
+- ✅ Use GridDown for personal, non-commercial purposes
+- ✅ Use GridDown for educational and academic research
+- ✅ Study and modify the source code
+- ✅ Share copies with others (under GPL v3)
+- ✅ Share your modifications (under GPL v3)
+- ✅ Use for non-profit organizational purposes
+
+### You CANNOT:
+
+- ❌ Sell devices pre-loaded with GridDown
+- ❌ Bundle GridDown with hardware for commercial sale
+- ❌ Use GridDown as part of a paid service
+- ❌ Deploy in a commercial/business environment
+- ❌ Remove or obscure BlackDot Technology attribution
+- ❌ Distribute modifications under a different license
+
+### Conditions:
+
+1. **Copyleft**: If you distribute modified versions, you must also distribute them under GPL v3 with complete source code.
+
+2. **Attribution**: You must retain all copyright notices and attribution to BlackDot Technology.
+
+3. **No Warranty**: The software is provided "as is" without warranty of any kind.
+
+### Full GPL v3 Text
+
+The complete GNU General Public License v3 is available at:
+https://www.gnu.org/licenses/gpl-3.0.en.html
+
+---
+
+## Commercial License
+
+### When Required
+
+A Commercial License is required for any use that is primarily intended for or directed toward commercial advantage or monetary compensation, including but not limited to:
+
+- Selling tablets, phones, or devices with GridDown pre-installed
+- Bundling GridDown with SDR hardware, survival kits, or other products
+- Deploying GridDown across a business or enterprise
+- Offering GridDown as part of a paid service or subscription
+- Government, defense, or military deployment
+- White-label or OEM distribution under your own brand
+
+### License Tiers
+
+| Tier | Description | Starting Price |
+|------|-------------|----------------|
+| Startup | Small business (<$1M revenue), up to 100 units/year | $2,500/year |
+| Business | Mid-size business, up to 1,000 units/year | $10,000/year |
+| Enterprise | Large deployments, unlimited units | $25,000/year |
+| OEM/White-Label | Custom branding, redistribution rights | Contact Sales |
+| Government | Federal, state, local government use | Contact Sales |
+
+*Prices are indicative. Contact licensing@blackdot.tech for a custom quote.*
+
+### Commercial License Benefits
+
+- Rights to distribute GridDown with hardware products
+- No copyleft requirements on your proprietary additions
+- Priority technical support
+- Early access to new features
+- Custom feature development (Enterprise+)
+- Indemnification against IP claims
+- Multi-year discount options
+
+### How to Obtain
+
+1. Email licensing@blackdot.tech
+2. Describe your use case and expected volume
+3. Receive a custom quote
+4. Execute agreement and submit payment
+5. Receive license certificate
+
+---
+
+## Examples
+
+### ✅ Permitted Under Community License (Free)
+
+- Individual prepper using GridDown on personal tablet
+- HAM radio club using for emergency exercises
+- University research project on navigation systems
+- SAR volunteer using on personal device
+- Blogger reviewing GridDown features
+- Developer contributing bug fixes
+
+### ❌ Requires Commercial License
+
+- Company selling tablets pre-loaded with GridDown
+- Emergency services deploying to organizational fleet
+- Selling "GridDown Survival Kits" with hardware
+- SaaS company offering GridDown as hosted service
+- Defense contractor deploying to military units
+- Consultant installing GridDown for paying clients
+
+---
+
+## Intellectual Property
+
+### Ownership
+
+GridDown, including all source code, documentation, and branding, is the intellectual property of BlackDot Technology. This license does not transfer ownership.
+
+### Trademarks
+
+"GridDown" and "BlackDot Technology" are trademarks of BlackDot Technology. Use requires written permission except for attribution.
+
+### Contributions
+
+Contributors retain copyright to their contributions but grant BlackDot Technology a perpetual, worldwide, royalty-free license to use contributions under both license models.
+
+---
+
+## Warranty Disclaimer
+
+**COMMUNITY LICENSE**: THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+
+**COMMERCIAL LICENSE**: Includes limited warranty per the commercial license agreement.
+
+### Safety Disclaimer
+
+GridDown is a supplementary navigation and planning tool. It is NOT a substitute for professional emergency services, proper training, or official search and rescue systems. Users are responsible for their own safety.
+
+---
+
+## Compliance
+
+### Violation Consequences
+
+- Immediate termination of license rights
+- Requirement to cease use and distribution
+- Legal action for copyright infringement
+- Public disclosure of violation
+
+### Reporting Violations
+
+Report potential violations to legal@blackdot.tech (anonymous reports accepted).
+
+---
+
+## Contact
+
+**Licensing Inquiries:**
+- Email: licensing@blackdot.tech
+- Web: https://blackdot.tech/licensing
+
+**Legal/Compliance:**
+- Email: legal@blackdot.tech
+
+---
+
+## FAQ
+
+**Q: I'm an individual prepper. Do I need to pay?**
+A: No. Personal use is free under the Community License.
+
+**Q: I want to sell hardware with GridDown. What do I need?**
+A: A Commercial License. Contact licensing@blackdot.tech.
+
+**Q: Can I modify GridDown and keep changes private?**
+A: Under GPL v3, distributed modifications must be open source. Under Commercial License, you may keep modifications proprietary.
+
+**Q: I'm a SAR volunteer. Which license?**
+A: Personal device use is free. Organizational deployment requires Commercial License.
+
+**Q: Can I fork GridDown?**
+A: Yes, but forks must be GPL v3 licensed. You cannot sell a fork without a Commercial License.
+
+---
+
+**GridDown Dual License v1.0**
+**© 2025 BlackDot Technology. All Rights Reserved.**
