@@ -1302,7 +1302,18 @@ const ModalsModule = (function() {
         const toast = document.createElement('div');
         toast.className = `toast toast--${type}`;
         toast.innerHTML = `<span class="toast__icon">${Icons.get(type === 'success' ? 'check' : type === 'error' ? 'alert' : 'info')}</span><span class="toast__message">${message}</span>`;
+        toast.style.cursor = 'pointer';
         toastContainer.appendChild(toast);
+        
+        // Click to dismiss
+        toast.onclick = () => {
+            if (toastTimeout) {
+                clearTimeout(toastTimeout);
+                toastTimeout = null;
+            }
+            toast.classList.add('toast--fading');
+            setTimeout(() => toast.remove(), 200);
+        };
         
         // Start fade-out animation before removal
         toastTimeout = setTimeout(() => {

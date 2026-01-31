@@ -596,11 +596,23 @@ const WeatherModule = (function() {
      * Find best travel windows in the forecast
      */
     function findBestTravelWindows(weatherData, requiredHours) {
-        if (!weatherData.length || !weatherData[0].weather?.hourly) {
+        // Validate inputs
+        if (!weatherData || !weatherData.length) {
+            return [];
+        }
+        
+        const hourly = weatherData[0]?.weather?.hourly;
+        
+        // Ensure hourly data exists and has enough elements
+        if (!hourly || !Array.isArray(hourly) || hourly.length < requiredHours) {
+            return [];
+        }
+        
+        // Validate that hourly entries have required properties
+        if (!hourly[0]?.time) {
             return [];
         }
 
-        const hourly = weatherData[0].weather.hourly;
         const windows = [];
         
         // Score each potential starting hour
@@ -610,12 +622,13 @@ const WeatherModule = (function() {
             
             for (let h = start; h < start + requiredHours && h < hourly.length; h++) {
                 const hour = hourly[h];
+                if (!hour) continue;
                 
                 // Penalize based on conditions
-                if (hour.weather.severity >= 4) {
+                if (hour.weather?.severity >= 4) {
                     score -= 50;
                     issues.push('severe weather');
-                } else if (hour.weather.severity >= 2) {
+                } else if (hour.weather?.severity >= 2) {
                     score -= 20;
                 }
                 
@@ -644,16 +657,30 @@ const WeatherModule = (function() {
                 }
             }
             
-            const startTime = new Date(hourly[start].time);
-            const endTime = new Date(hourly[Math.min(start + requiredHours, hourly.length - 1)].time);
+            // Safely get time values
+            const startEntry = hourly[start];
+            const endIndex = Math.min(start + requiredHours, hourly.length - 1);
+            const endEntry = hourly[endIndex];
+            
+            if (!startEntry?.time || !endEntry?.time) {
+                continue;
+            }
+            
+            const startTime = new Date(startEntry.time);
+            const endTime = new Date(endEntry.time);
+            
+            // Calculate average temperature safely
+            const tempSlice = hourly.slice(start, start + requiredHours).filter(h => h && typeof h.temperature === 'number');
+            const avgTemp = tempSlice.length > 0 
+                ? tempSlice.reduce((sum, h) => sum + h.temperature, 0) / tempSlice.length 
+                : null;
             
             windows.push({
                 start: startTime,
                 end: endTime,
                 score: Math.max(0, score),
                 issues: [...new Set(issues)],
-                avgTemp: hourly.slice(start, start + requiredHours)
-                    .reduce((sum, h) => sum + h.temperature, 0) / requiredHours
+                avgTemp
             });
         }
 

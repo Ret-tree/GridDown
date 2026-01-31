@@ -32,8 +32,9 @@ const SatWeatherModule = (function() {
     const OFFLINE_CACHE_DURATION = 24 * 60 * 60 * 1000;  // 24 hours for offline
     const MAX_CACHED_FRAMES = 24;  // Animation frames to cache
     
-    // Available satellite products - all using IEM tile services
-    // IEM services are reliable and free for use
+    // Available satellite products
+    // Using NASA GIBS (public domain) + NEXRAD from IEM (public domain)
+    // ALL PRODUCTS ARE COMMERCIAL-SAFE (US Government data)
     const PRODUCTS = {
         // === NEXRAD Radar (via Iowa Environmental Mesonet) ===
         // Free US Government data - no license restrictions
@@ -51,79 +52,60 @@ const SatWeatherModule = (function() {
             attribution: '© Iowa Environmental Mesonet, NOAA NWS'
         },
         
-        // === MRMS Precipitation (via IEM) ===
-        mrms_precip: {
-            id: 'mrms_precip',
-            name: '1-Hour Precip',
-            description: 'Multi-Radar Multi-Sensor 1-hour precipitation',
-            source: 'iem',
-            format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/q2-n1p-900913/{z}/{x}/{y}.png',
-            maxZoom: 8,
-            category: 'precipitation',
-            updateInterval: 5,
-            coverage: 'conus',
-            attribution: '© Iowa Environmental Mesonet, NOAA MRMS'
-        },
-        
-        // === NWS Warnings (via IEM) ===
-        nws_warnings: {
-            id: 'nws_warnings',
-            name: 'NWS Warnings',
-            description: 'Active watches, warnings, advisories',
-            source: 'iem',
-            format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/wwa-900913/{z}/{x}/{y}.png',
-            maxZoom: 10,
-            category: 'alerts',
-            updateInterval: 2,
-            coverage: 'conus',
-            attribution: '© Iowa Environmental Mesonet, NOAA NWS'
-        },
-        
-        // === GOES West Satellite (via IEM - still operational) ===
-        goes_ir: {
-            id: 'goes_west_ir',
-            name: 'GOES Infrared',
-            description: 'GOES West infrared (day/night)',
-            source: 'iem',
-            format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-west-ir-900913/{z}/{x}/{y}.png',
-            maxZoom: 8,
-            category: 'infrared',
-            updateInterval: 15,
-            coverage: 'west_conus',
-            attribution: '© Iowa Environmental Mesonet, NOAA GOES'
-        },
-        
-        goes_wv: {
-            id: 'goes_west_wv',
-            name: 'GOES Water Vapor',
-            description: 'GOES West water vapor channel',
-            source: 'iem',
-            format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-west-wv-900913/{z}/{x}/{y}.png',
-            maxZoom: 8,
-            category: 'moisture',
-            updateInterval: 15,
-            coverage: 'west_conus',
-            attribution: '© Iowa Environmental Mesonet, NOAA GOES'
-        },
-        
-        goes_vis: {
-            id: 'goes_west_vis',
-            name: 'GOES Visible',
-            description: 'GOES West visible (daytime only)',
-            source: 'iem',
-            format: 'png',
-            urlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/goes-west-vis-900913/{z}/{x}/{y}.png',
-            maxZoom: 8,
+        // === NASA GIBS VIIRS True Color (daily, global) ===
+        // Public domain - US Government work
+        // Uses yesterday's date for complete global coverage
+        viirs_true_color: {
+            id: 'VIIRS_SNPP_CorrectedReflectance_TrueColor',
+            name: 'Satellite (Daily)',
+            description: 'VIIRS true color satellite - global daily',
+            source: 'gibs',
+            format: 'jpg',
+            tileMatrixSet: 'GoogleMapsCompatible_Level9',
+            maxZoom: 9,
             category: 'visible',
-            updateInterval: 15,
-            coverage: 'west_conus',
-            attribution: '© Iowa Environmental Mesonet, NOAA GOES'
+            updateInterval: 1440,  // Daily
+            coverage: 'global',
+            attribution: 'NASA GIBS / NOAA VIIRS',
+            timeFormat: 'date'  // YYYY-MM-DD only
+        },
+        
+        // === NASA GIBS MODIS Terra True Color (daily, global) ===
+        // Public domain - US Government work
+        modis_terra_true_color: {
+            id: 'MODIS_Terra_CorrectedReflectance_TrueColor',
+            name: 'Terra MODIS',
+            description: 'MODIS Terra true color - global daily',
+            source: 'gibs',
+            format: 'jpg',
+            tileMatrixSet: 'GoogleMapsCompatible_Level9',
+            maxZoom: 9,
+            category: 'visible',
+            updateInterval: 1440,  // Daily
+            coverage: 'global',
+            attribution: 'NASA GIBS / Terra MODIS',
+            timeFormat: 'date'
+        },
+        
+        // === NASA GIBS MODIS Aqua True Color (daily, global) ===
+        // Public domain - US Government work
+        modis_aqua_true_color: {
+            id: 'MODIS_Aqua_CorrectedReflectance_TrueColor',
+            name: 'Aqua MODIS',
+            description: 'MODIS Aqua true color - global daily',
+            source: 'gibs',
+            format: 'jpg',
+            tileMatrixSet: 'GoogleMapsCompatible_Level9',
+            maxZoom: 9,
+            category: 'visible',
+            updateInterval: 1440,  // Daily
+            coverage: 'global',
+            attribution: 'NASA GIBS / Aqua MODIS',
+            timeFormat: 'date'
         }
     };
+    
+    // No time-varying state needed - daily products use simple date
     
     // Product categories for UI organization
     const CATEGORIES = {
@@ -213,16 +195,19 @@ const SatWeatherModule = (function() {
     
     /**
      * Get WMTS tile URL for a GIBS product
+     * GIBS uses YYYY-MM-DD date format in the REST URL
+     * For daily products, we use yesterday's date for complete global coverage
      */
-    function getGibsTileUrl(productKey, date = null) {
+    function getGibsTileUrl(productKey) {
         const product = PRODUCTS[productKey];
         if (!product || product.source !== 'gibs') return null;
         
-        // Use today's date if not specified
-        const dateStr = date || getTodayDateString();
+        // Use yesterday's date for complete global coverage
+        // (today's data may be incomplete depending on satellite passes)
+        const dateStr = getYesterdayDateString();
         
-        // WMTS REST pattern for GIBS
-        // {z}/{y}/{x} will be filled by the mapping library
+        // WMTS REST pattern for GIBS (using GoogleMapsCompatible projection)
+        // Format: {base}/{layer}/default/{date}/{tileMatrixSet}/{z}/{y}/{x}.{format}
         return `${GIBS_BASE}/${product.id}/default/${dateStr}/${product.tileMatrixSet}/{z}/{y}/{x}.${product.format}`;
     }
     
@@ -235,11 +220,12 @@ const SatWeatherModule = (function() {
     }
     
     /**
-     * Get date string for N hours ago
+     * Get yesterday's date in YYYY-MM-DD format (UTC)
+     * Used for daily products to ensure complete coverage
      */
-    function getDateStringHoursAgo(hours) {
-        const date = new Date(Date.now() - hours * 60 * 60 * 1000);
-        return date.toISOString().split('T')[0];
+    function getYesterdayDateString() {
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        return yesterday.toISOString().split('T')[0];
     }
     
     /**
@@ -261,9 +247,21 @@ const SatWeatherModule = (function() {
     }
     
     /**
+     * Get API key from storage
+     */
+    function getApiKey(keyName) {
+        try {
+            const keys = JSON.parse(localStorage.getItem('griddown_api_keys') || '{}');
+            return keys[keyName] || null;
+        } catch (e) {
+            return null;
+        }
+    }
+    
+    /**
      * Add satellite/weather layer to the map
      */
-    function addSatelliteLayer(productKey, opacity = 0.7) {
+    async function addSatelliteLayer(productKey, opacity = 0.7) {
         const product = PRODUCTS[productKey];
         if (!product) {
             console.error('Unknown satellite product:', productKey);
@@ -279,11 +277,8 @@ const SatWeatherModule = (function() {
             return false;
         }
         
-        // Determine attribution based on source
-        let attribution = 'NASA GIBS / NOAA';
-        if (product.source === 'iem') {
-            attribution = product.attribution || '© Iowa Environmental Mesonet, NOAA NWS';
-        }
+        // Use product attribution
+        const attribution = product.attribution || 'NASA GIBS / NOAA';
         
         // Create layer info for MapModule
         const layerInfo = {
@@ -304,7 +299,7 @@ const SatWeatherModule = (function() {
             activeProduct = productKey;
             saveSettings();
             notifySubscribers('layer:add', { product: productKey });
-            console.log('Added weather layer:', product.name);
+            console.log('Added weather layer:', product.name, 'URL:', tileUrl);
             return true;
         } else {
             console.warn('MapModule.addCustomTileLayer not available');

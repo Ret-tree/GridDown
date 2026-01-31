@@ -425,6 +425,7 @@ const PanelsModule = (function() {
             case 'weather': renderWeather(); break;
             case 'contingency': renderContingency(); break;
             case 'sunmoon': renderSunMoon(); break;
+            case 'celestial': renderCelestial(); break;
             case 'navigation': renderNavigation(); break;
             case 'coords': renderCoordinateConverter(); break;
             case 'comms': renderComms(); break;
@@ -1115,6 +1116,7 @@ const PanelsModule = (function() {
                                     <canvas id="elevation-canvas-${r.id}"></canvas>
                                 </div>
                                 <div id="elevation-stats-${r.id}"></div>
+                                <div id="hiking-time-${r.id}"></div>
                                 <div id="elevation-grades-${r.id}"></div>
                                 <div id="elevation-warnings-${r.id}"></div>
                             </div>
@@ -1417,6 +1419,67 @@ const PanelsModule = (function() {
                             </div>
                         </div>
                     `;
+                    
+                    // Render hiking time estimate
+                    const hikingTimeEl = document.getElementById(`hiking-time-${routeId}`);
+                    if (hikingTimeEl && typeof HikingModule !== 'undefined') {
+                        const hikingEstimate = HikingModule.estimateHikingTime(
+                            profile.totalDistance,
+                            profile.totalElevationGain,
+                            profile.totalElevationLoss
+                        );
+                        const daylight = HikingModule.getDaylightInfo();
+                        const turnaround = HikingModule.calculateTurnaround(
+                            profile.totalDistance / 2,  // One-way for out-and-back
+                            profile.totalElevationGain / 2,
+                            profile.totalElevationLoss / 2
+                        );
+                        
+                        hikingTimeEl.innerHTML = `
+                            <div class="section-label" style="margin-top:12px">🥾 Hiking Estimates</div>
+                            ${HikingModule.renderTimeEstimate(hikingEstimate)}
+                            <div style="margin-top:12px">
+                                ${HikingModule.renderDaylightWidget(daylight)}
+                            </div>
+                            ${profile.totalDistance < 20 ? `
+                                <div style="margin-top:12px">
+                                    ${HikingModule.renderTurnaroundWidget(turnaround)}
+                                </div>
+                            ` : ''}
+                            <div style="margin-top:12px">
+                                ${HikingModule.renderPaceSelector('pace-selector-' + routeId)}
+                            </div>
+                        `;
+                        
+                        // Attach pace selector handlers
+                        hikingTimeEl.querySelectorAll('[data-pace-preset]').forEach(paceBtn => {
+                            paceBtn.onclick = () => {
+                                const preset = paceBtn.dataset.pacePreset;
+                                HikingModule.setPacePreset(preset);
+                                // Re-render hiking estimates
+                                const newEstimate = HikingModule.estimateHikingTime(
+                                    profile.totalDistance,
+                                    profile.totalElevationGain,
+                                    profile.totalElevationLoss
+                                );
+                                const newTurnaround = HikingModule.calculateTurnaround(
+                                    profile.totalDistance / 2,
+                                    profile.totalElevationGain / 2,
+                                    profile.totalElevationLoss / 2
+                                );
+                                hikingTimeEl.querySelector('.hiking-estimate').outerHTML = HikingModule.renderTimeEstimate(newEstimate);
+                                const turnaroundWidget = hikingTimeEl.querySelector('.turnaround-widget');
+                                if (turnaroundWidget) {
+                                    turnaroundWidget.outerHTML = HikingModule.renderTurnaroundWidget(newTurnaround);
+                                }
+                                // Update button states
+                                hikingTimeEl.querySelectorAll('[data-pace-preset]').forEach(b => {
+                                    b.classList.toggle('btn--primary', b.dataset.pacePreset === preset);
+                                    b.classList.toggle('btn--secondary', b.dataset.pacePreset !== preset);
+                                });
+                            };
+                        });
+                    }
                     
                     // Render grade distribution
                     gradesEl.innerHTML = `<div class="section-label" style="margin-top:12px">Grade Distribution</div>`;
@@ -6454,9 +6517,17 @@ const PanelsModule = (function() {
     let weatherLoading = false;
     let weatherError = null;
     
+    // Air Quality state
+    let aqiData = null;
+    let aqiLoading = false;
+    let aqiError = null;
+    
     // Satellite/Radar imagery state
     let activeSatLayer = null;
     let satLayerOpacity = 0.7;
+    
+    // AQI map layer state
+    let aqiLayerActive = false;
 
     async function renderWeather() {
         // Check WeatherModule availability
@@ -6531,6 +6602,33 @@ const PanelsModule = (function() {
                             💨 Gusts up to ${Math.round(weatherData.current.windGusts)} mph
                         </div>
                     ` : ''}
+                </div>
+                
+                <!-- Air Quality Index -->
+                <div class="section-label" style="display:flex;align-items:center;justify-content:space-between">
+                    <span>Air Quality</span>
+                    <button class="btn btn--ghost" id="aqi-refresh" style="padding:2px 6px;font-size:10px" title="Refresh AQI data">
+                        ${Icons.get('locate')}
+                    </button>
+                </div>
+                <div id="aqi-container" style="margin-bottom:16px">
+                    ${aqiLoading ? `
+                        <div style="padding:16px;text-align:center;background:var(--color-bg-elevated);border-radius:10px">
+                            <div style="color:rgba(255,255,255,0.5);font-size:12px">Loading air quality data...</div>
+                        </div>
+                    ` : aqiData ? (
+                        aqiData.available ? 
+                            AirQualityModule.renderAQIBadge(aqiData) : 
+                            AirQualityModule.renderUnavailable(aqiData)
+                    ) : `
+                        <div style="padding:12px;background:var(--color-bg-elevated);border-radius:10px;text-align:center">
+                            <div style="font-size:12px;color:rgba(255,255,255,0.5)">
+                                ${typeof AirQualityModule !== 'undefined' ? 
+                                    'Click refresh to load AQI data' : 
+                                    'Air quality module not available'}
+                            </div>
+                        </div>
+                    `}
                 </div>
                 
                 <!-- 7-Day Forecast -->
@@ -6694,8 +6792,12 @@ const PanelsModule = (function() {
                     <!-- Weather Along Route -->
                     <div class="section-label">Weather Along Route</div>
                     <div style="display:flex;flex-direction:column;gap:8px">
-                        ${routeWeatherData.points.map(point => `
-                            <div style="padding:10px 12px;background:var(--color-bg-elevated);border-radius:8px;display:flex;align-items:center;gap:12px">
+                        ${routeWeatherData.points.map(point => {
+                            const hasAqi = point.aqi?.available;
+                            const aqiColor = hasAqi ? point.aqi.category.color : null;
+                            const aqiBg = hasAqi ? aqiColor + '22' : null;
+                            return `
+                            <div style="padding:10px 12px;background:var(--color-bg-elevated);border-radius:8px;display:flex;align-items:center;gap:12px${hasAqi && point.aqi.aqi > 100 ? `;border-left:3px solid ${aqiColor}` : ''}">
                                 <div style="font-size:24px">${point.weather?.current?.weather?.icon || '❓'}</div>
                                 <div style="flex:1">
                                     <div style="font-size:13px;font-weight:500">${point.name}</div>
@@ -6711,8 +6813,14 @@ const PanelsModule = (function() {
                                         ${point.weather?.current ? Math.round(point.weather.current.windSpeed) + ' mph' : ''}
                                     </div>
                                 </div>
+                                ${hasAqi ? `
+                                    <div style="padding:4px 8px;background:${aqiBg};border-radius:6px;text-align:center;min-width:50px">
+                                        <div style="font-size:12px;font-weight:600;color:${aqiColor}">${point.aqi.aqi}</div>
+                                        <div style="font-size:9px;color:rgba(255,255,255,0.5)">AQI</div>
+                                    </div>
+                                ` : ''}
                             </div>
-                        `).join('')}
+                        `}).join('')}
                     </div>
                 ` : ''}
             ` : `
@@ -6727,7 +6835,7 @@ const PanelsModule = (function() {
             ${waypoints.length > 0 ? `
                 <div class="section-label">Waypoint Weather</div>
                 <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px">
-                    Click a waypoint to view detailed weather
+                    Click a waypoint to view weather & air quality
                 </div>
                 <div style="display:flex;flex-direction:column;gap:8px">
                     ${waypoints.slice(0, 5).map(wp => {
@@ -6740,7 +6848,11 @@ const PanelsModule = (function() {
                                         <div class="card__title">${wp.name}</div>
                                         <div class="card__subtitle">Click to load weather</div>
                                     </div>
-                                    <span style="font-size:18px">🌤️</span>
+                                    <div class="wp-aqi-badge" style="display:none;padding:4px 8px;border-radius:6px;text-align:center;min-width:40px;margin-right:8px">
+                                        <div class="wp-aqi-value" style="font-size:12px;font-weight:600"></div>
+                                        <div style="font-size:8px;opacity:0.7">AQI</div>
+                                    </div>
+                                    <span class="wp-weather-icon" style="font-size:18px">🌤️</span>
                                 </div>
                             </button>
                         `;
@@ -6759,30 +6871,24 @@ const PanelsModule = (function() {
             <div class="section-label">🛰️ Satellite & Radar Imagery</div>
             <div style="margin-bottom:16px">
                 ${typeof SatWeatherModule !== 'undefined' ? `
-                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
                         <button class="btn ${activeSatLayer === 'nexrad_composite' ? 'btn--primary' : 'btn--secondary'}" 
                                 data-sat-layer="nexrad_composite"
                                 style="padding:12px 10px;display:flex;flex-direction:column;align-items:center;gap:4px">
                             <span style="font-size:20px">📡</span>
-                            <span style="font-size:11px">Radar</span>
+                            <span style="font-size:11px">NEXRAD</span>
                         </button>
-                        <button class="btn ${activeSatLayer === 'goes_ir' ? 'btn--primary' : 'btn--secondary'}" 
-                                data-sat-layer="goes_ir"
+                        <button class="btn ${activeSatLayer === 'viirs_true_color' ? 'btn--primary' : 'btn--secondary'}" 
+                                data-sat-layer="viirs_true_color"
                                 style="padding:12px 10px;display:flex;flex-direction:column;align-items:center;gap:4px">
-                            <span style="font-size:20px">🌡️</span>
-                            <span style="font-size:11px">Infrared</span>
+                            <span style="font-size:20px">🛰️</span>
+                            <span style="font-size:11px">Satellite</span>
                         </button>
-                        <button class="btn ${activeSatLayer === 'mrms_precip' ? 'btn--primary' : 'btn--secondary'}" 
-                                data-sat-layer="mrms_precip"
+                        <button class="btn ${activeSatLayer === 'modis_terra_true_color' ? 'btn--primary' : 'btn--secondary'}" 
+                                data-sat-layer="modis_terra_true_color"
                                 style="padding:12px 10px;display:flex;flex-direction:column;align-items:center;gap:4px">
-                            <span style="font-size:20px">🌧️</span>
-                            <span style="font-size:11px">Precip</span>
-                        </button>
-                        <button class="btn ${activeSatLayer === 'nws_warnings' ? 'btn--primary' : 'btn--secondary'}" 
-                                data-sat-layer="nws_warnings"
-                                style="padding:12px 10px;display:flex;flex-direction:column;align-items:center;gap:4px">
-                            <span style="font-size:20px">⚠️</span>
-                            <span style="font-size:11px">Warnings</span>
+                            <span style="font-size:20px">🌍</span>
+                            <span style="font-size:11px">Terra</span>
                         </button>
                     </div>
                     
@@ -6808,7 +6914,7 @@ const PanelsModule = (function() {
                     `}
                     
                     <div style="font-size:10px;color:rgba(255,255,255,0.4);text-align:center">
-                        Data: NASA GIBS, NOAA, Iowa Environmental Mesonet
+                        NEXRAD: NOAA/IEM (US) • Satellite: NASA GIBS (Global, Daily)
                     </div>
                 ` : `
                     <div style="padding:16px;background:var(--color-bg-elevated);border-radius:8px;text-align:center">
@@ -6816,6 +6922,201 @@ const PanelsModule = (function() {
                     </div>
                 `}
             </div>
+            
+            <!-- AQI Map Layer -->
+            ${typeof AirQualityModule !== 'undefined' ? `
+                <div class="section-label">🌬️ Air Quality Overlay</div>
+                <div style="margin-bottom:16px">
+                    <button class="btn ${aqiLayerActive ? 'btn--primary' : 'btn--secondary'} btn--full" 
+                            id="toggle-aqi-layer"
+                            style="padding:12px;display:flex;align-items:center;justify-content:center;gap:10px">
+                        <span style="font-size:20px">💨</span>
+                        <span>${aqiLayerActive ? 'Hide AQI Stations' : 'Show AQI Stations'}</span>
+                    </button>
+                    ${aqiLayerActive ? `
+                        <div style="margin-top:10px;padding:10px;background:var(--color-bg-elevated);border-radius:8px">
+                            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:8px">
+                                Tap markers for details. Pan map to load more stations.
+                            </div>
+                            <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center">
+                                <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px">
+                                    <span style="width:10px;height:10px;border-radius:50%;background:#00E400"></span>Good
+                                </span>
+                                <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px">
+                                    <span style="width:10px;height:10px;border-radius:50%;background:#FFFF00"></span>Moderate
+                                </span>
+                                <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px">
+                                    <span style="width:10px;height:10px;border-radius:50%;background:#FF7E00"></span>USG
+                                </span>
+                                <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px">
+                                    <span style="width:10px;height:10px;border-radius:50%;background:#FF0000"></span>Unhealthy
+                                </span>
+                                <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px">
+                                    <span style="width:10px;height:10px;border-radius:50%;background:#8F3F97"></span>V.Unhealthy
+                                </span>
+                                <span style="display:inline-flex;align-items:center;gap:4px;font-size:10px">
+                                    <span style="width:10px;height:10px;border-radius:50%;background:#7E0023"></span>Hazardous
+                                </span>
+                            </div>
+                        </div>
+                    ` : `
+                        <div style="margin-top:8px;font-size:10px;color:rgba(255,255,255,0.4);text-align:center">
+                            Shows EPA AirNow monitoring stations (US, Canada, Mexico)
+                        </div>
+                    `}
+                </div>
+            ` : ''}
+            
+            <!-- AQI Alerts & Monitoring -->
+            ${typeof AirQualityModule !== 'undefined' && typeof AlertModule !== 'undefined' ? `
+                <div class="section-label">🔔 AQI Alerts & Monitoring</div>
+                <div style="margin-bottom:16px">
+                    ${AirQualityModule.getApiKey() ? (() => {
+                        const monitoring = AirQualityModule.isMonitoringEnabled();
+                        const settings = AirQualityModule.getMonitoringSettings();
+                        const alertHistory = typeof AlertModule !== 'undefined' ? 
+                            AlertModule.getHistory({ source: 'aqi' }).slice(0, 5) : [];
+                        
+                        return `
+                            <!-- Monitoring Toggle -->
+                            <div style="display:flex;gap:8px;margin-bottom:12px">
+                                <button class="btn ${monitoring ? 'btn--primary' : 'btn--secondary'}" 
+                                        id="toggle-aqi-monitoring" style="flex:1;padding:10px">
+                                    ${monitoring ? '🔔 Monitoring ON' : '🔕 Monitoring OFF'}
+                                </button>
+                                <button class="btn btn--secondary" id="aqi-check-now" 
+                                        style="padding:10px" title="Check all locations now">
+                                    🔄
+                                </button>
+                            </div>
+                            
+                            ${monitoring ? `
+                                <!-- Monitoring Status -->
+                                <div style="padding:10px;background:rgba(34,197,94,0.1);border-radius:8px;margin-bottom:12px">
+                                    <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px">
+                                        <span style="color:rgba(255,255,255,0.6)">📍 Current location</span>
+                                        <span style="color:#22c55e">Every ${Math.round(settings.currentLocationInterval / 60000)} min</span>
+                                    </div>
+                                    <div style="display:flex;justify-content:space-between;font-size:11px">
+                                        <span style="color:rgba(255,255,255,0.6)">📌 All waypoints</span>
+                                        <span style="color:#22c55e">Every ${Math.round(settings.waypointInterval / 60000)} min</span>
+                                    </div>
+                                </div>
+                            ` : ''}
+                            
+                            <!-- Settings -->
+                            <div style="padding:12px;background:var(--color-bg-elevated);border-radius:8px;margin-bottom:12px">
+                                <div style="font-size:11px;font-weight:600;margin-bottom:10px;color:rgba(255,255,255,0.7)">Alert Thresholds</div>
+                                
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+                                    <div style="display:flex;align-items:center;gap:6px">
+                                        <span style="width:8px;height:8px;border-radius:50%;background:#FF7E00"></span>
+                                        <span style="font-size:10px;color:rgba(255,255,255,0.5)">Caution</span>
+                                        <input type="number" id="aqi-threshold-caution" value="${settings.thresholds.caution}" 
+                                               style="width:50px;padding:4px;font-size:11px;text-align:center" min="1" max="500">
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:6px">
+                                        <span style="width:8px;height:8px;border-radius:50%;background:#FF0000"></span>
+                                        <span style="font-size:10px;color:rgba(255,255,255,0.5)">Warning</span>
+                                        <input type="number" id="aqi-threshold-warning" value="${settings.thresholds.warning}" 
+                                               style="width:50px;padding:4px;font-size:11px;text-align:center" min="1" max="500">
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:6px">
+                                        <span style="width:8px;height:8px;border-radius:50%;background:#8F3F97"></span>
+                                        <span style="font-size:10px;color:rgba(255,255,255,0.5)">Critical</span>
+                                        <input type="number" id="aqi-threshold-critical" value="${settings.thresholds.critical}" 
+                                               style="width:50px;padding:4px;font-size:11px;text-align:center" min="1" max="500">
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:6px">
+                                        <span style="width:8px;height:8px;border-radius:50%;background:#7E0023"></span>
+                                        <span style="font-size:10px;color:rgba(255,255,255,0.5)">Emergency</span>
+                                        <input type="number" id="aqi-threshold-emergency" value="${settings.thresholds.emergency}" 
+                                               style="width:50px;padding:4px;font-size:11px;text-align:center" min="1" max="500">
+                                    </div>
+                                </div>
+                                
+                                <button class="btn btn--secondary btn--full" id="save-aqi-thresholds" style="padding:8px;font-size:11px">
+                                    Save Thresholds
+                                </button>
+                                
+                                <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.1)">
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                                        <input type="checkbox" id="aqi-sensitive-groups" ${settings.sensitiveGroups ? 'checked' : ''}>
+                                        <span style="font-size:11px">Sensitive Groups Mode (lower thresholds)</span>
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px">
+                                        <input type="checkbox" id="aqi-forecast-alerts" ${settings.forecastAlerts ? 'checked' : ''}>
+                                        <span style="font-size:11px">Include forecast alerts</span>
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <!-- Alert History -->
+                            ${alertHistory.length > 0 ? `
+                                <div style="padding:12px;background:var(--color-bg-elevated);border-radius:8px">
+                                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                                        <span style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.7)">Recent Alerts</span>
+                                        <button class="btn btn--secondary" id="clear-aqi-history" style="padding:4px 8px;font-size:10px">Clear</button>
+                                    </div>
+                                    <div style="max-height:150px;overflow-y:auto">
+                                        ${alertHistory.map(alert => {
+                                            const time = new Date(alert.timestamp);
+                                            const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                            const dateStr = time.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                                            const severityColor = {
+                                                caution: '#FF7E00',
+                                                warning: '#FF0000',
+                                                critical: '#8F3F97',
+                                                emergency: '#7E0023'
+                                            }[alert.severity] || '#3b82f6';
+                                            
+                                            return `
+                                                <div style="padding:8px;border-left:3px solid ${severityColor};margin-bottom:6px;background:rgba(0,0,0,0.2);border-radius:0 6px 6px 0">
+                                                    <div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,0.5)">
+                                                        <span>${dateStr} ${timeStr}</span>
+                                                        <span>AQI ${alert.data?.aqi || '--'}</span>
+                                                    </div>
+                                                    <div style="font-size:11px;margin-top:2px">${alert.data?.locationName || 'Unknown'}</div>
+                                                </div>
+                                            `;
+                                        }).join('')}
+                                    </div>
+                                </div>
+                            ` : `
+                                <div style="padding:12px;background:var(--color-bg-elevated);border-radius:8px;text-align:center">
+                                    <span style="font-size:11px;color:rgba(255,255,255,0.5)">No recent AQI alerts</span>
+                                </div>
+                            `}
+                            
+                            <!-- Push Notifications -->
+                            ${typeof AlertModule !== 'undefined' && 'Notification' in window ? `
+                                <div style="margin-top:12px;padding:10px;background:var(--color-bg-elevated);border-radius:8px">
+                                    <div style="display:flex;justify-content:space-between;align-items:center">
+                                        <span style="font-size:11px;color:rgba(255,255,255,0.6)">Push Notifications</span>
+                                        ${AlertModule.isNotificationsEnabled() ? `
+                                            <span style="font-size:10px;color:#22c55e">✓ Enabled</span>
+                                        ` : `
+                                            <button class="btn btn--secondary" id="enable-aqi-notifications" style="padding:4px 10px;font-size:10px">
+                                                Enable
+                                            </button>
+                                        `}
+                                    </div>
+                                </div>
+                            ` : ''}
+                        `;
+                    })() : `
+                        <div style="padding:16px;background:var(--color-bg-elevated);border-radius:8px;text-align:center">
+                            <div style="font-size:24px;margin-bottom:8px">🔑</div>
+                            <div style="font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:12px">
+                                API key required for AQI monitoring
+                            </div>
+                            <button class="btn btn--primary" onclick="State.set('activePanel','settings');PanelsModule.render();" style="padding:8px 16px;font-size:12px">
+                                Configure in Settings
+                            </button>
+                        </div>
+                    `}
+                </div>
+            ` : ''}
             
             <div class="divider"></div>
             
@@ -6843,6 +7144,15 @@ const PanelsModule = (function() {
             await loadCurrentWeather();
         };
         
+        // Refresh AQI only
+        const aqiRefreshBtn = container.querySelector('#aqi-refresh');
+        if (aqiRefreshBtn) {
+            aqiRefreshBtn.onclick = async (e) => {
+                e.stopPropagation();
+                await loadAQIData();
+            };
+        }
+        
         // Analyze route weather
         const analyzeBtn = container.querySelector('#analyze-route-weather');
         if (analyzeBtn) {
@@ -6857,6 +7167,43 @@ const PanelsModule = (function() {
                         travelDate: new Date(),
                         estimatedHours: parseFloat(selectedRoute.duration) || 8
                     });
+                    
+                    // Fetch AQI data for each route point if AirQualityModule is available
+                    if (typeof AirQualityModule !== 'undefined' && routeWeatherData?.points) {
+                        analyzeBtn.innerHTML = '⏳ Checking air quality...';
+                        
+                        const aqiPromises = routeWeatherData.points.map(async (point) => {
+                            try {
+                                const aqi = await AirQualityModule.fetchAQI(point.lat, point.lon);
+                                point.aqi = aqi;
+                                
+                                // Add AQI alerts for unhealthy conditions
+                                if (aqi?.available && aqi.aqi > 100) {
+                                    const aqiAlert = {
+                                        type: 'air_quality',
+                                        severity: aqi.aqi > 200 ? 'critical' : aqi.aqi > 150 ? 'warning' : 'caution',
+                                        location: point.name,
+                                        icon: aqi.category.icon,
+                                        message: `${aqi.category.label} Air Quality (AQI ${aqi.aqi})`,
+                                        recommendation: aqi.category.guidance
+                                    };
+                                    routeWeatherData.alerts.push(aqiAlert);
+                                }
+                            } catch (aqiErr) {
+                                console.debug('Could not fetch AQI for route point:', point.name, aqiErr);
+                                point.aqi = null;
+                            }
+                        });
+                        
+                        await Promise.all(aqiPromises);
+                        
+                        // Sort alerts by severity
+                        const severityOrder = { critical: 0, warning: 1, caution: 2 };
+                        routeWeatherData.alerts.sort((a, b) => 
+                            (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3)
+                        );
+                    }
+                    
                     renderWeather();
                 } catch (err) {
                     console.error('Route weather analysis failed:', err);
@@ -6875,14 +7222,40 @@ const PanelsModule = (function() {
                 if (!wp) return;
                 
                 btn.querySelector('.card__subtitle').textContent = 'Loading...';
+                const aqiBadge = btn.querySelector('.wp-aqi-badge');
+                const weatherIcon = btn.querySelector('.wp-weather-icon');
                 
                 try {
                     const wpWeather = await WeatherModule.getWaypointWeather(wp);
+                    let displayText = '';
+                    
                     if (wpWeather?.current) {
-                        btn.querySelector('.card__subtitle').textContent = 
-                            `${Math.round(wpWeather.current.temperature)}°F • ${wpWeather.current.weather.desc}`;
-                        btn.querySelector('span:last-child').textContent = wpWeather.current.weather.icon;
+                        displayText = `${Math.round(wpWeather.current.temperature)}°F • ${wpWeather.current.weather.desc}`;
+                        if (weatherIcon) weatherIcon.textContent = wpWeather.current.weather.icon;
                     }
+                    
+                    // Also fetch AQI if available
+                    if (typeof AirQualityModule !== 'undefined' && wp.lat && wp.lon) {
+                        try {
+                            const wpAqi = await AirQualityModule.fetchAQI(wp.lat, wp.lon);
+                            if (wpAqi?.available && aqiBadge) {
+                                const cat = wpAqi.category;
+                                aqiBadge.style.display = 'block';
+                                aqiBadge.style.background = cat.color + '22';
+                                aqiBadge.querySelector('.wp-aqi-value').textContent = wpAqi.aqi;
+                                aqiBadge.querySelector('.wp-aqi-value').style.color = cat.color;
+                                
+                                // Update weather icon to show AQI warning if unhealthy
+                                if (wpAqi.aqi > 100 && weatherIcon) {
+                                    weatherIcon.textContent = cat.icon;
+                                }
+                            }
+                        } catch (aqiErr) {
+                            console.debug('Could not fetch AQI for waypoint:', aqiErr);
+                        }
+                    }
+                    
+                    btn.querySelector('.card__subtitle').textContent = displayText || 'Weather loaded';
                 } catch (err) {
                     btn.querySelector('.card__subtitle').textContent = 'Failed to load';
                 }
@@ -6891,7 +7264,7 @@ const PanelsModule = (function() {
         
         // Satellite/Radar layer buttons
         container.querySelectorAll('[data-sat-layer]').forEach(btn => {
-            btn.onclick = () => {
+            btn.onclick = async () => {
                 const layerKey = btn.dataset.satLayer;
                 if (typeof SatWeatherModule !== 'undefined') {
                     // Toggle layer
@@ -6904,9 +7277,21 @@ const PanelsModule = (function() {
                         if (activeSatLayer) {
                             SatWeatherModule.removeSatelliteLayer(activeSatLayer);
                         }
-                        // Add new layer
-                        SatWeatherModule.addSatelliteLayer(layerKey, satLayerOpacity);
-                        activeSatLayer = layerKey;
+                        // Add new layer (async for RainViewer products)
+                        const success = await SatWeatherModule.addSatelliteLayer(layerKey, satLayerOpacity);
+                        if (success) {
+                            activeSatLayer = layerKey;
+                        } else {
+                            // Show error toast
+                            if (typeof ModalsModule !== 'undefined') {
+                                const product = SatWeatherModule.getProduct(layerKey);
+                                if (product?.source === 'owm') {
+                                    ModalsModule.showToast('OpenWeatherMap API key required. Configure in Settings.', 'error');
+                                } else {
+                                    ModalsModule.showToast('Failed to load weather layer', 'error');
+                                }
+                            }
+                        }
                     }
                     renderWeather();
                 }
@@ -6941,6 +7326,162 @@ const PanelsModule = (function() {
             };
         }
         
+        // AQI Map Layer toggle
+        const aqiLayerBtn = container.querySelector('#toggle-aqi-layer');
+        if (aqiLayerBtn) {
+            aqiLayerBtn.onclick = async () => {
+                if (typeof AirQualityModule === 'undefined') return;
+                
+                // Check for API key
+                if (!AirQualityModule.getApiKey()) {
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('AirNow API key required. Configure in Settings.', 'error');
+                    }
+                    return;
+                }
+                
+                aqiLayerBtn.disabled = true;
+                aqiLayerBtn.innerHTML = '<span style="font-size:20px">⏳</span><span>Loading...</span>';
+                
+                try {
+                    if (aqiLayerActive) {
+                        AirQualityModule.removeMapLayer();
+                        aqiLayerActive = false;
+                    } else {
+                        const success = await AirQualityModule.addMapLayer();
+                        if (success) {
+                            aqiLayerActive = true;
+                        } else {
+                            if (typeof ModalsModule !== 'undefined') {
+                                ModalsModule.showToast('Failed to load AQI stations', 'error');
+                            }
+                        }
+                    }
+                    renderWeather();
+                } catch (err) {
+                    console.error('AQI layer toggle failed:', err);
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('Error loading AQI layer', 'error');
+                    }
+                    aqiLayerBtn.disabled = false;
+                    aqiLayerBtn.innerHTML = '<span style="font-size:20px">💨</span><span>Show AQI Stations</span>';
+                }
+            };
+        }
+        
+        // AQI Monitoring toggle
+        const aqiMonitoringBtn = container.querySelector('#toggle-aqi-monitoring');
+        if (aqiMonitoringBtn) {
+            aqiMonitoringBtn.onclick = () => {
+                if (typeof AirQualityModule === 'undefined') return;
+                
+                if (AirQualityModule.isMonitoringEnabled()) {
+                    AirQualityModule.stopMonitoring();
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('AQI monitoring stopped', 'info');
+                    }
+                } else {
+                    AirQualityModule.startMonitoring();
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('AQI monitoring started', 'success');
+                    }
+                }
+                renderWeather();
+            };
+        }
+        
+        // AQI Check Now button
+        const aqiCheckNowBtn = container.querySelector('#aqi-check-now');
+        if (aqiCheckNowBtn) {
+            aqiCheckNowBtn.onclick = async () => {
+                if (typeof AirQualityModule !== 'undefined') {
+                    aqiCheckNowBtn.disabled = true;
+                    aqiCheckNowBtn.textContent = '⏳';
+                    await AirQualityModule.checkNow();
+                    aqiCheckNowBtn.disabled = false;
+                    aqiCheckNowBtn.textContent = '🔄';
+                    renderWeather();
+                }
+            };
+        }
+        
+        // AQI Thresholds save
+        const saveThresholdsBtn = container.querySelector('#save-aqi-thresholds');
+        if (saveThresholdsBtn) {
+            saveThresholdsBtn.onclick = () => {
+                if (typeof AirQualityModule === 'undefined') return;
+                
+                const caution = parseInt(container.querySelector('#aqi-threshold-caution')?.value) || 101;
+                const warning = parseInt(container.querySelector('#aqi-threshold-warning')?.value) || 151;
+                const critical = parseInt(container.querySelector('#aqi-threshold-critical')?.value) || 201;
+                const emergency = parseInt(container.querySelector('#aqi-threshold-emergency')?.value) || 301;
+                
+                AirQualityModule.setThresholds({ caution, warning, critical, emergency });
+                
+                if (typeof ModalsModule !== 'undefined') {
+                    ModalsModule.showToast('AQI thresholds saved', 'success');
+                }
+            };
+        }
+        
+        // Sensitive Groups checkbox
+        const sensitiveGroupsChk = container.querySelector('#aqi-sensitive-groups');
+        if (sensitiveGroupsChk) {
+            sensitiveGroupsChk.onchange = () => {
+                if (typeof AirQualityModule !== 'undefined') {
+                    AirQualityModule.setSensitiveGroups(sensitiveGroupsChk.checked);
+                }
+            };
+        }
+        
+        // Forecast Alerts checkbox
+        const forecastAlertsChk = container.querySelector('#aqi-forecast-alerts');
+        if (forecastAlertsChk) {
+            forecastAlertsChk.onchange = () => {
+                if (typeof AirQualityModule !== 'undefined') {
+                    const settings = AirQualityModule.getMonitoringSettings();
+                    settings.forecastAlerts = forecastAlertsChk.checked;
+                    if (typeof Storage !== 'undefined' && Storage.Settings) {
+                        Storage.Settings.set('aqiMonitoringSettings', settings);
+                    }
+                }
+            };
+        }
+        
+        // Clear AQI History
+        const clearHistoryBtn = container.querySelector('#clear-aqi-history');
+        if (clearHistoryBtn) {
+            clearHistoryBtn.onclick = () => {
+                if (typeof AlertModule !== 'undefined') {
+                    AlertModule.clearHistory('aqi');
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('AQI alert history cleared', 'info');
+                    }
+                    renderWeather();
+                }
+            };
+        }
+        
+        // Enable Push Notifications
+        const enableNotificationsBtn = container.querySelector('#enable-aqi-notifications');
+        if (enableNotificationsBtn) {
+            enableNotificationsBtn.onclick = async () => {
+                if (typeof AlertModule !== 'undefined') {
+                    const granted = await AlertModule.requestNotificationPermission();
+                    if (granted) {
+                        if (typeof ModalsModule !== 'undefined') {
+                            ModalsModule.showToast('Push notifications enabled', 'success');
+                        }
+                    } else {
+                        if (typeof ModalsModule !== 'undefined') {
+                            ModalsModule.showToast('Notification permission denied', 'error');
+                        }
+                    }
+                    renderWeather();
+                }
+            };
+        }
+        
         // Stream Gauge handlers
         const streamGaugeSection = container.querySelector('#stream-gauge-section');
         if (streamGaugeSection && typeof StreamGaugeModule !== 'undefined') {
@@ -6965,9 +7506,38 @@ const PanelsModule = (function() {
             weatherData = await WeatherModule.getMapCenterWeather();
             weatherLoading = false;
             renderWeather();
+            
+            // Also load AQI data (non-blocking)
+            loadAQIData();
         } catch (err) {
             weatherLoading = false;
             weatherError = err.message || 'Failed to load weather';
+            renderWeather();
+        }
+    }
+    
+    async function loadAQIData() {
+        if (typeof AirQualityModule === 'undefined') {
+            console.debug('AirQualityModule not available');
+            return;
+        }
+        
+        aqiLoading = true;
+        aqiError = null;
+        renderWeather();
+        
+        try {
+            aqiData = await AirQualityModule.getMapCenterAQI();
+            aqiLoading = false;
+            renderWeather();
+        } catch (err) {
+            aqiLoading = false;
+            aqiError = err.message || 'Failed to load AQI';
+            aqiData = {
+                available: false,
+                reason: 'fetch_error',
+                message: aqiError
+            };
             renderWeather();
         }
     }
@@ -7202,6 +7772,45 @@ const PanelsModule = (function() {
                         🏠 Go to Home Location
                     </button>
                 ` : ''}
+            </div>
+            
+            <div class="divider"></div>
+            
+            <!-- API Keys -->
+            <div class="section-label">API Keys</div>
+            
+            <div class="settings-group">
+                <p style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:12px">
+                    Optional API keys for enhanced features. All services offer free tiers.
+                </p>
+                
+                <!-- AirNow API Key -->
+                <div class="settings-row" style="flex-direction:column;align-items:stretch">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                        <div>
+                            <span class="settings-row__label">AirNow (Air Quality)</span>
+                            <div style="font-size:10px;color:rgba(255,255,255,0.4)">EPA air quality data for US/Canada/Mexico</div>
+                        </div>
+                        <span style="font-size:10px;padding:2px 6px;border-radius:4px;${typeof AirQualityModule !== 'undefined' && AirQualityModule.getApiKey() ? 'background:rgba(34,197,94,0.2);color:#22c55e' : 'background:rgba(107,114,128,0.2);color:#9ca3af'}">
+                            ${typeof AirQualityModule !== 'undefined' && AirQualityModule.getApiKey() ? '✓ Configured' : 'Not Set'}
+                        </span>
+                    </div>
+                    <div style="display:flex;gap:8px">
+                        <input type="password" id="airnow-api-key" 
+                               placeholder="Enter AirNow API key..." 
+                               value="${typeof AirQualityModule !== 'undefined' && AirQualityModule.getApiKey() ? '••••••••••••••••' : ''}"
+                               style="flex:1;font-size:12px">
+                        <button class="btn btn--secondary" id="save-airnow-key" style="padding:8px 12px;font-size:11px">
+                            Save
+                        </button>
+                    </div>
+                    <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:6px">
+                        <a href="https://docs.airnowapi.org/account/request/" target="_blank" rel="noopener" style="color:#f97316">
+                            Get free API key →
+                        </a>
+                        (instant approval)
+                    </div>
+                </div>
             </div>
             
             <div class="divider"></div>
@@ -7589,6 +8198,48 @@ const PanelsModule = (function() {
                     ModalsModule.showToast('Navigated to home', 'success');
                 }
             };
+        }
+        
+        // AirNow API Key handler
+        const saveAirnowBtn = container.querySelector('#save-airnow-key');
+        if (saveAirnowBtn) {
+            saveAirnowBtn.onclick = () => {
+                const input = container.querySelector('#airnow-api-key');
+                const key = input?.value?.trim();
+                
+                // Don't save if it's the masked placeholder
+                if (key && key !== '••••••••••••••••' && key.length > 0) {
+                    if (typeof AirQualityModule !== 'undefined') {
+                        AirQualityModule.setApiKey(key);
+                        ModalsModule.showToast('AirNow API key saved', 'success');
+                        renderSettings(); // Re-render to show updated status
+                    }
+                } else if (key === '' || key === null) {
+                    // Clear the key
+                    if (typeof AirQualityModule !== 'undefined') {
+                        AirQualityModule.setApiKey(null);
+                        ModalsModule.showToast('AirNow API key removed', 'info');
+                        renderSettings();
+                    }
+                }
+            };
+            
+            // Also allow Enter key to save
+            const airnowInput = container.querySelector('#airnow-api-key');
+            if (airnowInput) {
+                airnowInput.onkeypress = (e) => {
+                    if (e.key === 'Enter') {
+                        saveAirnowBtn.click();
+                    }
+                };
+                // Clear placeholder on focus
+                airnowInput.onfocus = () => {
+                    if (airnowInput.value === '••••••••••••••••') {
+                        airnowInput.value = '';
+                        airnowInput.type = 'text';
+                    }
+                };
+            }
         }
         
         // Print button handlers
@@ -8496,6 +9147,890 @@ ${text}
         }
     }
     
+    // ==================== CELESTIAL NAVIGATION PANEL ====================
+    
+    // Celestial panel state
+    let celestialState = {
+        activeTab: 'almanac',
+        observerLat: null,
+        observerLon: null,
+        selectedDate: new Date()
+    };
+    
+    /**
+     * Render Celestial Navigation Panel
+     */
+    function renderCelestial() {
+        // Check if module is available
+        if (typeof CelestialModule === 'undefined') {
+            container.innerHTML = `
+                <div class="panel__header">
+                    <h2 class="panel__title">🌟 Celestial Navigation</h2>
+                </div>
+                <div class="empty-state">
+                    <div class="empty-state__icon">${Icons.get('star')}</div>
+                    <div class="empty-state__title">Celestial Module Not Loaded</div>
+                    <div class="empty-state__desc">Celestial navigation features are not available</div>
+                </div>
+            `;
+            return;
+        }
+        
+        // Get current position from map or GPS
+        let lat = celestialState.observerLat;
+        let lon = celestialState.observerLon;
+        
+        if (lat === null || lon === null) {
+            if (typeof MapModule !== 'undefined') {
+                const mapState = MapModule.getMapState();
+                if (mapState) {
+                    lat = mapState.lat;
+                    lon = mapState.lon;
+                    celestialState.observerLat = lat;
+                    celestialState.observerLon = lon;
+                }
+            }
+        }
+        
+        // Default to San Francisco if no position
+        if (lat === null) lat = 37.7749;
+        if (lon === null) lon = -122.4194;
+        
+        const date = celestialState.selectedDate;
+        const activeTab = celestialState.activeTab;
+        
+        // Tab definitions
+        const tabs = [
+            { id: 'almanac', icon: '📖', label: 'Almanac' },
+            { id: 'observe', icon: '🔭', label: 'Observe' },
+            { id: 'fix', icon: '📍', label: 'Fix' },
+            { id: 'tools', icon: '🧭', label: 'Tools' },
+            { id: 'dr', icon: '📐', label: 'DR' },
+            { id: 'training', icon: '🎓', label: 'Training' }
+        ];
+        
+        container.innerHTML = `
+            <div class="panel__header">
+                <h2 class="panel__title">🌟 Celestial Navigation</h2>
+            </div>
+            
+            <!-- Position Display -->
+            <div style="padding:12px;background:var(--color-bg-elevated);border-radius:10px;margin:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <div style="font-size:12px;color:rgba(255,255,255,0.5)">Observer Position</div>
+                    <button id="celestial-sync-pos" class="btn btn--secondary" style="padding:4px 8px;font-size:10px">
+                        📍 Sync from Map
+                    </button>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <div>
+                        <label style="font-size:9px;color:rgba(255,255,255,0.4)">Latitude</label>
+                        <input type="number" id="celestial-lat" value="${lat.toFixed(4)}" step="0.0001" 
+                               style="width:100%;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:white;font-size:12px">
+                    </div>
+                    <div>
+                        <label style="font-size:9px;color:rgba(255,255,255,0.4)">Longitude</label>
+                        <input type="number" id="celestial-lon" value="${lon.toFixed(4)}" step="0.0001"
+                               style="width:100%;padding:6px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:4px;color:white;font-size:12px">
+                    </div>
+                </div>
+                <div style="margin-top:8px;font-size:10px;color:rgba(255,255,255,0.4);text-align:center">
+                    UTC: ${date.toISOString().replace('T', ' ').substr(0, 19)}
+                </div>
+            </div>
+            
+            <!-- Tab Navigation -->
+            <div style="display:flex;gap:4px;padding:0 12px;margin-bottom:12px;overflow-x:auto">
+                ${tabs.map(tab => `
+                    <button class="celestial-tab btn ${activeTab === tab.id ? 'btn--primary' : 'btn--secondary'}" 
+                            data-tab="${tab.id}"
+                            style="flex:1;padding:8px 4px;font-size:10px;white-space:nowrap;min-width:60px">
+                        <span style="display:block;font-size:16px">${tab.icon}</span>
+                        ${tab.label}
+                    </button>
+                `).join('')}
+            </div>
+            
+            <!-- Tab Content -->
+            <div id="celestial-content" style="padding:0 12px 12px">
+                ${renderCelestialTabContent(activeTab, lat, lon, date)}
+            </div>
+        `;
+        
+        // Bind events
+        bindCelestialEvents();
+    }
+    
+    /**
+     * Render content for active celestial tab
+     */
+    function renderCelestialTabContent(tab, lat, lon, date) {
+        switch (tab) {
+            case 'almanac':
+                return renderCelestialAlmanac(lat, lon, date);
+            case 'observe':
+                return renderCelestialObserve(lat, lon, date);
+            case 'fix':
+                return renderCelestialFix(lat, lon, date);
+            case 'tools':
+                return renderCelestialTools(lat, lon, date);
+            case 'dr':
+                return renderCelestialDR(lat, lon, date);
+            case 'training':
+                return renderCelestialTraining(lat, lon, date);
+            default:
+                return renderCelestialAlmanac(lat, lon, date);
+        }
+    }
+    
+    /**
+     * Render Almanac tab
+     */
+    function renderCelestialAlmanac(lat, lon, date) {
+        const almanac = CelestialModule.getAlmanac(date);
+        const visible = CelestialModule.getVisibleBodies(lat, lon, date);
+        const recommended = CelestialModule.getRecommendedBodies(lat, lon, date, 5);
+        
+        return `
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                <div style="font-size:14px;font-weight:600;margin-bottom:12px">☀️ Sun & Moon</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+                    <div style="padding:10px;background:rgba(251,191,36,0.1);border-radius:8px">
+                        <div style="font-size:11px;color:rgba(255,255,255,0.5)">Sun</div>
+                        <div style="font-size:12px;margin-top:4px">GHA: ${almanac.sun.formatted.GHA}</div>
+                        <div style="font-size:12px">Dec: ${almanac.sun.formatted.dec}</div>
+                    </div>
+                    <div style="padding:10px;background:rgba(148,163,184,0.1);border-radius:8px">
+                        <div style="font-size:11px;color:rgba(255,255,255,0.5)">Moon</div>
+                        <div style="font-size:12px;margin-top:4px">GHA: ${almanac.moon.formatted.GHA}</div>
+                        <div style="font-size:12px">Dec: ${almanac.moon.formatted.dec}</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                <div style="font-size:14px;font-weight:600;margin-bottom:12px">⭐ Recommended for Observation</div>
+                <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:8px">
+                    ${recommended.length} bodies with good geometry
+                </div>
+                ${recommended.length > 0 ? `
+                    <div style="display:flex;flex-direction:column;gap:8px">
+                        ${recommended.map(body => `
+                            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:rgba(0,0,0,0.2);border-radius:6px">
+                                <div>
+                                    <div style="font-size:12px;font-weight:600">${body.name}</div>
+                                    <div style="font-size:10px;color:rgba(255,255,255,0.5)">${body.body}</div>
+                                </div>
+                                <div style="text-align:right">
+                                    <div style="font-size:11px">Alt: ${body.altitude.toFixed(1)}°</div>
+                                    <div style="font-size:11px">Az: ${body.azimuth.toFixed(1)}°</div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : `
+                    <div style="text-align:center;padding:20px;color:rgba(255,255,255,0.4)">
+                        No bodies currently visible
+                    </div>
+                `}
+            </div>
+            
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px">
+                <div style="font-size:14px;font-weight:600;margin-bottom:12px">🌍 Planets</div>
+                <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:8px">
+                    ${['venus', 'mars', 'jupiter', 'saturn'].map(planet => {
+                        const pos = CelestialModule.getPlanetPosition(planet, date);
+                        return `
+                            <div style="padding:8px;background:rgba(0,0,0,0.2);border-radius:6px">
+                                <div style="font-size:11px;font-weight:600">${planet.charAt(0).toUpperCase() + planet.slice(1)}</div>
+                                <div style="font-size:10px;color:rgba(255,255,255,0.5)">GHA: ${pos.formatted?.GHA || 'N/A'}</div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    /**
+     * Render Observe tab
+     */
+    function renderCelestialObserve(lat, lon, date) {
+        const sightLog = CelestialModule.getSightLog();
+        const currentObs = CelestialModule.getCurrentObservation();
+        
+        return `
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                <div style="font-size:14px;font-weight:600;margin-bottom:12px">🔭 Take Observation</div>
+                
+                ${currentObs ? `
+                    <div style="padding:12px;background:rgba(59,130,246,0.1);border-radius:8px;margin-bottom:12px">
+                        <div style="font-size:12px;color:#3b82f6;font-weight:600">Observation in Progress</div>
+                        <div style="font-size:11px;margin-top:4px">Body: ${currentObs.bodyName}</div>
+                        <div style="font-size:11px">Readings: ${currentObs.altitudes?.length || 0}</div>
+                        <div style="display:flex;gap:8px;margin-top:8px">
+                            <button id="celestial-complete-obs" class="btn btn--primary" style="flex:1;padding:8px">
+                                ✓ Complete
+                            </button>
+                            <button id="celestial-cancel-obs" class="btn btn--secondary" style="padding:8px">
+                                ✗ Cancel
+                            </button>
+                        </div>
+                    </div>
+                ` : `
+                    <div style="margin-bottom:12px">
+                        <label style="font-size:10px;color:rgba(255,255,255,0.5);display:block;margin-bottom:4px">Select Body</label>
+                        <select id="celestial-body-select" style="width:100%;padding:8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:white">
+                            <option value="Sun">☀️ Sun</option>
+                            <option value="Moon">🌙 Moon</option>
+                            <optgroup label="Planets">
+                                <option value="Venus">Venus</option>
+                                <option value="Mars">Mars</option>
+                                <option value="Jupiter">Jupiter</option>
+                                <option value="Saturn">Saturn</option>
+                            </optgroup>
+                            <optgroup label="Stars">
+                                ${Object.keys(CelestialModule.NAVIGATION_STARS).slice(0, 20).map(star => 
+                                    `<option value="${star}">⭐ ${star}</option>`
+                                ).join('')}
+                            </optgroup>
+                        </select>
+                    </div>
+                    
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+                        <div>
+                            <label style="font-size:10px;color:rgba(255,255,255,0.5);display:block;margin-bottom:4px">Altitude (°)</label>
+                            <input type="number" id="celestial-obs-alt-deg" placeholder="45" min="0" max="90"
+                                   style="width:100%;padding:8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:white">
+                        </div>
+                        <div>
+                            <label style="font-size:10px;color:rgba(255,255,255,0.5);display:block;margin-bottom:4px">Minutes (')</label>
+                            <input type="number" id="celestial-obs-alt-min" placeholder="30.0" min="0" max="59.9" step="0.1"
+                                   style="width:100%;padding:8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:white">
+                        </div>
+                    </div>
+                    
+                    <div style="margin-bottom:12px">
+                        <label style="font-size:10px;color:rgba(255,255,255,0.5);display:block;margin-bottom:4px">Eye Height (m)</label>
+                        <input type="number" id="celestial-eye-height" placeholder="3" min="0" step="0.1" value="3"
+                               style="width:100%;padding:8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:white">
+                    </div>
+                    
+                    <button id="celestial-record-sight" class="btn btn--primary btn--full" style="padding:10px">
+                        📝 Record Sight
+                    </button>
+                `}
+            </div>
+            
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                    <div style="font-size:14px;font-weight:600">📋 Sight Log (${sightLog.length})</div>
+                    ${sightLog.length > 0 ? `
+                        <button id="celestial-clear-log" class="btn btn--secondary" style="padding:4px 8px;font-size:10px">
+                            🗑️ Clear
+                        </button>
+                    ` : ''}
+                </div>
+                
+                ${sightLog.length > 0 ? `
+                    <div style="display:flex;flex-direction:column;gap:8px;max-height:200px;overflow-y:auto">
+                        ${sightLog.map((sight, i) => `
+                            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:rgba(0,0,0,0.2);border-radius:6px">
+                                <div>
+                                    <div style="font-size:12px;font-weight:600">${sight.bodyName}</div>
+                                    <div style="font-size:10px;color:rgba(255,255,255,0.5)">
+                                        Ho: ${CelestialModule.formatAngle(sight.Ho)}
+                                    </div>
+                                </div>
+                                <div style="text-align:right;font-size:10px;color:rgba(255,255,255,0.5)">
+                                    ${new Date(sight.time).toLocaleTimeString()}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : `
+                    <div style="text-align:center;padding:20px;color:rgba(255,255,255,0.4)">
+                        No sights recorded
+                    </div>
+                `}
+            </div>
+        `;
+    }
+    
+    /**
+     * Render Fix tab
+     */
+    function renderCelestialFix(lat, lon, date) {
+        const sightLog = CelestialModule.getSightLog();
+        const lops = CelestialModule.getLOPs();
+        
+        return `
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                <div style="font-size:14px;font-weight:600;margin-bottom:12px">📐 Sight Reduction</div>
+                
+                ${sightLog.length === 0 ? `
+                    <div style="padding:20px;text-align:center;color:rgba(255,255,255,0.4)">
+                        <div style="font-size:24px;margin-bottom:8px">🔭</div>
+                        <div>No observations recorded</div>
+                        <div style="font-size:11px;margin-top:4px">Go to Observe tab to take sights</div>
+                    </div>
+                ` : `
+                    <div style="margin-bottom:12px">
+                        <label style="font-size:10px;color:rgba(255,255,255,0.5);display:block;margin-bottom:4px">
+                            Assumed Position for Reduction
+                        </label>
+                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                            <input type="number" id="celestial-ap-lat" placeholder="Lat" value="${lat.toFixed(2)}" step="0.01"
+                                   style="width:100%;padding:8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:white">
+                            <input type="number" id="celestial-ap-lon" placeholder="Lon" value="${lon.toFixed(2)}" step="0.01"
+                                   style="width:100%;padding:8px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:white">
+                        </div>
+                    </div>
+                    
+                    <button id="celestial-reduce-sights" class="btn btn--primary btn--full" style="padding:10px;margin-bottom:12px">
+                        📊 Reduce All Sights
+                    </button>
+                `}
+            </div>
+            
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                    <div style="font-size:14px;font-weight:600">📍 Lines of Position (${lops.length})</div>
+                    ${lops.length > 0 ? `
+                        <button id="celestial-clear-lops" class="btn btn--secondary" style="padding:4px 8px;font-size:10px">
+                            🗑️ Clear
+                        </button>
+                    ` : ''}
+                </div>
+                
+                ${lops.length > 0 ? `
+                    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+                        ${lops.map((lop, i) => `
+                            <div style="padding:8px;background:rgba(0,0,0,0.2);border-radius:6px">
+                                <div style="display:flex;justify-content:space-between">
+                                    <span style="font-size:12px;font-weight:600">${lop.bodyName}</span>
+                                    <span style="font-size:10px;color:rgba(255,255,255,0.5)">Zn: ${lop.Zn.toFixed(1)}°</span>
+                                </div>
+                                <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:2px">
+                                    Intercept: ${lop.intercept.toFixed(1)}' ${lop.intercept >= 0 ? 'Toward' : 'Away'}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    
+                    ${lops.length >= 2 ? `
+                        <button id="celestial-calc-fix" class="btn btn--primary btn--full" style="padding:10px">
+                            📍 Calculate Fix
+                        </button>
+                    ` : `
+                        <div style="text-align:center;padding:8px;color:rgba(255,255,255,0.4);font-size:11px">
+                            Need at least 2 LOPs for a fix
+                        </div>
+                    `}
+                ` : `
+                    <div style="text-align:center;padding:20px;color:rgba(255,255,255,0.4)">
+                        No LOPs calculated
+                    </div>
+                `}
+            </div>
+            
+            <div id="celestial-fix-result"></div>
+            
+            <!-- Emergency Methods -->
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px">
+                <div style="font-size:14px;font-weight:600;margin-bottom:12px">🆘 Emergency Methods</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <button id="celestial-noon-sight" class="btn btn--secondary" style="padding:10px;font-size:11px">
+                        ☀️ Noon Sight
+                    </button>
+                    <button id="celestial-polaris" class="btn btn--secondary" style="padding:10px;font-size:11px">
+                        ⭐ Polaris Lat
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    
+    /**
+     * Render Tools tab
+     */
+    function renderCelestialTools(lat, lon, date) {
+        return `
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                ${CelestialModule.renderSunCompassWidget(lat, lon, date)}
+            </div>
+            
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                ${CelestialModule.renderPolarisFinderWidget(lat, lon, date)}
+            </div>
+            
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px">
+                ${CelestialModule.renderStarChartWidget(lat, lon, date)}
+            </div>
+        `;
+    }
+    
+    /**
+     * Render Dead Reckoning tab
+     */
+    function renderCelestialDR(lat, lon, date) {
+        const drState = CelestialModule.getDRState();
+        
+        return `
+            ${CelestialModule.renderDRStatusWidget()}
+            
+            <div style="margin-top:12px">
+                ${CelestialModule.renderDRInputWidget(drState.course || 0, drState.speed || 0)}
+            </div>
+            
+            <div style="margin-top:12px">
+                ${CelestialModule.renderNavigationPlanWidget()}
+            </div>
+            
+            ${!drState.lastFix ? `
+                <div style="margin-top:12px;background:var(--color-bg-elevated);border-radius:10px;padding:12px">
+                    <div style="font-size:14px;font-weight:600;margin-bottom:12px">📍 Initialize Position</div>
+                    <p style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:12px">
+                        Start dead reckoning from your current position
+                    </p>
+                    <button id="celestial-init-dr" class="btn btn--primary btn--full" style="padding:10px">
+                        🚀 Initialize from Current Position
+                    </button>
+                </div>
+            ` : ''}
+        `;
+    }
+    
+    /**
+     * Render Training tab - primitive navigation methods
+     */
+    function renderCelestialTraining(lat, lon, date) {
+        const solarNoon = CelestialModule.calculateSolarNoon(lon, date);
+        const watchMethod = CelestialModule.calculateWatchMethod(date, lat);
+        const horizon = CelestialModule.calculateHorizonDistance(6);  // 6 ft standing
+        
+        return `
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                <div style="font-size:16px;font-weight:700;margin-bottom:8px">🎓 Primitive Navigation</div>
+                <p style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:12px">
+                    Learn to navigate without instruments using traditional methods
+                </p>
+            </div>
+            
+            <!-- Shadow Stick Method -->
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                <div style="font-size:14px;font-weight:600;margin-bottom:8px">🌿 Shadow Stick Method</div>
+                <p style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:12px">
+                    Find East-West direction using the sun and a stick
+                </p>
+                <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:12px;margin-bottom:12px">
+                    <ol style="font-size:11px;margin:0;padding-left:16px;color:rgba(255,255,255,0.8)">
+                        <li style="margin-bottom:4px">Place a vertical stick in the ground</li>
+                        <li style="margin-bottom:4px">Mark the shadow tip with a stone</li>
+                        <li style="margin-bottom:4px">Wait 15-30 minutes</li>
+                        <li style="margin-bottom:4px">Mark the new shadow tip</li>
+                        <li style="margin-bottom:4px">Connect the marks: this is your East-West line</li>
+                        <li>First mark = West, Second mark = East</li>
+                    </ol>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center;font-size:11px">
+                    <div style="background:rgba(34,197,94,0.1);padding:8px;border-radius:6px">
+                        <div style="color:#22c55e;font-weight:600">Best Time</div>
+                        <div>15-30 min wait</div>
+                    </div>
+                    <div style="background:rgba(59,130,246,0.1);padding:8px;border-radius:6px">
+                        <div style="color:#3b82f6;font-weight:600">Accuracy</div>
+                        <div>±5° typical</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Solar Noon -->
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                <div style="font-size:14px;font-weight:600;margin-bottom:8px">☀️ Solar Noon</div>
+                <p style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:12px">
+                    At solar noon, shadows point true North (N. hemisphere)
+                </p>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+                    <div style="background:rgba(251,191,36,0.1);padding:10px;border-radius:6px;text-align:center">
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5)">Solar Noon Today</div>
+                        <div style="font-size:18px;font-weight:700;color:#fbbf24">${solarNoon.formatted.time}</div>
+                    </div>
+                    <div style="background:rgba(0,0,0,0.2);padding:10px;border-radius:6px;text-align:center">
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5)">Equation of Time</div>
+                        <div style="font-size:18px;font-weight:700">${solarNoon.formatted.EoT}</div>
+                    </div>
+                </div>
+                <div style="font-size:10px;color:rgba(255,255,255,0.5);text-align:center">
+                    For longitude ${lon.toFixed(1)}°
+                </div>
+            </div>
+            
+            <!-- Watch Method -->
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                <div style="font-size:14px;font-weight:600;margin-bottom:8px">⌚ Watch Method</div>
+                <p style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:12px">
+                    Find direction using an analog watch
+                </p>
+                <div style="background:rgba(0,0,0,0.2);border-radius:8px;padding:12px;margin-bottom:12px">
+                    ${lat >= 0 ? `
+                        <div style="font-size:11px;color:rgba(255,255,255,0.8)">
+                            <strong>Northern Hemisphere:</strong>
+                            <ol style="margin:8px 0 0;padding-left:16px">
+                                <li style="margin-bottom:4px">Point the hour hand at the sun</li>
+                                <li style="margin-bottom:4px">Bisect angle between hour hand and 12</li>
+                                <li>This line points South</li>
+                            </ol>
+                        </div>
+                    ` : `
+                        <div style="font-size:11px;color:rgba(255,255,255,0.8)">
+                            <strong>Southern Hemisphere:</strong>
+                            <ol style="margin:8px 0 0;padding-left:16px">
+                                <li style="margin-bottom:4px">Point 12 o'clock at the sun</li>
+                                <li style="margin-bottom:4px">Bisect angle between 12 and hour hand</li>
+                                <li>This line points North</li>
+                            </ol>
+                        </div>
+                    `}
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center;font-size:11px">
+                    <div style="background:rgba(0,0,0,0.2);padding:8px;border-radius:6px">
+                        <div style="color:rgba(255,255,255,0.5)">Current Hour</div>
+                        <div style="font-weight:600">${watchMethod.formatted.hourHand}</div>
+                    </div>
+                    <div style="background:rgba(34,197,94,0.1);padding:8px;border-radius:6px">
+                        <div style="color:#22c55e">Points</div>
+                        <div style="font-weight:600">${watchMethod.formatted.direction}</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Hand Measurement -->
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px;margin-bottom:12px">
+                <div style="font-size:14px;font-weight:600;margin-bottom:8px">✋ Hand Measurement</div>
+                <p style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:12px">
+                    Measure angles using your hand at arm's length
+                </p>
+                <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:8px;text-align:center;margin-bottom:12px">
+                    <div style="background:rgba(0,0,0,0.2);padding:8px;border-radius:6px">
+                        <div style="font-size:16px">👆</div>
+                        <div style="font-size:10px">1 finger</div>
+                        <div style="font-size:12px;font-weight:600">2°</div>
+                    </div>
+                    <div style="background:rgba(0,0,0,0.2);padding:8px;border-radius:6px">
+                        <div style="font-size:16px">🤟</div>
+                        <div style="font-size:10px">3 fingers</div>
+                        <div style="font-size:12px;font-weight:600">5°</div>
+                    </div>
+                    <div style="background:rgba(0,0,0,0.2);padding:8px;border-radius:6px">
+                        <div style="font-size:16px">✊</div>
+                        <div style="font-size:10px">Fist</div>
+                        <div style="font-size:12px;font-weight:600">10°</div>
+                    </div>
+                    <div style="background:rgba(0,0,0,0.2);padding:8px;border-radius:6px">
+                        <div style="font-size:16px">🤙</div>
+                        <div style="font-size:10px">Span</div>
+                        <div style="font-size:12px;font-weight:600">20°</div>
+                    </div>
+                </div>
+                <div style="background:rgba(59,130,246,0.1);padding:10px;border-radius:6px;font-size:11px;text-align:center">
+                    <strong>Polaris Altitude ≈ Your Latitude</strong><br>
+                    Count fists from horizon to Polaris
+                </div>
+            </div>
+            
+            <!-- Horizon Distance -->
+            <div style="background:var(--color-bg-elevated);border-radius:10px;padding:12px">
+                <div style="font-size:14px;font-weight:600;margin-bottom:8px">👁️ Horizon Distance</div>
+                <p style="font-size:11px;color:rgba(255,255,255,0.6);margin-bottom:12px">
+                    How far can you see to the horizon?
+                </p>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+                    <div style="background:rgba(0,0,0,0.2);padding:10px;border-radius:6px;text-align:center">
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5)">Standing (6 ft)</div>
+                        <div style="font-size:16px;font-weight:700">${horizon.formatted.distance}</div>
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5)">${horizon.formatted.distanceKm}</div>
+                    </div>
+                    <div style="background:rgba(0,0,0,0.2);padding:10px;border-radius:6px;text-align:center">
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5)">Mast (20 ft)</div>
+                        <div style="font-size:16px;font-weight:700">5.2 nm</div>
+                        <div style="font-size:10px;color:rgba(255,255,255,0.5)">9.7 km</div>
+                    </div>
+                </div>
+                <div style="font-size:10px;color:rgba(255,255,255,0.5);text-align:center">
+                    Formula: 1.17 × √(height in feet) = nautical miles
+                </div>
+            </div>
+        `;
+    }
+    
+    /**
+     * Bind celestial panel events
+     */
+    function bindCelestialEvents() {
+        // Tab switching
+        container.querySelectorAll('.celestial-tab').forEach(btn => {
+            btn.onclick = () => {
+                celestialState.activeTab = btn.dataset.tab;
+                renderCelestial();
+            };
+        });
+        
+        // Sync position from map
+        const syncBtn = container.querySelector('#celestial-sync-pos');
+        if (syncBtn) {
+            syncBtn.onclick = () => {
+                if (typeof MapModule !== 'undefined') {
+                    const mapState = MapModule.getMapState();
+                    if (mapState) {
+                        celestialState.observerLat = mapState.lat;
+                        celestialState.observerLon = mapState.lon;
+                        renderCelestial();
+                    }
+                }
+            };
+        }
+        
+        // Position input changes
+        const latInput = container.querySelector('#celestial-lat');
+        const lonInput = container.querySelector('#celestial-lon');
+        if (latInput) {
+            latInput.onchange = () => {
+                celestialState.observerLat = parseFloat(latInput.value);
+            };
+        }
+        if (lonInput) {
+            lonInput.onchange = () => {
+                celestialState.observerLon = parseFloat(lonInput.value);
+            };
+        }
+        
+        // Record sight button
+        const recordBtn = container.querySelector('#celestial-record-sight');
+        if (recordBtn) {
+            recordBtn.onclick = () => {
+                const body = container.querySelector('#celestial-body-select')?.value;
+                const altDeg = parseFloat(container.querySelector('#celestial-obs-alt-deg')?.value) || 0;
+                const altMin = parseFloat(container.querySelector('#celestial-obs-alt-min')?.value) || 0;
+                const eyeHeight = parseFloat(container.querySelector('#celestial-eye-height')?.value) || 3;
+                
+                if (!body) {
+                    alert('Please select a celestial body');
+                    return;
+                }
+                
+                const Hs = altDeg + altMin / 60;
+                const date = new Date();
+                
+                // Start and complete observation in one step for manual entry
+                CelestialModule.startObservation(body, { eyeHeight });
+                CelestialModule.recordSight(Hs);
+                CelestialModule.completeObservation();
+                
+                renderCelestial();
+            };
+        }
+        
+        // Complete/Cancel observation
+        const completeBtn = container.querySelector('#celestial-complete-obs');
+        if (completeBtn) {
+            completeBtn.onclick = () => {
+                CelestialModule.completeObservation();
+                renderCelestial();
+            };
+        }
+        
+        const cancelBtn = container.querySelector('#celestial-cancel-obs');
+        if (cancelBtn) {
+            cancelBtn.onclick = () => {
+                CelestialModule.cancelObservation();
+                renderCelestial();
+            };
+        }
+        
+        // Clear sight log
+        const clearLogBtn = container.querySelector('#celestial-clear-log');
+        if (clearLogBtn) {
+            clearLogBtn.onclick = () => {
+                if (confirm('Clear all recorded sights?')) {
+                    CelestialModule.clearSightLog();
+                    renderCelestial();
+                }
+            };
+        }
+        
+        // Reduce sights
+        const reduceBtn = container.querySelector('#celestial-reduce-sights');
+        if (reduceBtn) {
+            reduceBtn.onclick = () => {
+                const apLat = parseFloat(container.querySelector('#celestial-ap-lat')?.value) || celestialState.observerLat;
+                const apLon = parseFloat(container.querySelector('#celestial-ap-lon')?.value) || celestialState.observerLon;
+                
+                const results = CelestialModule.reduceAllSights(apLat, apLon);
+                
+                if (results.length === 0) {
+                    alert('No sights to reduce');
+                    return;
+                }
+                
+                // Store LOPs
+                results.forEach(r => {
+                    if (!r.error) {
+                        CelestialModule.storeLOP(r);
+                    }
+                });
+                
+                renderCelestial();
+            };
+        }
+        
+        // Clear LOPs
+        const clearLopsBtn = container.querySelector('#celestial-clear-lops');
+        if (clearLopsBtn) {
+            clearLopsBtn.onclick = () => {
+                if (confirm('Clear all Lines of Position?')) {
+                    CelestialModule.clearLOPs();
+                    renderCelestial();
+                }
+            };
+        }
+        
+        // Calculate fix
+        const calcFixBtn = container.querySelector('#celestial-calc-fix');
+        if (calcFixBtn) {
+            calcFixBtn.onclick = () => {
+                const lops = CelestialModule.getLOPs();
+                if (lops.length < 2) {
+                    alert('Need at least 2 LOPs');
+                    return;
+                }
+                
+                const fix = CelestialModule.calculateLOPIntersection(lops[0], lops[1]);
+                
+                const resultDiv = container.querySelector('#celestial-fix-result');
+                if (resultDiv && fix && !fix.error) {
+                    resultDiv.innerHTML = `
+                        <div style="background:rgba(34,197,94,0.1);border-radius:10px;padding:12px;margin-bottom:12px">
+                            <div style="font-size:14px;font-weight:600;color:#22c55e;margin-bottom:8px">📍 Fix Calculated!</div>
+                            <div style="font-size:16px;font-weight:700">
+                                ${CelestialModule.formatAngle(fix.lat, true)}, ${CelestialModule.formatAngle(Math.abs(fix.lon))}${fix.lon >= 0 ? 'E' : 'W'}
+                            </div>
+                            <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:4px">
+                                Angle: ${fix.angle?.toFixed(1) || 'N/A'}°
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div style="background:rgba(239,68,68,0.1);border-radius:10px;padding:12px;margin-bottom:12px">
+                            <div style="color:#ef4444">Fix calculation failed: ${fix?.error || 'Unknown error'}</div>
+                        </div>
+                    `;
+                }
+            };
+        }
+        
+        // Initialize DR
+        const initDRBtn = container.querySelector('#celestial-init-dr');
+        if (initDRBtn) {
+            initDRBtn.onclick = () => {
+                const lat = celestialState.observerLat || 37.7749;
+                const lon = celestialState.observerLon || -122.4194;
+                
+                CelestialModule.initializeDR(
+                    { lat, lon }, 
+                    new Date(), 
+                    'manual', 
+                    { course: 0, speed: 0 }
+                );
+                
+                renderCelestial();
+            };
+        }
+        
+        // DR course/speed apply
+        const applyCSBtn = container.querySelector('.dr-apply-cs');
+        if (applyCSBtn) {
+            applyCSBtn.onclick = () => {
+                const course = parseFloat(container.querySelector('#dr-course')?.value) || 0;
+                const speed = parseFloat(container.querySelector('#dr-speed')?.value) || 0;
+                
+                CelestialModule.updateCourseSpeed(course, speed);
+                renderCelestial();
+            };
+        }
+        
+        // Quick course buttons
+        container.querySelectorAll('.dr-quick-course').forEach(btn => {
+            btn.onclick = () => {
+                const courseInput = container.querySelector('#dr-course');
+                if (courseInput) {
+                    courseInput.value = btn.dataset.course;
+                }
+            };
+        });
+        
+        // ETA calculation
+        const etaBtn = container.querySelector('.calculate-eta-btn');
+        if (etaBtn) {
+            etaBtn.onclick = () => {
+                const wpLat = parseFloat(container.querySelector('#wp-lat')?.value);
+                const wpLon = parseFloat(container.querySelector('#wp-lon')?.value);
+                
+                if (isNaN(wpLat) || isNaN(wpLon)) {
+                    alert('Please enter waypoint coordinates');
+                    return;
+                }
+                
+                const eta = CelestialModule.calculateETA({ lat: wpLat, lon: wpLon });
+                
+                const resultDiv = container.querySelector('#eta-result');
+                if (resultDiv) {
+                    resultDiv.style.display = 'block';
+                    resultDiv.innerHTML = CelestialModule.renderETAResult(eta);
+                }
+            };
+        }
+        
+        // Emergency methods
+        const noonSightBtn = container.querySelector('#celestial-noon-sight');
+        if (noonSightBtn) {
+            noonSightBtn.onclick = () => {
+                const lon = celestialState.observerLon || -122;
+                const passage = CelestialModule.calculateMeridianPassage(lon, new Date());
+                
+                alert(`Meridian Passage at ${lon.toFixed(1)}°:\n\n` +
+                      `Time: ${passage.formatted.timeUTC}\n` +
+                      `EoT: ${passage.EoT.toFixed(1)} min\n` +
+                      `Sun Dec: ${passage.formatted.sunDec}\n\n` +
+                      `At this time, measure sun's maximum altitude.\n` +
+                      `Latitude = 90° - altitude + declination`);
+            };
+        }
+        
+        const polarisBtn = container.querySelector('#celestial-polaris');
+        if (polarisBtn) {
+            polarisBtn.onclick = () => {
+                const lat = celestialState.observerLat || 37;
+                const lon = celestialState.observerLon || -122;
+                
+                if (lat < 0) {
+                    alert('Polaris is not visible from the Southern Hemisphere.\n\nUse the Southern Cross instead.');
+                    return;
+                }
+                
+                const finder = CelestialModule.calculatePolarisFinder(lat, lon, new Date());
+                
+                alert(`Polaris Finder:\n\n` +
+                      `Current Polaris Altitude: ${finder.formatted.polarisAlt}\n` +
+                      `Look toward: ${finder.formatted.polarisAz}\n\n` +
+                      `Your latitude ≈ Polaris altitude\n\n` +
+                      `How to find:\n` +
+                      finder.instructions.slice(0, 4).join('\n'));
+            };
+        }
+    }
+    
     /**
      * Get cardinal direction from bearing
      */
@@ -8683,6 +10218,29 @@ ${text}
                 <span>Show Track Breadcrumbs</span>
             </label>
             
+            <!-- Active Hike Widget -->
+            ${typeof HikingModule !== 'undefined' ? `
+                <div class="divider"></div>
+                <div class="section-label">🥾 Hiking Mode</div>
+                <div id="active-hike-widget">
+                    ${HikingModule.renderActiveHikeWidget()}
+                </div>
+                ${HikingModule.isHikeActive() ? `
+                    <div style="margin-top:12px">
+                        ${HikingModule.renderTrailLegend()}
+                    </div>
+                ` : ''}
+            ` : ''}
+            
+            <!-- Daylight Remaining Widget -->
+            ${typeof HikingModule !== 'undefined' ? `
+                <div class="divider"></div>
+                <div class="section-label">☀️ Daylight Status</div>
+                <div id="nav-daylight-widget">
+                    ${HikingModule.renderDaylightWidget()}
+                </div>
+            ` : ''}
+            
             <!-- GPS Status Reminder -->
             <div style="margin-top:16px;padding:12px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:10px">
                 <div style="font-size:12px;color:#3b82f6;display:flex;align-items:center;gap:8px">
@@ -8779,6 +10337,120 @@ ${text}
                 };
             }
         });
+        
+        // Start Hike button
+        const startHikeBtn = container.querySelector('#start-hike-btn');
+        if (startHikeBtn) {
+            startHikeBtn.onclick = () => {
+                if (typeof HikingModule === 'undefined') return;
+                
+                // Create inline modal for hike configuration
+                const modalOverlay = document.createElement('div');
+                modalOverlay.id = 'hike-config-modal';
+                modalOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+                
+                modalOverlay.innerHTML = `
+                    <div style="background:var(--color-bg-elevated, #1f2937);border-radius:16px;max-width:400px;width:100%;max-height:90vh;overflow-y:auto">
+                        <div style="padding:16px;border-bottom:1px solid rgba(255,255,255,0.1)">
+                            <div style="font-size:16px;font-weight:600">🥾 Start Hiking</div>
+                        </div>
+                        <div style="padding:16px">
+                            <div style="margin-bottom:16px">
+                                <label style="display:block;font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:6px">Target Distance (one-way, miles)</label>
+                                <input type="number" id="hike-target-distance" value="2" min="0.1" max="50" step="0.1" 
+                                       style="width:100%;padding:10px;font-size:14px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:8px;color:white">
+                            </div>
+                            <div style="margin-bottom:16px">
+                                <label style="display:block;font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:6px">Expected Elevation Gain (feet)</label>
+                                <input type="number" id="hike-elev-gain" value="500" min="0" max="10000" step="100" 
+                                       style="width:100%;padding:10px;font-size:14px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:8px;color:white">
+                            </div>
+                            <div style="margin-bottom:16px">
+                                <label style="display:block;font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:6px">Expected Elevation Loss (feet)</label>
+                                <input type="number" id="hike-elev-loss" value="100" min="0" max="10000" step="100" 
+                                       style="width:100%;padding:10px;font-size:14px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.2);border-radius:8px;color:white">
+                            </div>
+                            <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;cursor:pointer">
+                                <input type="checkbox" id="hike-out-and-back" checked style="width:18px;height:18px">
+                                <span style="font-size:12px">Out-and-back hike (return same way)</span>
+                            </label>
+                            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                                <input type="checkbox" id="hike-turnaround-alerts" checked style="width:18px;height:18px">
+                                <span style="font-size:12px">Enable turnaround time alerts</span>
+                            </label>
+                        </div>
+                        <div style="padding:16px;border-top:1px solid rgba(255,255,255,0.1);display:flex;gap:12px;justify-content:flex-end">
+                            <button id="hike-cancel-btn" class="btn btn--secondary" style="padding:10px 20px">Cancel</button>
+                            <button id="hike-start-btn" class="btn btn--primary" style="padding:10px 20px">Start Hike</button>
+                        </div>
+                    </div>
+                `;
+                
+                document.body.appendChild(modalOverlay);
+                
+                // Focus first input
+                setTimeout(() => {
+                    const distInput = document.getElementById('hike-target-distance');
+                    if (distInput) distInput.focus();
+                }, 100);
+                
+                // Cancel button
+                document.getElementById('hike-cancel-btn').onclick = () => {
+                    modalOverlay.remove();
+                };
+                
+                // Click overlay to close
+                modalOverlay.onclick = (e) => {
+                    if (e.target === modalOverlay) {
+                        modalOverlay.remove();
+                    }
+                };
+                
+                // Start button
+                document.getElementById('hike-start-btn').onclick = () => {
+                    const distance = parseFloat(document.getElementById('hike-target-distance').value) || 2;
+                    const gain = parseFloat(document.getElementById('hike-elev-gain').value) || 0;
+                    const loss = parseFloat(document.getElementById('hike-elev-loss').value) || 0;
+                    const outAndBack = document.getElementById('hike-out-and-back').checked;
+                    const alerts = document.getElementById('hike-turnaround-alerts').checked;
+                    
+                    HikingModule.updateSettings({ turnaroundAlerts: alerts });
+                    HikingModule.startHike({
+                        targetDistance: distance,
+                        elevationGain: gain,
+                        elevationLoss: loss,
+                        outAndBack: outAndBack
+                    });
+                    
+                    modalOverlay.remove();
+                    renderNavigation();
+                    
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('Hike started! Trail recording active.', 'success');
+                    }
+                };
+            };
+        }
+        
+        // Stop Hike button
+        const stopHikeBtn = container.querySelector('#stop-hike-btn');
+        if (stopHikeBtn) {
+            stopHikeBtn.onclick = () => {
+                if (typeof HikingModule === 'undefined') return;
+                
+                const summary = HikingModule.stopHike();
+                renderNavigation();
+                
+                if (summary && typeof ModalsModule !== 'undefined') {
+                    const stats = summary.trail?.length > 1 ? HikingModule.getTrailStats() : null;
+                    ModalsModule.showToast(
+                        `Hike complete! ${stats ? stats.totalDistance.toFixed(2) + ' mi, ' + HikingModule.formatDuration(summary.duration / 60) : 'Trail saved.'}`,
+                        'success',
+                        5000
+                    );
+                }
+            };
+        }
     }
     
     /**
@@ -12056,6 +13728,12 @@ ${text}
     let sstvTransmitMode = 'Robot36';
     let sstvTransmitSource = 'camera';
     
+    // TX image state - persists across re-renders
+    let sstvCapturedImageData = null;  // Stored ImageData for TX preview
+    let sstvCameraCapturing = false;   // Flag to prevent re-renders during capture
+    let sstvRestorePending = false;    // Flag to prevent multiple restore operations
+    let sstvPreviewDisplayed = false;  // Flag to track if preview is currently shown
+    
     // Annotation state
     let sstvAnnotationTool = 'pen';
     let sstvAnnotationColor = '#ff0000';
@@ -12151,6 +13829,12 @@ ${text}
         container.querySelectorAll('[data-sstv-tab]').forEach(btn => {
             btn.onclick = () => {
                 sstvActiveTab = btn.dataset.sstvTab;
+                
+                // Update tab button active states
+                container.querySelectorAll('[data-sstv-tab]').forEach(b => {
+                    b.classList.toggle('chip--active', b.dataset.sstvTab === sstvActiveTab);
+                });
+                
                 document.getElementById('sstv-content').innerHTML = renderSSTVTabContent();
                 attachSSTVHandlers();
             };
@@ -12160,6 +13844,11 @@ ${text}
     }
 
     function renderSSTVTabContent() {
+        // Reset preview displayed flag when content is re-rendered (canvas gets recreated)
+        if (sstvActiveTab === 'transmit') {
+            sstvPreviewDisplayed = false;
+        }
+        
         switch (sstvActiveTab) {
             case 'receive': return renderSSTVReceive();
             case 'transmit': return renderSSTVTransmit();
@@ -12472,11 +14161,14 @@ ${text}
                 <div id="sstv-tx-preview" style="background:#000;border-radius:8px;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;margin-bottom:16px;position:relative;overflow:hidden">
                     <canvas id="sstv-tx-canvas" style="max-width:100%;max-height:100%;display:none;position:absolute"></canvas>
                     <canvas id="sstv-annotation-canvas" style="max-width:100%;max-height:100%;display:none;position:absolute;cursor:crosshair"></canvas>
-                    <span id="sstv-tx-placeholder" style="color:var(--text-secondary)">Select image source</span>
+                    <span id="sstv-tx-placeholder" style="color:var(--text-secondary)">${sstvCapturedImageData ? 'Loading preview...' : 'Select image source'}</span>
                     ${settings.callsign && settings.autoCallsignOverlay ? `
                         <div style="position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,0.6);padding:4px 8px;border-radius:4px;font-family:monospace;font-size:12px;z-index:10;pointer-events:none">
                             ${settings.callsign}${settings.gridSquare ? ' ' + settings.gridSquare : ''}
                         </div>
+                    ` : ''}
+                    ${sstvCapturedImageData ? `
+                        <button id="sstv-clear-preview-btn" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);border:none;border-radius:4px;padding:4px 8px;font-size:11px;color:#fff;cursor:pointer;z-index:10" title="Clear image">✕</button>
                     ` : ''}
                 </div>
 
@@ -13951,7 +15643,7 @@ ${text}
         if (!imageData) return;
         
         // Switch to transmit tab
-        sstvCurrentTab = 'transmit';
+        sstvActiveTab = 'transmit';
         document.getElementById('sstv-content').innerHTML = renderSSTVTabContent();
         attachSSTVHandlers();
         
@@ -14128,6 +15820,16 @@ ${text}
             };
         }
 
+        // Clear preview button
+        const clearPreviewBtn = container.querySelector('#sstv-clear-preview-btn');
+        if (clearPreviewBtn) {
+            clearPreviewBtn.onclick = () => {
+                clearTXPreview();
+                document.getElementById('sstv-content').innerHTML = renderSSTVTabContent();
+                attachSSTVHandlers();
+            };
+        }
+
         const transmitBtn = container.querySelector('#sstv-transmit-btn');
         if (transmitBtn) {
             transmitBtn.onclick = async () => {
@@ -14141,6 +15843,12 @@ ${text}
                         }
                     }
                     await SSTVModule.transmit(canvas, sstvTransmitMode);
+                    
+                    // Clear stored image after successful transmit
+                    sstvCapturedImageData = null;
+                    sstvPreviewDisplayed = false;
+                    sstvAnnotationHistory = [];
+                    
                     renderSSTV();
                 } else {
                     if (typeof ModalsModule !== 'undefined') {
@@ -14366,6 +16074,9 @@ ${text}
         if (sstvActiveTab === 'enhance') {
             loadEnhanceCacheInfo();
         }
+        
+        // Restore TX preview if we have a captured image and are on transmit tab
+        restoreTXPreview();
     }
 
     async function loadMapForTransmit() {
@@ -14382,6 +16093,11 @@ ${text}
 
     async function loadCameraForTransmit() {
         try {
+            // Show loading indicator
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('📷 Initializing camera...', 'info');
+            }
+            
             const stream = await navigator.mediaDevices.getUserMedia({ 
                 video: { 
                     facingMode: 'environment',
@@ -14419,6 +16135,11 @@ ${text}
                 throw new Error('Invalid video dimensions');
             }
             
+            // Camera warm-up delay: Allow auto-exposure and auto-white-balance to adjust
+            // Many cameras need 1-2 seconds to properly adjust to lighting conditions
+            console.log('[SSTV] Camera warming up (auto-exposure adjustment)...');
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            
             // Capture frame
             const canvas = document.createElement('canvas');
             canvas.width = video.videoWidth;
@@ -14431,7 +16152,7 @@ ${text}
             const imageData = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
             displayTransmitPreview(imageData);
             
-            console.log(`[SSTV] Camera capture: ${canvas.width}x${canvas.height}`);
+            console.log(`[SSTV] Camera capture complete: ${canvas.width}x${canvas.height} (after 1.5s warm-up)`);
             
         } catch (err) {
             console.error('[SSTV] Failed to access camera:', err);
@@ -14458,18 +16179,36 @@ ${text}
         reader.readAsDataURL(file);
     }
 
-    function displayTransmitPreview(imageData) {
+    function displayTransmitPreview(imageData, retryCount = 0) {
+        const MAX_RETRIES = 5;
+        const RETRY_DELAY = 200;
+        
+        // Store the image data so it persists across re-renders
+        if (imageData && imageData.width > 0 && imageData.height > 0) {
+            sstvCapturedImageData = imageData;
+        }
+        
         const canvas = document.getElementById('sstv-tx-canvas');
         const placeholder = document.getElementById('sstv-tx-placeholder');
         
-        // Validate inputs
+        // If canvas doesn't exist yet, retry after a delay
         if (!canvas || !placeholder) {
-            console.error('[SSTV] TX canvas elements not found');
+            if (retryCount < MAX_RETRIES) {
+                console.log(`[SSTV] TX canvas not ready, retry ${retryCount + 1}/${MAX_RETRIES} in ${RETRY_DELAY}ms`);
+                setTimeout(() => {
+                    displayTransmitPreview(sstvCapturedImageData, retryCount + 1);
+                }, RETRY_DELAY);
+            } else {
+                console.warn('[SSTV] TX canvas not found after max retries - image saved for manual restore');
+            }
             return;
         }
         
-        if (!imageData || !imageData.width || !imageData.height || imageData.width === 0 || imageData.height === 0) {
-            console.error('[SSTV] Invalid image data:', imageData?.width, 'x', imageData?.height);
+        // Use stored image data if current is invalid
+        const dataToUse = (imageData && imageData.width > 0) ? imageData : sstvCapturedImageData;
+        
+        if (!dataToUse || !dataToUse.width || !dataToUse.height || dataToUse.width === 0 || dataToUse.height === 0) {
+            console.error('[SSTV] Invalid image data:', dataToUse?.width, 'x', dataToUse?.height);
             if (typeof ModalsModule !== 'undefined') {
                 ModalsModule.showToast('Invalid image data', 'error');
             }
@@ -14489,19 +16228,22 @@ ${text}
             
             // Draw scaled image
             const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = imageData.width;
-            tempCanvas.height = imageData.height;
-            tempCanvas.getContext('2d').putImageData(imageData, 0, 0);
+            tempCanvas.width = dataToUse.width;
+            tempCanvas.height = dataToUse.height;
+            tempCanvas.getContext('2d').putImageData(dataToUse, 0, 0);
             
             canvas.getContext('2d').drawImage(tempCanvas, 0, 0, mode.width, mode.height);
             
             canvas.style.display = 'block';
             placeholder.style.display = 'none';
             
+            // Mark preview as displayed
+            sstvPreviewDisplayed = true;
+            
             // Initialize annotation canvas
             setTimeout(() => initAnnotationCanvas(), 50);
             
-            console.log(`[SSTV] Preview loaded: ${imageData.width}x${imageData.height} → ${mode.width}x${mode.height}`);
+            console.log(`[SSTV] Preview loaded: ${dataToUse.width}x${dataToUse.height} → ${mode.width}x${mode.height}`);
             
         } catch (err) {
             console.error('[SSTV] Failed to display preview:', err);
@@ -14509,6 +16251,68 @@ ${text}
                 ModalsModule.showToast('Failed to load image preview', 'error');
             }
         }
+    }
+    
+    /**
+     * Restore captured TX image after re-render
+     */
+    function restoreTXPreview() {
+        // Only restore if we have captured data, on transmit tab, and not already restoring/displayed
+        if (!sstvCapturedImageData || sstvActiveTab !== 'transmit') {
+            return;
+        }
+        
+        // Prevent multiple concurrent restore operations
+        if (sstvRestorePending) {
+            return;
+        }
+        
+        // If preview is already displayed and canvas is visible, don't restore again
+        const existingCanvas = document.getElementById('sstv-tx-canvas');
+        if (sstvPreviewDisplayed && existingCanvas && existingCanvas.style.display === 'block') {
+            return;
+        }
+        
+        sstvRestorePending = true;
+        
+        // Small delay to ensure DOM is ready
+        setTimeout(() => {
+            const canvas = document.getElementById('sstv-tx-canvas');
+            const placeholder = document.getElementById('sstv-tx-placeholder');
+            
+            if (canvas && placeholder && sstvCapturedImageData) {
+                displayTransmitPreview(sstvCapturedImageData);
+                console.log('[SSTV] TX preview restored after re-render');
+            }
+            
+            sstvRestorePending = false;
+        }, 100);
+    }
+    
+    /**
+     * Clear stored TX image (call when user wants to start fresh)
+     */
+    function clearTXPreview() {
+        sstvCapturedImageData = null;
+        sstvPreviewDisplayed = false;
+        sstvRestorePending = false;
+        
+        const canvas = document.getElementById('sstv-tx-canvas');
+        const placeholder = document.getElementById('sstv-tx-placeholder');
+        const annotationCanvas = document.getElementById('sstv-annotation-canvas');
+        const toolbar = document.getElementById('sstv-annotation-toolbar');
+        
+        if (canvas) {
+            canvas.style.display = 'none';
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        if (placeholder) placeholder.style.display = '';
+        if (annotationCanvas) annotationCanvas.style.display = 'none';
+        if (toolbar) toolbar.style.display = 'none';
+        
+        sstvAnnotationHistory = [];
+        console.log('[SSTV] TX preview cleared');
     }
 
     function showSSTVImageDetail(id) {

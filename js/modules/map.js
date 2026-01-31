@@ -214,6 +214,13 @@ const MapModule = (function() {
     // Custom tile layers (for satellite weather, etc.)
     // Map of layerId -> { url, opacity, maxZoom, attribution, zIndex }
     const customTileLayers = new Map();
+    
+    // Custom overlay markers (for AQI stations, etc.)
+    // Map of layerId -> { markers: [...], visible: true, onClick: fn }
+    const customOverlayMarkers = new Map();
+    
+    // Callbacks for map movement/zoom (for external modules like AQI)
+    const moveCallbacks = [];
 
     // Track initialization state
     let initialized = false;
@@ -811,6 +818,7 @@ const MapModule = (function() {
         renderDrawingRegion(width, height);
         renderRFLOSOverlay(width, height);
         renderStreamGaugeOverlay(width, height);
+        renderOverlayMarkers(width, height);
         
         // Restore state (removes rotation)
         ctx.restore();
@@ -862,6 +870,16 @@ const MapModule = (function() {
             ctx.arc(pixel.x, pixel.y, 3, 0, Math.PI * 2);
             ctx.fill();
         });
+        
+        // Render enhanced hiking trail if active
+        if (typeof HikingModule !== 'undefined' && HikingModule.isHikeActive()) {
+            HikingModule.renderHikingTrail(ctx, latLonToPixel, {
+                colorBySpeed: true,
+                showDistanceMarkers: true,
+                lineWidth: 4,
+                markerInterval: 0.25
+            });
+        }
     }
     
     /**
@@ -1167,6 +1185,179 @@ const MapModule = (function() {
                 }
             }
         }
+    }
+
+    // ==================== CUSTOM OVERLAY MARKERS ====================
+    
+    /**
+     * Add a custom overlay marker layer (for AQI stations, etc.)
+     * @param {string} layerId - Unique identifier for the layer
+     * @param {Array} markers - Array of marker objects with {lat, lon, color, value, label, data}
+     * @param {Object} options - Optional: { onClick: fn, tooltip: true }
+     */
+    function addOverlayMarkers(layerId, markers = [], options = {}) {
+        customOverlayMarkers.set(layerId, {
+            markers: markers,
+            visible: true,
+            onClick: options.onClick || null,
+            showTooltip: options.tooltip !== false,
+            markerRadius: options.radius || 12
+        });
+        render();
+        return true;
+    }
+    
+    /**
+     * Update markers in an existing overlay layer
+     */
+    function updateOverlayMarkers(layerId, markers) {
+        const layer = customOverlayMarkers.get(layerId);
+        if (!layer) return false;
+        
+        layer.markers = markers;
+        render();
+        return true;
+    }
+    
+    /**
+     * Remove an overlay marker layer
+     */
+    function removeOverlayMarkers(layerId) {
+        if (!customOverlayMarkers.has(layerId)) return false;
+        customOverlayMarkers.delete(layerId);
+        render();
+        return true;
+    }
+    
+    /**
+     * Check if overlay marker layer exists
+     */
+    function hasOverlayMarkers(layerId) {
+        return customOverlayMarkers.has(layerId);
+    }
+    
+    /**
+     * Render all custom overlay markers
+     */
+    function renderOverlayMarkers(width, height) {
+        if (customOverlayMarkers.size === 0) return;
+        
+        customOverlayMarkers.forEach((layer, layerId) => {
+            if (!layer.visible || !layer.markers) return;
+            
+            const radius = layer.markerRadius || 12;
+            
+            layer.markers.forEach(marker => {
+                if (!marker.lat || !marker.lon) return;
+                
+                const pixel = latLonToPixel(marker.lat, marker.lon);
+                
+                // Skip if off screen
+                if (pixel.x < -50 || pixel.x > width + 50 || pixel.y < -50 || pixel.y > height + 50) return;
+                
+                // Draw outer ring (white border)
+                ctx.beginPath();
+                ctx.arc(pixel.x, pixel.y, radius, 0, Math.PI * 2);
+                ctx.fillStyle = marker.color || '#808080';
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Draw value text inside marker
+                if (marker.value !== undefined && marker.value !== null) {
+                    ctx.font = 'bold 9px system-ui, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    
+                    // Text color based on marker color brightness
+                    const textColor = marker.textColor || '#ffffff';
+                    ctx.fillStyle = textColor;
+                    ctx.fillText(String(marker.value), pixel.x, pixel.y);
+                }
+                
+                // Store pixel position for click detection
+                marker._screenX = pixel.x;
+                marker._screenY = pixel.y;
+                marker._radius = radius;
+            });
+        });
+    }
+    
+    /**
+     * Handle click on overlay markers
+     */
+    function handleOverlayMarkerClick(screenX, screenY) {
+        let clickedMarker = null;
+        let clickedLayerId = null;
+        
+        customOverlayMarkers.forEach((layer, layerId) => {
+            if (!layer.visible || !layer.markers || clickedMarker) return;
+            
+            layer.markers.forEach(marker => {
+                if (clickedMarker) return;
+                if (marker._screenX === undefined) return;
+                
+                const dx = screenX - marker._screenX;
+                const dy = screenY - marker._screenY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance <= (marker._radius || 12) + 5) {
+                    clickedMarker = marker;
+                    clickedLayerId = layerId;
+                }
+            });
+        });
+        
+        if (clickedMarker && clickedLayerId) {
+            const layer = customOverlayMarkers.get(clickedLayerId);
+            if (layer?.onClick) {
+                layer.onClick(clickedMarker, clickedLayerId);
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    // ==================== MAP MOVEMENT CALLBACKS ====================
+    
+    /**
+     * Register a callback for map movement (pan/zoom)
+     * @param {Function} callback - Function to call when map moves
+     * @returns {Function} - Unsubscribe function
+     */
+    function onMoveEnd(callback) {
+        if (typeof callback === 'function') {
+            moveCallbacks.push(callback);
+        }
+        // Return unsubscribe function
+        return () => {
+            const index = moveCallbacks.indexOf(callback);
+            if (index > -1) {
+                moveCallbacks.splice(index, 1);
+            }
+        };
+    }
+    
+    /**
+     * Notify all move callbacks (debounced)
+     */
+    let moveEndTimeout = null;
+    function notifyMoveEnd() {
+        if (moveEndTimeout) {
+            clearTimeout(moveEndTimeout);
+        }
+        moveEndTimeout = setTimeout(() => {
+            moveCallbacks.forEach(cb => {
+                try {
+                    cb(getMapState());
+                } catch (e) {
+                    console.error('Move callback error:', e);
+                }
+            });
+            moveEndTimeout = null;
+        }, 300);
     }
 
     function renderGrid(width, height) {
@@ -2475,6 +2666,11 @@ const MapModule = (function() {
             }
         }
         
+        // Check if clicked on a custom overlay marker (AQI stations, etc.)
+        if (handleOverlayMarkerClick(x, y)) {
+            return;
+        }
+        
         const waypoints = State.get('waypoints');
         const clickedWp = waypoints.find(wp => {
             const lat = wp.lat || (37.4215 + (wp.y - 50) * 0.002);
@@ -3303,6 +3499,9 @@ const MapModule = (function() {
         
         // Update declination for new position
         updateDeclinationDisplay();
+        
+        // Notify move callbacks (debounced)
+        notifyMoveEnd();
     }
     
     /**
@@ -3451,7 +3650,16 @@ const MapModule = (function() {
         removeCustomTileLayer,
         getCustomTileLayers,
         setCustomLayerOpacity,
-        setLayerOpacity: setCustomLayerOpacity  // Alias for compatibility
+        setLayerOpacity: setCustomLayerOpacity,  // Alias for compatibility
+        
+        // Custom overlay markers (for AQI stations, etc.)
+        addOverlayMarkers,
+        updateOverlayMarkers,
+        removeOverlayMarkers,
+        hasOverlayMarkers,
+        
+        // Map movement callbacks
+        onMoveEnd
     };
 })();
 

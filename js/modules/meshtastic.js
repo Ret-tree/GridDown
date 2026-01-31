@@ -39,17 +39,69 @@ const MeshtasticModule = (function() {
         ROUTE: 'route',
         SOS: 'sos',
         CHECKIN: 'checkin',
-        ACK: 'ack'
+        ACK: 'ack',
+        // PKI message types
+        PUBLIC_KEY: 'public_key',       // Broadcasting/sharing public key
+        KEY_REQUEST: 'key_request',     // Requesting someone's public key
+        KEY_RESPONSE: 'key_response',   // Response to key request
+        // Direct Message types
+        DM: 'dm',                        // Encrypted direct message
+        DM_ACK: 'dm_ack',                // DM delivery acknowledgment
+        DM_READ: 'dm_read'               // DM read receipt
+    };
+    
+    // Message delivery status
+    const DeliveryStatus = {
+        PENDING: 'pending',     // Queued for sending
+        SENT: 'sent',           // Sent to mesh (no ACK yet)
+        DELIVERED: 'delivered', // ACK received from recipient
+        READ: 'read',           // Read receipt received
+        FAILED: 'failed'        // Send failed or timed out
     };
     
     // Position update interval (ms)
     const POSITION_BROADCAST_INTERVAL = 60000; // 1 minute
     const STALE_THRESHOLD = 300000; // 5 minutes
     const OFFLINE_THRESHOLD = 900000; // 15 minutes
+    const ACK_TIMEOUT = 30000; // 30 seconds to wait for ACK
+    const KEY_REQUEST_TIMEOUT = 60000; // 60 seconds to wait for key response
+    
+    // Retry configuration
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS = [5000, 15000, 30000]; // Exponential backoff: 5s, 15s, 30s
     
     // Message size limits (Meshtastic has ~237 byte payload limit)
     const MAX_MESSAGE_SIZE = 200;
     const MAX_CHUNK_SIZE = 180;
+    
+    // Default Meshtastic channels (US region presets)
+    // These use the publicly known default PSK - NOT secure for private comms
+    const DEFAULT_CHANNELS = [
+        {
+            id: 'primary',
+            index: 0,
+            name: 'Primary',
+            psk: null, // Default Meshtastic PSK (public)
+            isDefault: true,
+            isPrivate: false
+        },
+        {
+            id: 'longfast',
+            index: 1,
+            name: 'LongFast',
+            psk: null,
+            isDefault: true,
+            isPrivate: false
+        },
+        {
+            id: 'longslow',
+            index: 2,
+            name: 'LongSlow',
+            psk: null,
+            isDefault: true,
+            isPrivate: false
+        }
+    ];
 
     // =========================================================================
     // STATE
@@ -72,7 +124,36 @@ const MeshtasticModule = (function() {
         
         // Team tracking
         nodes: new Map(), // nodeNum -> nodeInfo
-        messages: [],     // Message history
+        messages: [],     // Message history (all channels)
+        
+        // Channel management
+        channels: [...DEFAULT_CHANNELS], // Available channels
+        activeChannelId: 'primary',      // Currently selected channel
+        
+        // Message state tracking
+        messageStates: new Map(),        // messageId -> { status, sentAt, ackAt, retries }
+        channelReadState: new Map(),     // channelId -> { lastReadAt, lastReadMessageId }
+        pendingAcks: new Map(),          // messageId -> { timeout, message }
+        
+        // PKI (Public Key Infrastructure) for DM encryption
+        myKeyPair: null,                 // { publicKey, privateKey, createdAt }
+        peerPublicKeys: new Map(),       // nodeId -> { publicKey, sharedSecret, receivedAt, verified }
+        pendingKeyRequests: new Map(),   // nodeId -> { requestedAt, callback }
+        
+        // Direct Messages
+        dmConversations: new Map(),      // nodeId -> [messages]
+        activeDMContact: null,           // Currently viewing DM thread (nodeId or null)
+        dmUnreadCounts: new Map(),       // nodeId -> unread count
+        pendingDMs: new Map(),           // nodeId -> [queued messages awaiting key]
+        
+        // Batch 3: Read receipts
+        readReceiptsEnabled: true,       // Whether to send read receipts
+        
+        // Batch 3: Message retry tracking
+        pendingRetries: new Map(),       // messageId -> { message, retryCount, nextRetryAt, timeout }
+        
+        // Batch 3: Deleted messages
+        deletedMessageIds: new Set(),    // Messages deleted by user (hidden from view)
         
         // Intervals (no longer needed - using EventManager)
         positionInterval: null,
@@ -82,7 +163,12 @@ const MeshtasticModule = (function() {
         onMessage: null,
         onPositionUpdate: null,
         onConnectionChange: null,
-        onNodeUpdate: null
+        onNodeUpdate: null,
+        onChannelChange: null,
+        onUnreadChange: null,
+        onDMReceived: null,
+        onKeyExchange: null,
+        onReadReceipt: null
     };
 
     // Scoped event manager for cleanup
@@ -159,6 +245,86 @@ const MeshtasticModule = (function() {
                 state.longName = saved.longName || state.longName;
                 state.shortName = saved.shortName || state.shortName;
                 state.myNodeId = saved.nodeId || null;
+                state.activeChannelId = saved.activeChannelId || 'primary';
+                
+                // Load custom channels (merge with defaults)
+                if (saved.customChannels && Array.isArray(saved.customChannels)) {
+                    // Keep default channels and add custom ones
+                    state.channels = [
+                        ...DEFAULT_CHANNELS,
+                        ...saved.customChannels.filter(c => !c.isDefault)
+                    ];
+                }
+                
+                // Load channel read state
+                if (saved.channelReadState) {
+                    state.channelReadState = new Map(Object.entries(saved.channelReadState));
+                }
+                
+                // Load DM unread counts
+                if (saved.dmUnreadCounts) {
+                    state.dmUnreadCounts = new Map(Object.entries(saved.dmUnreadCounts));
+                }
+            }
+            
+            // Initialize read state for any channels that don't have it
+            state.channels.forEach(channel => {
+                if (!state.channelReadState.has(channel.id)) {
+                    state.channelReadState.set(channel.id, {
+                        lastReadAt: Date.now(),
+                        lastReadMessageId: null
+                    });
+                }
+            });
+            
+            // Load persisted messages
+            const savedMessages = await Storage.Settings.get('meshtastic_messages');
+            if (savedMessages && Array.isArray(savedMessages)) {
+                state.messages = savedMessages.slice(-100); // Keep last 100
+                
+                // Rebuild message states from saved messages
+                savedMessages.forEach(msg => {
+                    if (msg.id && msg.deliveryStatus) {
+                        state.messageStates.set(msg.id, {
+                            status: msg.deliveryStatus,
+                            sentAt: msg.timestamp,
+                            ackAt: msg.ackAt || null
+                        });
+                    }
+                });
+            }
+            
+            // Load PKI key pair
+            const savedKeyPair = await Storage.Settings.get('meshtastic_keypair');
+            if (savedKeyPair && savedKeyPair.publicKey && savedKeyPair.privateKey) {
+                state.myKeyPair = savedKeyPair;
+                console.log('Loaded existing PKI key pair');
+            }
+            
+            // Load peer public keys
+            const savedPeerKeys = await Storage.Settings.get('meshtastic_peer_keys');
+            if (savedPeerKeys) {
+                state.peerPublicKeys = new Map(Object.entries(savedPeerKeys));
+            }
+            
+            // Load DM conversations
+            const savedDMs = await Storage.Settings.get('meshtastic_dm_conversations');
+            if (savedDMs) {
+                Object.entries(savedDMs).forEach(([nodeId, messages]) => {
+                    state.dmConversations.set(nodeId, messages.slice(-50)); // Keep last 50 per contact
+                });
+            }
+            
+            // Batch 3: Load read receipts setting
+            const savedPrefs = await Storage.Settings.get('meshtastic_preferences');
+            if (savedPrefs) {
+                state.readReceiptsEnabled = savedPrefs.readReceiptsEnabled !== false; // Default true
+            }
+            
+            // Batch 3: Load deleted message IDs
+            const savedDeleted = await Storage.Settings.get('meshtastic_deleted');
+            if (savedDeleted && Array.isArray(savedDeleted)) {
+                state.deletedMessageIds = new Set(savedDeleted);
             }
         } catch (e) {
             console.warn('Could not load Meshtastic settings:', e);
@@ -170,14 +336,116 @@ const MeshtasticModule = (function() {
      */
     async function saveSettings() {
         try {
+            // Convert Map to object for storage
+            const channelReadStateObj = {};
+            state.channelReadState.forEach((value, key) => {
+                channelReadStateObj[key] = value;
+            });
+            
+            const dmUnreadCountsObj = {};
+            state.dmUnreadCounts.forEach((value, key) => {
+                dmUnreadCountsObj[key] = value;
+            });
+            
             await Storage.Settings.set('meshtastic', {
                 longName: state.longName,
                 shortName: state.shortName,
-                nodeId: state.myNodeId
+                nodeId: state.myNodeId,
+                activeChannelId: state.activeChannelId,
+                customChannels: state.channels.filter(c => !c.isDefault),
+                channelReadState: channelReadStateObj,
+                dmUnreadCounts: dmUnreadCountsObj
+            });
+            
+            // Batch 3: Save preferences
+            await Storage.Settings.set('meshtastic_preferences', {
+                readReceiptsEnabled: state.readReceiptsEnabled
             });
         } catch (e) {
             console.warn('Could not save Meshtastic settings:', e);
         }
+    }
+    
+    /**
+     * Batch 3: Save deleted message IDs (debounced)
+     */
+    let _saveDeletedTimeout = null;
+    async function saveDeletedMessages() {
+        if (_saveDeletedTimeout) clearTimeout(_saveDeletedTimeout);
+        _saveDeletedTimeout = setTimeout(async () => {
+            try {
+                await Storage.Settings.set('meshtastic_deleted', [...state.deletedMessageIds]);
+            } catch (e) {
+                console.warn('Could not save deleted messages:', e);
+            }
+        }, 1000);
+    }
+    
+    /**
+     * Save PKI key pair to storage
+     */
+    async function saveKeyPair() {
+        if (!state.myKeyPair) return;
+        try {
+            await Storage.Settings.set('meshtastic_keypair', state.myKeyPair);
+        } catch (e) {
+            console.warn('Could not save PKI key pair:', e);
+        }
+    }
+    
+    /**
+     * Save peer public keys to storage
+     */
+    async function savePeerKeys() {
+        try {
+            const peerKeysObj = {};
+            state.peerPublicKeys.forEach((value, key) => {
+                peerKeysObj[key] = value;
+            });
+            await Storage.Settings.set('meshtastic_peer_keys', peerKeysObj);
+        } catch (e) {
+            console.warn('Could not save peer keys:', e);
+        }
+    }
+    
+    /**
+     * Save DM conversations to storage (debounced)
+     */
+    let _saveDMsTimeout = null;
+    async function saveDMConversations() {
+        if (_saveDMsTimeout) clearTimeout(_saveDMsTimeout);
+        _saveDMsTimeout = setTimeout(async () => {
+            try {
+                const dmsObj = {};
+                state.dmConversations.forEach((messages, nodeId) => {
+                    dmsObj[nodeId] = messages.slice(-50); // Keep last 50 per contact
+                });
+                await Storage.Settings.set('meshtastic_dm_conversations', dmsObj);
+            } catch (e) {
+                console.warn('Could not save DM conversations:', e);
+            }
+        }, 1000);
+    }
+    
+    /**
+     * Save messages to storage (debounced)
+     */
+    let _saveMessagesTimeout = null;
+    async function saveMessages() {
+        // Debounce to avoid excessive writes
+        if (_saveMessagesTimeout) clearTimeout(_saveMessagesTimeout);
+        _saveMessagesTimeout = setTimeout(async () => {
+            try {
+                // Save messages with delivery status
+                const messagesToSave = state.messages.map(msg => ({
+                    ...msg,
+                    deliveryStatus: state.messageStates.get(msg.id)?.status || DeliveryStatus.SENT
+                }));
+                await Storage.Settings.set('meshtastic_messages', messagesToSave.slice(-100));
+            } catch (e) {
+                console.warn('Could not save Meshtastic messages:', e);
+            }
+        }, 1000);
     }
 
     // =========================================================================
@@ -506,6 +774,26 @@ const MeshtasticModule = (function() {
             case MessageType.ACK:
                 handleAck(message);
                 break;
+            // PKI message types
+            case MessageType.PUBLIC_KEY:
+                handlePublicKeyReceived(message);
+                break;
+            case MessageType.KEY_REQUEST:
+                handleKeyRequest(message);
+                break;
+            case MessageType.KEY_RESPONSE:
+                handleKeyResponse(message);
+                break;
+            // Direct Message types
+            case MessageType.DM:
+                handleDirectMessage(message);
+                break;
+            case MessageType.DM_ACK:
+                handleDMAck(message);
+                break;
+            case MessageType.DM_READ:
+                handleDMReadReceipt(message);
+                break;
             default:
                 console.warn('Unknown message type:', message.type);
         }
@@ -778,9 +1066,12 @@ const MeshtasticModule = (function() {
     // =========================================================================
     
     /**
-     * Send text message
+     * Send text message to current channel or specific recipient
+     * @param {string} text - Message content
+     * @param {string|null} to - Recipient node ID (null for channel broadcast)
+     * @param {string|null} channelId - Channel to send on (defaults to active channel)
      */
-    async function sendTextMessage(text, to = null) {
+    async function sendTextMessage(text, to = null, channelId = null) {
         if (!text || text.length === 0) return;
         
         // Truncate if needed
@@ -788,23 +1079,103 @@ const MeshtasticModule = (function() {
             text = text.substring(0, MAX_MESSAGE_SIZE);
         }
         
+        const channel = channelId ? getChannel(channelId) : getActiveChannel();
+        const messageId = generateMessageId();
+        
         const message = {
             type: MessageType.TEXT,
             from: state.myNodeId,
             fromName: state.shortName,
-            to: to, // null = broadcast
+            to: to, // null = channel broadcast
+            channelId: channel?.id || state.activeChannelId,
+            channelIndex: channel?.index || 0,
             text: text,
             timestamp: Date.now(),
-            id: generateMessageId()
+            id: messageId,
+            // Include PSK hash for encrypted channels (not the actual PSK)
+            encrypted: channel?.isPrivate || false
         };
+        
+        // Set initial delivery status
+        state.messageStates.set(messageId, {
+            status: DeliveryStatus.PENDING,
+            sentAt: Date.now(),
+            ackAt: null,
+            retries: 0
+        });
         
         // Store locally
         addMessageToHistory(message, true);
         
-        // Send to mesh
-        await sendToDevice(message);
+        try {
+            // Send to mesh
+            await sendToDevice(message);
+            
+            // Update status to SENT
+            updateMessageStatus(messageId, DeliveryStatus.SENT);
+            
+            // Set up ACK timeout
+            setupAckTimeout(messageId, message);
+            
+        } catch (e) {
+            console.error('Failed to send message:', e);
+            updateMessageStatus(messageId, DeliveryStatus.FAILED);
+            throw e;
+        }
         
         return message;
+    }
+    
+    /**
+     * Set up ACK timeout for message delivery confirmation
+     */
+    function setupAckTimeout(messageId, message) {
+        const timeout = setTimeout(() => {
+            const msgState = state.messageStates.get(messageId);
+            // If still in SENT state (no ACK received), keep it as SENT
+            // We don't mark as FAILED because mesh networks may have delays
+            if (msgState && msgState.status === DeliveryStatus.SENT) {
+                // Could retry here if needed
+                console.log(`No ACK received for message ${messageId} within timeout`);
+            }
+            state.pendingAcks.delete(messageId);
+        }, ACK_TIMEOUT);
+        
+        state.pendingAcks.set(messageId, { timeout, message });
+    }
+    
+    /**
+     * Update message delivery status
+     */
+    function updateMessageStatus(messageId, status) {
+        const msgState = state.messageStates.get(messageId);
+        if (msgState) {
+            msgState.status = status;
+            if (status === DeliveryStatus.DELIVERED) {
+                msgState.ackAt = Date.now();
+            }
+            state.messageStates.set(messageId, msgState);
+        } else {
+            state.messageStates.set(messageId, {
+                status,
+                sentAt: Date.now(),
+                ackAt: status === DeliveryStatus.DELIVERED ? Date.now() : null,
+                retries: 0
+            });
+        }
+        
+        // Save messages (debounced)
+        saveMessages();
+        
+        // Emit status change event
+        Events.emit('meshtastic:message_status', { messageId, status });
+    }
+    
+    /**
+     * Get message delivery status
+     */
+    function getMessageStatus(messageId) {
+        return state.messageStates.get(messageId)?.status || DeliveryStatus.SENT;
     }
     
     /**
@@ -814,39 +1185,91 @@ const MeshtasticModule = (function() {
         // Avoid duplicates
         if (state.messages.some(m => m.id === message.id)) return;
         
+        // Ensure channel ID is set (default to primary if not specified)
+        message.channelId = message.channelId || 'primary';
+        
         addMessageToHistory(message, false);
+        
+        // Track unread if not from current channel or panel not visible
+        const isCurrentChannel = message.channelId === state.activeChannelId;
+        if (!isCurrentChannel) {
+            // Message is on a different channel, increment unread
+            incrementUnreadCount(message.channelId);
+        }
+        
+        // Send ACK back for text messages
+        sendMessageAck(message.id, message.from);
         
         // Show notification
         if (typeof ModalsModule !== 'undefined') {
-            ModalsModule.showToast(`📨 ${message.fromName}: ${message.text.substring(0, 50)}...`, 'info');
+            const channelName = getChannel(message.channelId)?.name || message.channelId;
+            ModalsModule.showToast(`📨 [${channelName}] ${message.fromName}: ${message.text.substring(0, 50)}${message.text.length > 50 ? '...' : ''}`, 'info');
         }
         
         Events.emit('meshtastic:message', { message });
     }
     
     /**
+     * Send acknowledgment for received message
+     */
+    async function sendMessageAck(messageId, toNodeId) {
+        if (state.connectionState !== ConnectionState.CONNECTED) return;
+        
+        const ack = {
+            type: MessageType.ACK,
+            originalMessageId: messageId,
+            from: state.myNodeId,
+            to: toNodeId,
+            timestamp: Date.now()
+        };
+        
+        try {
+            await sendToDevice(ack);
+        } catch (e) {
+            console.warn('Failed to send ACK:', e);
+        }
+    }
+    
+    /**
      * Add message to history
      */
     function addMessageToHistory(message, isSent) {
-        state.messages.push({
+        const fullMessage = {
             ...message,
             isSent,
-            receivedAt: Date.now()
-        });
+            receivedAt: Date.now(),
+            channelId: message.channelId || state.activeChannelId // Ensure channel is set
+        };
+        
+        state.messages.push(fullMessage);
         
         // Limit history
         if (state.messages.length > 100) {
             state.messages = state.messages.slice(-100);
         }
         
+        // Save messages (debounced)
+        saveMessages();
+        
         Events.emit('meshtastic:messages_updated', { messages: state.messages });
     }
     
     /**
-     * Get message history
+     * Get message history, optionally filtered by channel
+     * @param {string|null} channelId - Filter by channel (null for all)
      */
-    function getMessages() {
-        return [...state.messages];
+    function getMessages(channelId = null) {
+        if (channelId === null) {
+            return [...state.messages];
+        }
+        return state.messages.filter(m => m.channelId === channelId);
+    }
+    
+    /**
+     * Get messages for the active channel
+     */
+    function getActiveChannelMessages() {
+        return getMessages(state.activeChannelId);
     }
     
     /**
@@ -854,6 +1277,1587 @@ const MeshtasticModule = (function() {
      */
     function generateMessageId() {
         return `${state.myNodeId || 'local'}-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    }
+    
+    // =========================================================================
+    // CHANNEL MANAGEMENT
+    // =========================================================================
+    
+    /**
+     * Get all available channels
+     */
+    function getChannels() {
+        return [...state.channels];
+    }
+    
+    /**
+     * Get channel by ID
+     */
+    function getChannel(channelId) {
+        return state.channels.find(c => c.id === channelId);
+    }
+    
+    /**
+     * Get the currently active channel
+     */
+    function getActiveChannel() {
+        return getChannel(state.activeChannelId) || state.channels[0];
+    }
+    
+    /**
+     * Set the active channel
+     */
+    function setActiveChannel(channelId) {
+        const channel = getChannel(channelId);
+        if (!channel) {
+            console.warn('Channel not found:', channelId);
+            return false;
+        }
+        
+        state.activeChannelId = channelId;
+        
+        // Mark channel as read when switching to it
+        markChannelAsRead(channelId);
+        
+        // Save settings
+        saveSettings();
+        
+        // Emit change event
+        Events.emit('meshtastic:channel_change', { channelId, channel });
+        
+        if (state.onChannelChange) {
+            state.onChannelChange(channel);
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Create a new private channel with custom PSK
+     * @param {string} name - Channel display name
+     * @param {string} psk - Pre-shared key (will be hashed)
+     * @returns {object} The created channel
+     */
+    function createChannel(name, psk) {
+        if (!name || name.trim().length === 0) {
+            throw new Error('Channel name is required');
+        }
+        
+        // Generate channel ID from name
+        const id = `custom-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now().toString(36)}`;
+        
+        // Find next available index (after defaults)
+        const maxIndex = Math.max(...state.channels.map(c => c.index), -1);
+        const newIndex = maxIndex + 1;
+        
+        // Hash the PSK for storage (we don't store raw PSK)
+        const pskHash = psk ? hashPSK(psk) : null;
+        
+        const channel = {
+            id,
+            index: newIndex,
+            name: name.trim(),
+            psk: pskHash,
+            pskRaw: psk, // Keep raw PSK in memory for this session (needed for actual encryption)
+            isDefault: false,
+            isPrivate: !!psk,
+            createdAt: Date.now()
+        };
+        
+        state.channels.push(channel);
+        
+        // Initialize read state
+        state.channelReadState.set(id, {
+            lastReadAt: Date.now(),
+            lastReadMessageId: null
+        });
+        
+        // Save settings
+        saveSettings();
+        
+        // Emit event
+        Events.emit('meshtastic:channel_created', { channel });
+        
+        return channel;
+    }
+    
+    /**
+     * Import a channel from a shared configuration
+     * @param {object} config - Channel configuration (from QR code or share)
+     */
+    function importChannel(config) {
+        if (!config || !config.name) {
+            throw new Error('Invalid channel configuration');
+        }
+        
+        // Check for duplicate
+        const existing = state.channels.find(c => 
+            c.name === config.name && c.psk === config.psk
+        );
+        if (existing) {
+            return existing; // Return existing channel
+        }
+        
+        return createChannel(config.name, config.psk);
+    }
+    
+    /**
+     * Delete a custom channel
+     */
+    function deleteChannel(channelId) {
+        const channel = getChannel(channelId);
+        if (!channel) return false;
+        
+        if (channel.isDefault) {
+            throw new Error('Cannot delete default channels');
+        }
+        
+        // Remove channel
+        state.channels = state.channels.filter(c => c.id !== channelId);
+        
+        // Remove read state
+        state.channelReadState.delete(channelId);
+        
+        // If this was the active channel, switch to primary
+        if (state.activeChannelId === channelId) {
+            state.activeChannelId = 'primary';
+        }
+        
+        // Save settings
+        saveSettings();
+        
+        // Emit event
+        Events.emit('meshtastic:channel_deleted', { channelId });
+        
+        return true;
+    }
+    
+    /**
+     * Export channel configuration for sharing
+     */
+    function exportChannel(channelId) {
+        const channel = getChannel(channelId);
+        if (!channel) return null;
+        
+        return {
+            name: channel.name,
+            psk: channel.pskRaw || null, // Include raw PSK for sharing
+            isPrivate: channel.isPrivate
+        };
+    }
+    
+    /**
+     * Simple hash function for PSK (for storage identification, not encryption)
+     */
+    function hashPSK(psk) {
+        let hash = 0;
+        for (let i = 0; i < psk.length; i++) {
+            const char = psk.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
+        }
+        return 'psk-' + Math.abs(hash).toString(16);
+    }
+    
+    // =========================================================================
+    // UNREAD MESSAGE TRACKING
+    // =========================================================================
+    
+    /**
+     * Get unread message count for a channel
+     */
+    function getUnreadCount(channelId) {
+        const readState = state.channelReadState.get(channelId);
+        if (!readState) return 0;
+        
+        const channelMessages = getMessages(channelId).filter(m => !m.isSent);
+        const unreadMessages = channelMessages.filter(m => 
+            m.receivedAt > readState.lastReadAt
+        );
+        
+        return unreadMessages.length;
+    }
+    
+    /**
+     * Get total unread count across all channels
+     */
+    function getTotalUnreadCount() {
+        let total = 0;
+        state.channels.forEach(channel => {
+            total += getUnreadCount(channel.id);
+        });
+        return total;
+    }
+    
+    /**
+     * Get unread counts for all channels
+     */
+    function getAllUnreadCounts() {
+        const counts = {};
+        state.channels.forEach(channel => {
+            counts[channel.id] = getUnreadCount(channel.id);
+        });
+        return counts;
+    }
+    
+    /**
+     * Mark channel as read (all messages up to now)
+     */
+    function markChannelAsRead(channelId) {
+        const channelMessages = getMessages(channelId);
+        const lastMessage = channelMessages[channelMessages.length - 1];
+        
+        state.channelReadState.set(channelId, {
+            lastReadAt: Date.now(),
+            lastReadMessageId: lastMessage?.id || null
+        });
+        
+        // Save settings
+        saveSettings();
+        
+        // Emit event
+        Events.emit('meshtastic:unread_change', { 
+            channelId, 
+            unreadCount: 0,
+            totalUnread: getTotalUnreadCount()
+        });
+        
+        if (state.onUnreadChange) {
+            state.onUnreadChange(channelId, 0);
+        }
+    }
+    
+    /**
+     * Increment unread count (internal use)
+     */
+    function incrementUnreadCount(channelId) {
+        // Read state is timestamp-based, so we don't need to increment
+        // Just emit the event with new count
+        const count = getUnreadCount(channelId);
+        
+        Events.emit('meshtastic:unread_change', { 
+            channelId, 
+            unreadCount: count,
+            totalUnread: getTotalUnreadCount()
+        });
+        
+        if (state.onUnreadChange) {
+            state.onUnreadChange(channelId, count);
+        }
+    }
+
+    // =========================================================================
+    // PKI (PUBLIC KEY INFRASTRUCTURE)
+    // =========================================================================
+    
+    /**
+     * Check if Web Crypto API is available
+     */
+    function isCryptoAvailable() {
+        return typeof crypto !== 'undefined' && 
+               crypto.subtle && 
+               typeof crypto.subtle.generateKey === 'function';
+    }
+    
+    /**
+     * Generate a new ECDH key pair for DM encryption
+     * Uses Curve25519 via Web Crypto API (P-256 as fallback since Curve25519 not universally supported)
+     */
+    async function generateKeyPair() {
+        if (!isCryptoAvailable()) {
+            throw new Error('Web Crypto API not available');
+        }
+        
+        try {
+            // Generate ECDH key pair (P-256 curve - widely supported)
+            const keyPair = await crypto.subtle.generateKey(
+                {
+                    name: 'ECDH',
+                    namedCurve: 'P-256'
+                },
+                true, // extractable
+                ['deriveBits']
+            );
+            
+            // Export keys for storage
+            const publicKeyRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey);
+            const privateKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
+            
+            state.myKeyPair = {
+                publicKey: arrayBufferToBase64(publicKeyRaw),
+                privateKey: JSON.stringify(privateKeyJwk), // Store as JWK string
+                publicKeyObj: keyPair.publicKey,
+                privateKeyObj: keyPair.privateKey,
+                createdAt: Date.now()
+            };
+            
+            // Save to storage
+            await saveKeyPair();
+            
+            console.log('Generated new PKI key pair');
+            Events.emit('meshtastic:keypair_generated', { publicKey: state.myKeyPair.publicKey });
+            
+            return state.myKeyPair.publicKey;
+            
+        } catch (e) {
+            console.error('Failed to generate key pair:', e);
+            throw e;
+        }
+    }
+    
+    /**
+     * Get or generate my public key
+     */
+    async function getMyPublicKey() {
+        if (!state.myKeyPair) {
+            await generateKeyPair();
+        }
+        return state.myKeyPair.publicKey;
+    }
+    
+    /**
+     * Ensure key objects are loaded (after loading from storage)
+     */
+    async function ensureKeyObjects() {
+        if (state.myKeyPair && !state.myKeyPair.privateKeyObj) {
+            try {
+                // Re-import the private key from JWK
+                const privateKeyJwk = JSON.parse(state.myKeyPair.privateKey);
+                state.myKeyPair.privateKeyObj = await crypto.subtle.importKey(
+                    'jwk',
+                    privateKeyJwk,
+                    { name: 'ECDH', namedCurve: 'P-256' },
+                    true,
+                    ['deriveBits']
+                );
+                
+                // Re-import the public key from raw
+                const publicKeyRaw = base64ToArrayBuffer(state.myKeyPair.publicKey);
+                state.myKeyPair.publicKeyObj = await crypto.subtle.importKey(
+                    'raw',
+                    publicKeyRaw,
+                    { name: 'ECDH', namedCurve: 'P-256' },
+                    true,
+                    []
+                );
+            } catch (e) {
+                console.warn('Could not restore key objects, regenerating:', e);
+                await generateKeyPair();
+            }
+        }
+    }
+    
+    /**
+     * Broadcast public key to mesh network
+     */
+    async function broadcastPublicKey() {
+        const publicKey = await getMyPublicKey();
+        
+        const message = {
+            type: MessageType.PUBLIC_KEY,
+            from: state.myNodeId,
+            fromName: state.shortName,
+            publicKey: publicKey,
+            timestamp: Date.now()
+        };
+        
+        await sendToDevice(message);
+        console.log('Broadcast public key to mesh');
+        
+        if (typeof ModalsModule !== 'undefined') {
+            ModalsModule.showToast('🔑 Public key broadcast', 'info');
+        }
+    }
+    
+    /**
+     * Request public key from a specific node
+     */
+    async function requestPublicKey(nodeId) {
+        const message = {
+            type: MessageType.KEY_REQUEST,
+            from: state.myNodeId,
+            fromName: state.shortName,
+            to: nodeId,
+            timestamp: Date.now()
+        };
+        
+        // Set up timeout for response
+        const timeout = setTimeout(() => {
+            const pending = state.pendingKeyRequests.get(nodeId);
+            if (pending) {
+                state.pendingKeyRequests.delete(nodeId);
+                console.warn(`Key request to ${nodeId} timed out`);
+                Events.emit('meshtastic:key_request_timeout', { nodeId });
+            }
+        }, KEY_REQUEST_TIMEOUT);
+        
+        state.pendingKeyRequests.set(nodeId, {
+            requestedAt: Date.now(),
+            timeout
+        });
+        
+        await sendToDevice(message);
+        console.log('Requested public key from:', nodeId);
+    }
+    
+    /**
+     * Handle received public key
+     */
+    function handlePublicKeyReceived(message) {
+        const nodeId = message.from;
+        const publicKey = message.publicKey;
+        
+        if (!publicKey) {
+            console.warn('Received PUBLIC_KEY message without key');
+            return;
+        }
+        
+        // Store the public key
+        state.peerPublicKeys.set(nodeId, {
+            publicKey: publicKey,
+            sharedSecret: null, // Will be derived when needed
+            receivedAt: Date.now(),
+            verified: false
+        });
+        
+        // Save to storage
+        savePeerKeys();
+        
+        console.log('Received public key from:', nodeId);
+        Events.emit('meshtastic:public_key_received', { nodeId, publicKey });
+        
+        if (state.onKeyExchange) {
+            state.onKeyExchange(nodeId, 'received');
+        }
+        
+        // Check if we have pending DMs for this node
+        processPendingDMs(nodeId);
+        
+        if (typeof ModalsModule !== 'undefined') {
+            const node = state.nodes.get(nodeId);
+            const name = node?.name || nodeId?.slice(-4) || 'Unknown';
+            ModalsModule.showToast(`🔑 Key received from ${name}`, 'success');
+        }
+    }
+    
+    /**
+     * Handle key request - send our public key
+     */
+    async function handleKeyRequest(message) {
+        // Only respond if the request is for us
+        if (message.to && message.to !== state.myNodeId) return;
+        
+        const publicKey = await getMyPublicKey();
+        
+        const response = {
+            type: MessageType.KEY_RESPONSE,
+            from: state.myNodeId,
+            fromName: state.shortName,
+            to: message.from,
+            publicKey: publicKey,
+            timestamp: Date.now()
+        };
+        
+        await sendToDevice(response);
+        console.log('Sent public key to:', message.from);
+    }
+    
+    /**
+     * Handle key response
+     */
+    function handleKeyResponse(message) {
+        // Clear pending request timeout
+        const pending = state.pendingKeyRequests.get(message.from);
+        if (pending) {
+            clearTimeout(pending.timeout);
+            state.pendingKeyRequests.delete(message.from);
+        }
+        
+        // Process as regular public key
+        handlePublicKeyReceived(message);
+    }
+    
+    /**
+     * Derive shared secret with a peer using ECDH
+     */
+    async function deriveSharedSecret(nodeId) {
+        const peerData = state.peerPublicKeys.get(nodeId);
+        if (!peerData || !peerData.publicKey) {
+            throw new Error(`No public key for node ${nodeId}`);
+        }
+        
+        // Return cached if available
+        if (peerData.sharedSecret) {
+            return peerData.sharedSecret;
+        }
+        
+        await ensureKeyObjects();
+        
+        try {
+            // Import peer's public key
+            const peerPublicKeyRaw = base64ToArrayBuffer(peerData.publicKey);
+            const peerPublicKey = await crypto.subtle.importKey(
+                'raw',
+                peerPublicKeyRaw,
+                { name: 'ECDH', namedCurve: 'P-256' },
+                false,
+                []
+            );
+            
+            // Derive shared bits
+            const sharedBits = await crypto.subtle.deriveBits(
+                {
+                    name: 'ECDH',
+                    public: peerPublicKey
+                },
+                state.myKeyPair.privateKeyObj,
+                256 // 256 bits = 32 bytes
+            );
+            
+            // Derive AES key from shared bits
+            const sharedKey = await crypto.subtle.importKey(
+                'raw',
+                sharedBits,
+                { name: 'AES-GCM', length: 256 },
+                false,
+                ['encrypt', 'decrypt']
+            );
+            
+            // Cache the shared secret
+            peerData.sharedSecret = sharedKey;
+            state.peerPublicKeys.set(nodeId, peerData);
+            
+            console.log('Derived shared secret with:', nodeId);
+            return sharedKey;
+            
+        } catch (e) {
+            console.error('Failed to derive shared secret:', e);
+            throw e;
+        }
+    }
+    
+    /**
+     * Encrypt a message for a specific node
+     */
+    async function encryptForNode(nodeId, plaintext) {
+        const sharedKey = await deriveSharedSecret(nodeId);
+        
+        // Generate random IV (12 bytes for AES-GCM)
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        
+        // Encode plaintext
+        const encoder = new TextEncoder();
+        const data = encoder.encode(plaintext);
+        
+        // Encrypt
+        const ciphertext = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: iv },
+            sharedKey,
+            data
+        );
+        
+        // Combine IV + ciphertext for transmission
+        const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+        combined.set(iv, 0);
+        combined.set(new Uint8Array(ciphertext), iv.length);
+        
+        return arrayBufferToBase64(combined);
+    }
+    
+    /**
+     * Decrypt a message from a specific node
+     */
+    async function decryptFromNode(nodeId, encryptedBase64) {
+        const sharedKey = await deriveSharedSecret(nodeId);
+        
+        // Decode combined IV + ciphertext
+        const combined = base64ToArrayBuffer(encryptedBase64);
+        const combinedArray = new Uint8Array(combined);
+        
+        // Extract IV (first 12 bytes)
+        const iv = combinedArray.slice(0, 12);
+        const ciphertext = combinedArray.slice(12);
+        
+        // Decrypt
+        const decrypted = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: iv },
+            sharedKey,
+            ciphertext
+        );
+        
+        // Decode to string
+        const decoder = new TextDecoder();
+        return decoder.decode(decrypted);
+    }
+    
+    /**
+     * Check if we can send encrypted DM to a node
+     */
+    function canSendDMTo(nodeId) {
+        return state.peerPublicKeys.has(nodeId);
+    }
+    
+    /**
+     * Get nodes we can DM (have their public key)
+     */
+    function getDMCapableNodes() {
+        const nodes = [];
+        state.peerPublicKeys.forEach((data, nodeId) => {
+            const nodeInfo = state.nodes.get(nodeId);
+            nodes.push({
+                id: nodeId,
+                name: nodeInfo?.name || `Node-${nodeId?.slice(-4) || 'Unknown'}`,
+                shortName: nodeInfo?.shortName || '???',
+                status: nodeInfo?.status || 'unknown',
+                hasKey: true,
+                keyReceivedAt: data.receivedAt
+            });
+        });
+        return nodes;
+    }
+    
+    // Utility functions for base64/ArrayBuffer conversion
+    function arrayBufferToBase64(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    }
+    
+    function base64ToArrayBuffer(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+
+    // =========================================================================
+    // DIRECT MESSAGES
+    // =========================================================================
+    
+    /**
+     * Send encrypted direct message to a specific node
+     */
+    async function sendDirectMessage(nodeId, text) {
+        if (!text || text.length === 0) return;
+        
+        // Truncate if needed
+        if (text.length > MAX_MESSAGE_SIZE) {
+            text = text.substring(0, MAX_MESSAGE_SIZE);
+        }
+        
+        const messageId = generateMessageId();
+        
+        // Check if we have their public key
+        if (!canSendDMTo(nodeId)) {
+            console.log('No public key for', nodeId, '- requesting key and queueing message');
+            
+            // Queue the message
+            const pending = state.pendingDMs.get(nodeId) || [];
+            pending.push({
+                id: messageId,
+                text: text,
+                timestamp: Date.now()
+            });
+            state.pendingDMs.set(nodeId, pending);
+            
+            // Request their public key
+            await requestPublicKey(nodeId);
+            
+            // Add to conversation as pending
+            addDMToConversation(nodeId, {
+                id: messageId,
+                from: state.myNodeId,
+                fromName: state.shortName,
+                to: nodeId,
+                text: text,
+                timestamp: Date.now(),
+                isSent: true,
+                encrypted: true,
+                status: DeliveryStatus.PENDING
+            });
+            
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('🔑 Requesting encryption key...', 'info');
+            }
+            
+            return { id: messageId, status: 'pending_key' };
+        }
+        
+        try {
+            // Encrypt the message
+            const encryptedText = await encryptForNode(nodeId, text);
+            
+            const message = {
+                type: MessageType.DM,
+                from: state.myNodeId,
+                fromName: state.shortName,
+                to: nodeId,
+                encryptedText: encryptedText,
+                timestamp: Date.now(),
+                id: messageId
+            };
+            
+            // Set initial delivery status
+            state.messageStates.set(messageId, {
+                status: DeliveryStatus.PENDING,
+                sentAt: Date.now(),
+                ackAt: null
+            });
+            
+            // Add to conversation
+            addDMToConversation(nodeId, {
+                id: messageId,
+                from: state.myNodeId,
+                fromName: state.shortName,
+                to: nodeId,
+                text: text, // Store decrypted locally
+                timestamp: Date.now(),
+                isSent: true,
+                encrypted: true,
+                status: DeliveryStatus.PENDING
+            });
+            
+            // Send to mesh
+            await sendToDevice(message);
+            
+            // Update status to SENT
+            updateMessageStatus(messageId, DeliveryStatus.SENT);
+            
+            // Set up ACK timeout
+            setupDMAckTimeout(messageId, nodeId);
+            
+            return { id: messageId, status: 'sent' };
+            
+        } catch (e) {
+            console.error('Failed to send DM:', e);
+            updateMessageStatus(messageId, DeliveryStatus.FAILED);
+            throw e;
+        }
+    }
+    
+    /**
+     * Process pending DMs after receiving a public key
+     */
+    async function processPendingDMs(nodeId) {
+        const pending = state.pendingDMs.get(nodeId);
+        if (!pending || pending.length === 0) return;
+        
+        console.log(`Processing ${pending.length} pending DMs for ${nodeId}`);
+        
+        for (const msg of pending) {
+            try {
+                // Encrypt and send the queued message
+                const encryptedText = await encryptForNode(nodeId, msg.text);
+                
+                const message = {
+                    type: MessageType.DM,
+                    from: state.myNodeId,
+                    fromName: state.shortName,
+                    to: nodeId,
+                    encryptedText: encryptedText,
+                    timestamp: msg.timestamp,
+                    id: msg.id
+                };
+                
+                await sendToDevice(message);
+                updateMessageStatus(msg.id, DeliveryStatus.SENT);
+                setupDMAckTimeout(msg.id, nodeId);
+                
+            } catch (e) {
+                console.error('Failed to send pending DM:', e);
+                updateMessageStatus(msg.id, DeliveryStatus.FAILED);
+            }
+        }
+        
+        // Clear pending queue
+        state.pendingDMs.delete(nodeId);
+        
+        if (typeof ModalsModule !== 'undefined') {
+            ModalsModule.showToast(`📤 Sent ${pending.length} queued message(s)`, 'success');
+        }
+    }
+    
+    /**
+     * Set up ACK timeout for DM
+     */
+    function setupDMAckTimeout(messageId, nodeId) {
+        const timeout = setTimeout(() => {
+            const msgState = state.messageStates.get(messageId);
+            if (msgState && msgState.status === DeliveryStatus.SENT) {
+                console.log(`No ACK received for DM ${messageId} - scheduling retry`);
+                
+                // Find the original message for retry
+                const conversation = state.dmConversations.get(nodeId);
+                const originalMessage = conversation?.find(m => m.id === messageId);
+                
+                if (originalMessage) {
+                    // Schedule retry with exponential backoff
+                    scheduleRetry(messageId, originalMessage, nodeId);
+                } else {
+                    // Can't retry - mark as failed
+                    updateMessageStatus(messageId, DeliveryStatus.FAILED);
+                }
+            }
+            state.pendingAcks.delete(messageId);
+        }, ACK_TIMEOUT);
+        
+        state.pendingAcks.set(messageId, { timeout, nodeId });
+    }
+    
+    /**
+     * Handle received encrypted DM
+     */
+    async function handleDirectMessage(message) {
+        const fromNodeId = message.from;
+        
+        // Check if we have their public key
+        if (!state.peerPublicKeys.has(fromNodeId)) {
+            console.warn('Received DM but no public key for sender:', fromNodeId);
+            // Request their key
+            await requestPublicKey(fromNodeId);
+            
+            // Store encrypted message temporarily
+            const pending = state.pendingDMs.get(fromNodeId) || [];
+            pending.push({
+                encrypted: true,
+                raw: message,
+                receivedAt: Date.now()
+            });
+            state.pendingDMs.set(fromNodeId, pending);
+            return;
+        }
+        
+        try {
+            // Decrypt the message
+            const decryptedText = await decryptFromNode(fromNodeId, message.encryptedText);
+            
+            const dmMessage = {
+                id: message.id,
+                from: fromNodeId,
+                fromName: message.fromName,
+                to: state.myNodeId,
+                text: decryptedText,
+                timestamp: message.timestamp,
+                receivedAt: Date.now(),
+                isSent: false,
+                encrypted: true
+            };
+            
+            // Add to conversation
+            addDMToConversation(fromNodeId, dmMessage);
+            
+            // Send ACK
+            await sendDMAck(message.id, fromNodeId);
+            
+            // Update unread count if not viewing this conversation
+            if (state.activeDMContact !== fromNodeId) {
+                incrementDMUnreadCount(fromNodeId);
+            }
+            
+            // Show notification
+            if (typeof ModalsModule !== 'undefined') {
+                const name = message.fromName || fromNodeId?.slice(-4) || 'Unknown';
+                ModalsModule.showToast(`🔐 DM from ${name}: ${decryptedText.substring(0, 40)}${decryptedText.length > 40 ? '...' : ''}`, 'info');
+            }
+            
+            Events.emit('meshtastic:dm_received', { message: dmMessage });
+            
+            if (state.onDMReceived) {
+                state.onDMReceived(dmMessage);
+            }
+            
+        } catch (e) {
+            console.error('Failed to decrypt DM:', e);
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('🔐 Received encrypted message (decryption failed)', 'error');
+            }
+        }
+    }
+    
+    /**
+     * Send DM acknowledgment
+     */
+    async function sendDMAck(messageId, toNodeId) {
+        const ack = {
+            type: MessageType.DM_ACK,
+            originalMessageId: messageId,
+            from: state.myNodeId,
+            to: toNodeId,
+            timestamp: Date.now()
+        };
+        
+        try {
+            await sendToDevice(ack);
+        } catch (e) {
+            console.warn('Failed to send DM ACK:', e);
+        }
+    }
+    
+    /**
+     * Handle DM acknowledgment
+     */
+    function handleDMAck(message) {
+        const originalMessageId = message.originalMessageId;
+        
+        if (originalMessageId) {
+            const pending = state.pendingAcks.get(originalMessageId);
+            if (pending) {
+                clearTimeout(pending.timeout);
+                state.pendingAcks.delete(originalMessageId);
+            }
+            
+            updateMessageStatus(originalMessageId, DeliveryStatus.DELIVERED);
+            
+            // Update the message in conversation
+            updateDMStatus(message.from, originalMessageId, DeliveryStatus.DELIVERED);
+            
+            console.log(`DM ACK received for message ${originalMessageId}`);
+        }
+        
+        Events.emit('meshtastic:dm_ack', { message });
+    }
+    
+    /**
+     * Add message to DM conversation
+     */
+    function addDMToConversation(nodeId, message) {
+        let conversation = state.dmConversations.get(nodeId);
+        if (!conversation) {
+            conversation = [];
+            state.dmConversations.set(nodeId, conversation);
+        }
+        
+        // Avoid duplicates
+        if (conversation.some(m => m.id === message.id)) return;
+        
+        conversation.push(message);
+        
+        // Limit history
+        if (conversation.length > 50) {
+            state.dmConversations.set(nodeId, conversation.slice(-50));
+        }
+        
+        // Save (debounced)
+        saveDMConversations();
+        
+        Events.emit('meshtastic:dm_updated', { nodeId, messages: conversation });
+    }
+    
+    /**
+     * Update DM message status in conversation
+     */
+    function updateDMStatus(nodeId, messageId, status) {
+        const conversation = state.dmConversations.get(nodeId);
+        if (!conversation) return;
+        
+        const msg = conversation.find(m => m.id === messageId);
+        if (msg) {
+            msg.status = status;
+            Events.emit('meshtastic:dm_updated', { nodeId, messages: conversation });
+        }
+    }
+    
+    /**
+     * Get DM conversation with a specific node
+     */
+    function getDMConversation(nodeId) {
+        return state.dmConversations.get(nodeId) || [];
+    }
+    
+    /**
+     * Get all DM contacts (nodes with conversation history)
+     */
+    function getDMContacts() {
+        const contacts = [];
+        
+        // Add nodes with conversations
+        state.dmConversations.forEach((messages, nodeId) => {
+            const nodeInfo = state.nodes.get(nodeId);
+            const lastMessage = messages[messages.length - 1];
+            const unread = state.dmUnreadCounts.get(nodeId) || 0;
+            
+            contacts.push({
+                id: nodeId,
+                name: nodeInfo?.name || `Node-${nodeId?.slice(-4) || 'Unknown'}`,
+                shortName: nodeInfo?.shortName || '???',
+                status: nodeInfo?.status || 'unknown',
+                hasKey: state.peerPublicKeys.has(nodeId),
+                lastMessage: lastMessage?.text?.substring(0, 30) || '',
+                lastMessageTime: lastMessage?.timestamp || 0,
+                unreadCount: unread
+            });
+        });
+        
+        // Sort by last message time (most recent first)
+        contacts.sort((a, b) => b.lastMessageTime - a.lastMessageTime);
+        
+        return contacts;
+    }
+    
+    /**
+     * Set active DM contact (viewing their conversation)
+     */
+    function setActiveDMContact(nodeId) {
+        state.activeDMContact = nodeId;
+        
+        // Mark as read
+        if (nodeId) {
+            markDMAsRead(nodeId);
+            
+            // Batch 3: Send read receipts for unread messages
+            sendReadReceiptsForContact(nodeId);
+        }
+        
+        Events.emit('meshtastic:active_dm_changed', { nodeId });
+    }
+    
+    /**
+     * Clear active DM contact (return to channel view)
+     */
+    function clearActiveDMContact() {
+        state.activeDMContact = null;
+        Events.emit('meshtastic:active_dm_changed', { nodeId: null });
+    }
+    
+    /**
+     * Get active DM contact
+     */
+    function getActiveDMContact() {
+        return state.activeDMContact;
+    }
+    
+    /**
+     * Get DM unread count for a node
+     */
+    function getDMUnreadCount(nodeId) {
+        return state.dmUnreadCounts.get(nodeId) || 0;
+    }
+    
+    /**
+     * Get total DM unread count
+     */
+    function getTotalDMUnreadCount() {
+        let total = 0;
+        state.dmUnreadCounts.forEach(count => {
+            total += count;
+        });
+        return total;
+    }
+    
+    /**
+     * Mark DM conversation as read
+     */
+    function markDMAsRead(nodeId) {
+        state.dmUnreadCounts.set(nodeId, 0);
+        saveSettings();
+        
+        Events.emit('meshtastic:dm_unread_change', { 
+            nodeId, 
+            unreadCount: 0,
+            totalDMUnread: getTotalDMUnreadCount()
+        });
+    }
+    
+    /**
+     * Increment DM unread count
+     */
+    function incrementDMUnreadCount(nodeId) {
+        const current = state.dmUnreadCounts.get(nodeId) || 0;
+        state.dmUnreadCounts.set(nodeId, current + 1);
+        saveSettings();
+        
+        Events.emit('meshtastic:dm_unread_change', { 
+            nodeId, 
+            unreadCount: current + 1,
+            totalDMUnread: getTotalDMUnreadCount()
+        });
+    }
+
+    // =========================================================================
+    // BATCH 3: READ RECEIPTS
+    // =========================================================================
+    
+    /**
+     * Send read receipt for a message
+     */
+    async function sendDMReadReceipt(messageId, toNodeId) {
+        if (!state.readReceiptsEnabled) return;
+        
+        const receipt = {
+            type: MessageType.DM_READ,
+            originalMessageId: messageId,
+            from: state.myNodeId,
+            to: toNodeId,
+            timestamp: Date.now()
+        };
+        
+        try {
+            await sendToDevice(receipt);
+            console.log('Sent read receipt for:', messageId);
+        } catch (e) {
+            console.warn('Failed to send read receipt:', e);
+        }
+    }
+    
+    /**
+     * Handle incoming read receipt
+     */
+    function handleDMReadReceipt(message) {
+        const originalMessageId = message.originalMessageId;
+        
+        if (originalMessageId) {
+            // Update message status to READ
+            updateMessageStatus(originalMessageId, DeliveryStatus.READ);
+            
+            // Update the message in conversation
+            updateDMStatus(message.from, originalMessageId, DeliveryStatus.READ);
+            
+            console.log(`Read receipt received for message ${originalMessageId}`);
+            
+            Events.emit('meshtastic:dm_read', { 
+                messageId: originalMessageId, 
+                readBy: message.from,
+                readAt: message.timestamp 
+            });
+            
+            if (state.onReadReceipt) {
+                state.onReadReceipt(originalMessageId, message.from);
+            }
+        }
+    }
+    
+    /**
+     * Send read receipts for all unread messages from a contact
+     * Called when opening a DM conversation
+     */
+    async function sendReadReceiptsForContact(nodeId) {
+        if (!state.readReceiptsEnabled) return;
+        
+        const conversation = state.dmConversations.get(nodeId) || [];
+        const unreadMessages = conversation.filter(msg => 
+            !msg.isSent && !msg.readReceiptSent
+        );
+        
+        for (const msg of unreadMessages) {
+            await sendDMReadReceipt(msg.id, nodeId);
+            msg.readReceiptSent = true;
+        }
+        
+        // Persist the update
+        if (unreadMessages.length > 0) {
+            saveDMConversations();
+        }
+    }
+    
+    /**
+     * Get/set read receipts enabled state
+     */
+    function isReadReceiptsEnabled() {
+        return state.readReceiptsEnabled;
+    }
+    
+    function setReadReceiptsEnabled(enabled) {
+        state.readReceiptsEnabled = enabled;
+        saveSettings();
+        Events.emit('meshtastic:settings_changed', { readReceiptsEnabled: enabled });
+    }
+
+    // =========================================================================
+    // BATCH 3: MESSAGE RETRY LOGIC
+    // =========================================================================
+    
+    /**
+     * Schedule a retry for a failed message
+     */
+    function scheduleRetry(messageId, message, nodeId) {
+        const existingRetry = state.pendingRetries.get(messageId);
+        const retryCount = existingRetry ? existingRetry.retryCount + 1 : 1;
+        
+        if (retryCount > MAX_RETRIES) {
+            console.log(`Max retries (${MAX_RETRIES}) reached for message ${messageId}`);
+            updateMessageStatus(messageId, DeliveryStatus.FAILED);
+            state.pendingRetries.delete(messageId);
+            
+            Events.emit('meshtastic:message_failed', { 
+                messageId, 
+                reason: 'max_retries',
+                retries: MAX_RETRIES
+            });
+            return false;
+        }
+        
+        const delay = RETRY_DELAYS[retryCount - 1] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
+        const nextRetryAt = Date.now() + delay;
+        
+        // Clear existing timeout if any
+        if (existingRetry?.timeout) {
+            clearTimeout(existingRetry.timeout);
+        }
+        
+        const timeout = setTimeout(async () => {
+            await executeRetry(messageId);
+        }, delay);
+        
+        state.pendingRetries.set(messageId, {
+            message,
+            nodeId,
+            retryCount,
+            nextRetryAt,
+            timeout
+        });
+        
+        console.log(`Scheduled retry ${retryCount}/${MAX_RETRIES} for message ${messageId} in ${delay/1000}s`);
+        
+        Events.emit('meshtastic:retry_scheduled', { 
+            messageId, 
+            retryCount, 
+            maxRetries: MAX_RETRIES,
+            nextRetryAt
+        });
+        
+        return true;
+    }
+    
+    /**
+     * Execute a retry for a pending message
+     */
+    async function executeRetry(messageId) {
+        const retry = state.pendingRetries.get(messageId);
+        if (!retry) return;
+        
+        console.log(`Executing retry ${retry.retryCount}/${MAX_RETRIES} for message ${messageId}`);
+        
+        try {
+            // Re-send the message
+            if (retry.message.type === MessageType.DM) {
+                // Re-encrypt and send DM
+                const encryptedText = await encryptForNode(retry.nodeId, retry.message.text);
+                const outgoingMessage = {
+                    type: MessageType.DM,
+                    from: state.myNodeId,
+                    fromName: state.shortName,
+                    to: retry.nodeId,
+                    encryptedText: encryptedText,
+                    timestamp: retry.message.timestamp,
+                    id: messageId
+                };
+                await sendToDevice(outgoingMessage);
+            } else {
+                // Re-send regular message
+                await sendToDevice(retry.message);
+            }
+            
+            // Update status to SENT
+            updateMessageStatus(messageId, DeliveryStatus.SENT);
+            
+            // Set up new ACK timeout
+            setupDMAckTimeout(messageId, retry.nodeId);
+            
+            Events.emit('meshtastic:retry_sent', { 
+                messageId, 
+                retryCount: retry.retryCount 
+            });
+            
+        } catch (e) {
+            console.error(`Retry failed for message ${messageId}:`, e);
+            
+            // Schedule another retry if we haven't reached max
+            if (retry.retryCount < MAX_RETRIES) {
+                scheduleRetry(messageId, retry.message, retry.nodeId);
+            } else {
+                updateMessageStatus(messageId, DeliveryStatus.FAILED);
+                state.pendingRetries.delete(messageId);
+            }
+        }
+    }
+    
+    /**
+     * Manually retry a failed message
+     */
+    async function retryMessage(messageId) {
+        const msgState = state.messageStates.get(messageId);
+        if (!msgState || msgState.status !== DeliveryStatus.FAILED) {
+            console.warn('Cannot retry message - not in FAILED state');
+            return false;
+        }
+        
+        // Find the original message
+        let originalMessage = null;
+        let nodeId = null;
+        
+        // Check DM conversations
+        for (const [contactId, messages] of state.dmConversations) {
+            const msg = messages.find(m => m.id === messageId);
+            if (msg) {
+                originalMessage = msg;
+                nodeId = contactId;
+                break;
+            }
+        }
+        
+        // Check channel messages
+        if (!originalMessage) {
+            originalMessage = state.messages.find(m => m.id === messageId);
+        }
+        
+        if (!originalMessage) {
+            console.warn('Original message not found for retry');
+            return false;
+        }
+        
+        // Reset retry count and schedule immediate retry
+        state.pendingRetries.delete(messageId);
+        
+        // Update status to pending
+        updateMessageStatus(messageId, DeliveryStatus.PENDING);
+        
+        // Execute retry immediately
+        state.pendingRetries.set(messageId, {
+            message: originalMessage,
+            nodeId,
+            retryCount: 0,
+            nextRetryAt: Date.now(),
+            timeout: null
+        });
+        
+        await executeRetry(messageId);
+        return true;
+    }
+    
+    /**
+     * Cancel a pending retry
+     */
+    function cancelRetry(messageId) {
+        const retry = state.pendingRetries.get(messageId);
+        if (retry?.timeout) {
+            clearTimeout(retry.timeout);
+        }
+        state.pendingRetries.delete(messageId);
+    }
+    
+    /**
+     * Get retry info for a message
+     */
+    function getRetryInfo(messageId) {
+        return state.pendingRetries.get(messageId) || null;
+    }
+
+    // =========================================================================
+    // BATCH 3: KEY VERIFICATION
+    // =========================================================================
+    
+    /**
+     * Generate key fingerprint for verification
+     * Returns a short, human-readable fingerprint for comparing keys
+     */
+    function generateKeyFingerprint(publicKey) {
+        // Simple fingerprint: take first 16 chars of base64 and format
+        const short = publicKey.substring(0, 16);
+        
+        // Format as 4 groups of 4 chars
+        const formatted = short.match(/.{1,4}/g).join(' ');
+        
+        return formatted.toUpperCase();
+    }
+    
+    /**
+     * Get my public key fingerprint
+     */
+    async function getMyKeyFingerprint() {
+        const publicKey = await getMyPublicKey();
+        return generateKeyFingerprint(publicKey);
+    }
+    
+    /**
+     * Get a peer's key fingerprint
+     */
+    function getPeerKeyFingerprint(nodeId) {
+        const peerData = state.peerPublicKeys.get(nodeId);
+        if (!peerData || !peerData.publicKey) {
+            return null;
+        }
+        return generateKeyFingerprint(peerData.publicKey);
+    }
+    
+    /**
+     * Mark a peer's key as verified
+     */
+    function markKeyAsVerified(nodeId) {
+        const peerData = state.peerPublicKeys.get(nodeId);
+        if (!peerData) {
+            console.warn('Cannot verify key - no key found for node:', nodeId);
+            return false;
+        }
+        
+        peerData.verified = true;
+        peerData.verifiedAt = Date.now();
+        state.peerPublicKeys.set(nodeId, peerData);
+        savePeerKeys();
+        
+        Events.emit('meshtastic:key_verified', { nodeId });
+        
+        if (typeof ModalsModule !== 'undefined') {
+            const node = state.nodes.get(nodeId);
+            const name = node?.name || nodeId?.slice(-4) || 'Unknown';
+            ModalsModule.showToast(`✅ Key verified for ${name}`, 'success');
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Mark a peer's key as unverified
+     */
+    function markKeyAsUnverified(nodeId) {
+        const peerData = state.peerPublicKeys.get(nodeId);
+        if (!peerData) return false;
+        
+        peerData.verified = false;
+        peerData.verifiedAt = null;
+        state.peerPublicKeys.set(nodeId, peerData);
+        savePeerKeys();
+        
+        Events.emit('meshtastic:key_unverified', { nodeId });
+        return true;
+    }
+    
+    /**
+     * Check if a peer's key is verified
+     */
+    function isKeyVerified(nodeId) {
+        const peerData = state.peerPublicKeys.get(nodeId);
+        return peerData?.verified === true;
+    }
+    
+    /**
+     * Get verification status for a peer
+     */
+    function getKeyVerificationStatus(nodeId) {
+        const peerData = state.peerPublicKeys.get(nodeId);
+        if (!peerData) {
+            return { hasKey: false, verified: false };
+        }
+        return {
+            hasKey: true,
+            verified: peerData.verified === true,
+            verifiedAt: peerData.verifiedAt || null,
+            fingerprint: generateKeyFingerprint(peerData.publicKey)
+        };
+    }
+
+    // =========================================================================
+    // BATCH 3: MESSAGE MANAGEMENT
+    // =========================================================================
+    
+    /**
+     * Delete a message (hide from view)
+     */
+    function deleteMessage(messageId, isDM = false, nodeId = null) {
+        state.deletedMessageIds.add(messageId);
+        saveDeletedMessages();
+        
+        // Remove from conversation if DM
+        if (isDM && nodeId) {
+            const conversation = state.dmConversations.get(nodeId);
+            if (conversation) {
+                const index = conversation.findIndex(m => m.id === messageId);
+                if (index !== -1) {
+                    conversation.splice(index, 1);
+                    state.dmConversations.set(nodeId, conversation);
+                    saveDMConversations();
+                }
+            }
+        }
+        
+        // Remove from channel messages
+        const msgIndex = state.messages.findIndex(m => m.id === messageId);
+        if (msgIndex !== -1) {
+            state.messages.splice(msgIndex, 1);
+            saveMessages();
+        }
+        
+        Events.emit('meshtastic:message_deleted', { messageId, isDM, nodeId });
+        
+        return true;
+    }
+    
+    /**
+     * Check if a message is deleted
+     */
+    function isMessageDeleted(messageId) {
+        return state.deletedMessageIds.has(messageId);
+    }
+    
+    /**
+     * Copy message text to clipboard
+     */
+    async function copyMessageText(messageId, isDM = false, nodeId = null) {
+        let message = null;
+        
+        // Find in DM conversations
+        if (isDM && nodeId) {
+            const conversation = state.dmConversations.get(nodeId);
+            message = conversation?.find(m => m.id === messageId);
+        }
+        
+        // Find in channel messages
+        if (!message) {
+            message = state.messages.find(m => m.id === messageId);
+        }
+        
+        if (!message || !message.text) {
+            return false;
+        }
+        
+        try {
+            await navigator.clipboard.writeText(message.text);
+            
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('Message copied to clipboard', 'success');
+            }
+            
+            return true;
+        } catch (e) {
+            console.warn('Failed to copy to clipboard:', e);
+            return false;
+        }
+    }
+    
+    /**
+     * Get message details for context menu
+     */
+    function getMessageDetails(messageId, isDM = false, nodeId = null) {
+        let message = null;
+        
+        // Find in DM conversations
+        if (isDM && nodeId) {
+            const conversation = state.dmConversations.get(nodeId);
+            message = conversation?.find(m => m.id === messageId);
+        }
+        
+        // Find in channel messages
+        if (!message) {
+            message = state.messages.find(m => m.id === messageId);
+        }
+        
+        if (!message) return null;
+        
+        const msgState = state.messageStates.get(messageId);
+        const retryInfo = state.pendingRetries.get(messageId);
+        
+        return {
+            ...message,
+            deliveryStatus: msgState?.status || null,
+            canRetry: msgState?.status === DeliveryStatus.FAILED,
+            isRetrying: retryInfo !== undefined,
+            retryCount: retryInfo?.retryCount || 0,
+            nextRetryAt: retryInfo?.nextRetryAt || null
+        };
     }
 
     // =========================================================================
@@ -1227,9 +3231,25 @@ const MeshtasticModule = (function() {
     }
     
     /**
-     * Handle acknowledgment
+     * Handle acknowledgment - update message delivery status
      */
     function handleAck(message) {
+        const originalMessageId = message.originalMessageId;
+        
+        if (originalMessageId) {
+            // Clear pending ACK timeout
+            const pending = state.pendingAcks.get(originalMessageId);
+            if (pending) {
+                clearTimeout(pending.timeout);
+                state.pendingAcks.delete(originalMessageId);
+            }
+            
+            // Update delivery status to DELIVERED
+            updateMessageStatus(originalMessageId, DeliveryStatus.DELIVERED);
+            
+            console.log(`ACK received for message ${originalMessageId}`);
+        }
+        
         Events.emit('meshtastic:ack', { message });
     }
 
@@ -1272,7 +3292,9 @@ const MeshtasticModule = (function() {
             type: state.connectionType,
             deviceName: state.device?.name || null,
             nodeId: state.myNodeId,
-            nodeName: state.longName
+            nodeName: state.longName,
+            shortName: state.shortName,
+            activeChannelId: state.activeChannelId
         };
     }
     
@@ -1292,6 +3314,8 @@ const MeshtasticModule = (function() {
             case 'position': state.onPositionUpdate = callback; break;
             case 'connection': state.onConnectionChange = callback; break;
             case 'node': state.onNodeUpdate = callback; break;
+            case 'channel': state.onChannelChange = callback; break;
+            case 'unread': state.onUnreadChange = callback; break;
         }
     }
 
@@ -1317,6 +3341,68 @@ const MeshtasticModule = (function() {
         // Messaging
         sendTextMessage,
         getMessages,
+        getActiveChannelMessages,
+        getMessageStatus,
+        
+        // Channels
+        getChannels,
+        getChannel,
+        getActiveChannel,
+        setActiveChannel,
+        createChannel,
+        importChannel,
+        deleteChannel,
+        exportChannel,
+        
+        // Unread tracking (channels)
+        getUnreadCount,
+        getTotalUnreadCount,
+        getAllUnreadCounts,
+        markChannelAsRead,
+        
+        // PKI (Public Key Infrastructure)
+        generateKeyPair,
+        getMyPublicKey,
+        broadcastPublicKey,
+        requestPublicKey,
+        canSendDMTo,
+        getDMCapableNodes,
+        isCryptoAvailable,
+        
+        // Direct Messages
+        sendDirectMessage,
+        getDMConversation,
+        getDMContacts,
+        setActiveDMContact,
+        clearActiveDMContact,
+        getActiveDMContact,
+        getDMUnreadCount,
+        getTotalDMUnreadCount,
+        markDMAsRead,
+        
+        // Batch 3: Read Receipts
+        isReadReceiptsEnabled,
+        setReadReceiptsEnabled,
+        sendDMReadReceipt,
+        
+        // Batch 3: Message Retry
+        retryMessage,
+        cancelRetry,
+        getRetryInfo,
+        
+        // Batch 3: Key Verification
+        getMyKeyFingerprint,
+        getPeerKeyFingerprint,
+        markKeyAsVerified,
+        markKeyAsUnverified,
+        isKeyVerified,
+        getKeyVerificationStatus,
+        
+        // Batch 3: Message Management
+        deleteMessage,
+        isMessageDeleted,
+        copyMessageText,
+        getMessageDetails,
         
         // Sharing
         shareWaypoint,
@@ -1335,7 +3421,8 @@ const MeshtasticModule = (function() {
         
         // Constants
         ConnectionState,
-        MessageType
+        MessageType,
+        DeliveryStatus
     };
 })();
 
