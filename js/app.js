@@ -65,9 +65,25 @@ const App = (function() {
             PanelsModule.init();
             ModalsModule.init();
             await ElevationModule.init();
+            
+            // Initialize hiking module (time estimates, daylight tracking)
+            if (typeof HikingModule !== 'undefined') {
+                HikingModule.init();
+            }
+            
             await OfflineModule.init();
             await GPSModule.init();
             WeatherModule.init();
+            
+            // Initialize alert system
+            if (typeof AlertModule !== 'undefined') {
+                AlertModule.init();
+            }
+            
+            // Initialize air quality module
+            if (typeof AirQualityModule !== 'undefined') {
+                AirQualityModule.init();
+            }
             
             // Initialize satellite weather imagery module
             if (typeof SatWeatherModule !== 'undefined') {
@@ -82,6 +98,7 @@ const App = (function() {
             ContingencyModule.init();
             MeasureModule.init();
             SunMoonModule.init();
+            CelestialModule.init();
             
             // Initialize history/undo system
             if (typeof HistoryModule !== 'undefined') {
