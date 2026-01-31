@@ -2,122 +2,390 @@
 
 **GridDown by BlackDot Technology**
 
-Last updated: January 2026
+Last updated: January 2025
+
+---
 
 ## Summary
 
-GridDown is designed with privacy as a core principle. We collect no personal data, require no accounts, and operate primarily offline.
+GridDown is designed with **privacy as a core principle**. We:
+
+- ✅ Collect **no personal data**
+- ✅ Require **no accounts or registration**
+- ✅ Operate **primarily offline**
+- ✅ Store all data **locally on your device**
+- ✅ Have **no analytics or tracking**
+- ✅ Run **no backend servers**
+
+**Your data stays on your device. Period.**
+
+---
 
 ## Data Collection
 
-**We do not collect:**
-- Personal information
-- Location data
-- Usage analytics
-- Cookies or tracking data
+### What We Do NOT Collect
 
-## Data Storage
+BlackDot Technology does not collect:
 
-All data you create in GridDown (waypoints, routes, settings, received SSTV images) is stored **locally on your device** using your browser's IndexedDB storage. This data:
+| Data Type | Collected? |
+|-----------|------------|
+| Personal information (name, email, etc.) | ❌ No |
+| Location/GPS data | ❌ No |
+| Usage analytics | ❌ No |
+| Crash reports | ❌ No |
+| Cookies or tracking data | ❌ No |
+| Device identifiers | ❌ No |
+| IP addresses | ❌ No |
+| Browsing history | ❌ No |
 
+### What Stays on Your Device
+
+All data you create or interact with in GridDown is stored **locally** on your device:
+
+| Data Type | Storage Location |
+|-----------|------------------|
+| Waypoints and routes | IndexedDB (browser) |
+| Settings and preferences | localStorage (browser) |
+| Search history and favorites | localStorage (browser) |
+| Offline map tiles | Cache API (browser) |
+| SSTV images | IndexedDB (browser) |
+| Radiation tracks | IndexedDB (browser) |
+| Team/comm plans | IndexedDB (browser) |
+
+This data:
 - Never leaves your device unless you explicitly export it
 - Is not accessible to BlackDot Technology
 - Is not synced to any cloud service
-- Can be deleted at any time by clearing your browser data
+- Can be deleted at any time by clearing browser site data
+
+---
 
 ## Device Permissions
 
-GridDown may request the following device permissions. All are optional and only used when you initiate the relevant feature:
+GridDown may request device permissions. **All are optional** and only activated when you use the relevant feature:
 
-| Permission | Feature | Purpose |
-|------------|---------|---------|
-| **Location** | GPS tracking, navigation | Show your position on map, calculate distances |
-| **Microphone** | SSTV receive | Decode SSTV audio signals from radio |
-| **Camera** | SSTV transmit | Capture photos for SSTV transmission |
-| **Bluetooth** | APRS, Meshtastic, RadiaCode | Connect to external radio/sensor devices |
-| **Serial Port** | TNC devices | Connect to serial APRS equipment |
+### Location (GPS)
 
-**Important**: 
-- Audio from your microphone is processed **locally** for SSTV decoding and is never transmitted over the internet
-- Camera images are stored **locally** and only transmitted as SSTV audio through your radio when you explicitly click "Transmit"
-- No audio, images, or device data is sent to BlackDot Technology or any third party
+| Feature | Purpose |
+|---------|---------|
+| Map centering | Show your position on the map |
+| Navigation | Calculate distance and bearing |
+| Weather | Get forecast for your location |
+| Air quality | Get AQI for your location |
+| Waypoint creation | Save current position |
+
+**Your location is never transmitted to BlackDot Technology.** It may be sent to third-party APIs (weather, AQI) as coordinates only—see External Services below.
+
+### Microphone
+
+| Feature | Purpose |
+|---------|---------|
+| SSTV Receive | Decode SSTV audio from radio |
+
+**Audio is processed entirely on your device.** It is never recorded, stored long-term, or transmitted over the internet.
+
+### Camera
+
+| Feature | Purpose |
+|---------|---------|
+| SSTV Transmit | Capture photos for radio transmission |
+| Star Identification | Point at sky to identify stars |
+| Camera Sextant | Measure celestial body altitude |
+
+**Images are stored locally** and only transmitted as audio tones through your radio speaker when you explicitly initiate transmission.
+
+### Bluetooth
+
+| Feature | Purpose |
+|---------|---------|
+| RadiaCode | Connect to radiation detector |
+| Meshtastic | Connect to mesh radio device |
+| APRS | Connect to TNC/radio |
+
+**Connections are direct** between your device and the hardware. No data passes through any server.
+
+### Serial Port (USB)
+
+| Feature | Purpose |
+|---------|---------|
+| APRS TNC | Connect to serial radio equipment |
+| RF Sentinel | Connect to SDR hardware |
+
+**Connections are local** USB connections to your own hardware.
+
+### Motion Sensors
+
+| Feature | Purpose |
+|---------|---------|
+| Compass | Determine device heading |
+| Inertial Navigation | Dead reckoning when GPS unavailable |
+
+**Sensor data is processed locally** for navigation calculations. It is never stored long-term or transmitted.
+
+### Vibration
+
+| Feature | Purpose |
+|---------|---------|
+| Haptic Feedback | Tactile response for buttons and alerts |
+| Navigation Alerts | Vibration for turn notifications |
+
+**Vibration is a local device function** with no data transmission.
+
+---
 
 ## External Services
 
-GridDown connects to the following external services **only when you have internet connectivity**:
+GridDown connects to third-party services **only when you have internet connectivity** and use features that require external data.
 
-| Service | Purpose | Data Sent |
-|---------|---------|-----------|
-| Map tile providers (OSM, USGS, Esri) | Display map imagery | Tile coordinates only |
-| NASA GIBS | Satellite imagery overlays | Tile coordinates only |
-| Iowa Environmental Mesonet | NEXRAD radar imagery | Tile coordinates only |
-| Open-Meteo | Weather forecasts | Coordinates for forecast location |
-| Nominatim | Location search | Search query text |
-| USGS Water Services | Stream gauge data | Gauge station IDs |
-| Google Fonts | Typography | Standard font requests |
+### Map Tile Providers
 
-No personal information is sent to these services.
+| Provider | Data Sent | Purpose |
+|----------|-----------|---------|
+| OpenStreetMap | Tile coordinates | Street maps |
+| USGS National Map | Tile coordinates | Topographic maps |
+| USFS | Tile coordinates | Forest service maps |
+| Esri | Tile coordinates | Satellite imagery |
+| OpenTopoMap | Tile coordinates | Topographic overlay |
+| NASA GIBS | Tile coordinates | Satellite imagery |
+
+**Only tile coordinates are sent** (e.g., zoom level, x, y). No personal information is transmitted.
+
+### Weather and Environmental
+
+| Service | Data Sent | Purpose |
+|---------|-----------|---------|
+| Open-Meteo | Coordinates | Weather forecast |
+| Iowa Environmental Mesonet | Tile coordinates | NEXRAD radar |
+| EPA AirNow | Coordinates, API key | Air quality index |
+| USGS Water Services | Gauge station IDs | Stream water levels |
+
+**Coordinates are sent** to get localized data. No other personal information is included.
+
+### Search and Geocoding
+
+| Service | Data Sent | Purpose |
+|---------|-----------|---------|
+| OpenStreetMap Nominatim | Search query text | Location search |
+
+**Only your search query** is sent. No device or user identifiers are included.
+
+### No Data Sent To
+
+- BlackDot Technology servers (we have none)
+- Analytics services
+- Advertising networks
+- Social media platforms
+- Any data brokers
+
+---
 
 ## Offline Operation
 
-When operating offline:
-- No network requests are made
-- All functionality uses locally cached data
-- No data is transmitted anywhere
+When operating offline, GridDown:
+
+- Makes **no network requests**
+- Uses **locally cached** map tiles and data
+- Processes all features **on-device**
+- Transmits **nothing** over the internet
+
+**GridDown is designed to work fully offline** after initial setup and map downloading.
+
+---
+
+## Feature-Specific Privacy Details
+
+### Global Search (Ctrl+K)
+
+- Search history stored **locally** in localStorage
+- Favorites stored **locally** in localStorage
+- **No search queries sent to any server**
+- Landmark database is **bundled with app** (no network lookup)
+
+### Situation Wizard (F1)
+
+- Decision tree processed **entirely locally**
+- **No data collection or transmission**
+- No analytics on wizard usage
+
+### Mobile Features
+
+| Feature | Privacy Impact |
+|---------|----------------|
+| Battery Status | Local API only—not transmitted |
+| Connection Status | Local API only—not transmitted |
+| PWA Install | Standard browser PWA—no tracking |
+| Haptic Feedback | Local vibration—no data |
+
+### SSTV (Slow Scan Television)
+
+- **Receiving**: Audio decoded locally into images
+- **Transmitting**: Images encoded locally to audio tones
+- **AI Enhancement**: Runs entirely on your device (WebGPU/WASM)
+- **Storage**: Images saved in browser IndexedDB
+- **No cloud processing**: Everything runs locally
+
+### RadiaCode Integration
+
+- **Direct Bluetooth connection** to your detector
+- Radiation readings processed and stored **locally**
+- Track exports are **local files** you control
+- **No data sent to any server**
+
+### RF Sentinel Integration
+
+- Connects to **your own local** RF Sentinel hardware
+- Data flows between GridDown and your RF Sentinel only
+- **No data passes through BlackDot Technology**
+
+### Celestial Navigation
+
+- Star calculations run **locally** using bundled algorithms
+- Camera star identification processed **on-device**
+- **No images or observations transmitted**
+
+### Meshtastic / APRS
+
+*APRS® is a registered trademark of Bob Bruninga, WB4APR (SK).*
+
+- Connect directly to **your hardware**
+- Messages sent over **your radio network**
+- GridDown does not relay or store network traffic
+- **You control your radio communications**
+
+---
 
 ## Hardware Connections
 
-When you connect devices (RadiaCode, Meshtastic, APRS TNC):
-- Connections are direct via Web Bluetooth or Web Serial
-- Data stays between your device and the connected hardware
-- No data is sent to BlackDot Technology or any third party
+When you connect external devices:
 
-## RF Sentinel
+| Connection Type | Privacy Model |
+|-----------------|---------------|
+| Web Bluetooth | Direct device-to-device |
+| Web Serial | Direct USB connection |
+| WebSocket (RF Sentinel) | Local network to your hardware |
 
-If you use RF Sentinel integration:
-- Connections are made to your own local RF Sentinel hardware
-- Data flows directly between GridDown and your RF Sentinel instance
-- No data passes through BlackDot Technology servers
+**No hardware data is transmitted to BlackDot Technology or any third party.**
 
-## SSTV (Slow Scan Television)
+---
 
-When using SSTV features:
-- **Receiving**: Audio from your microphone is decoded locally into images
-- **Transmitting**: Images are encoded locally into audio tones played through your speaker
-- **Storage**: Received images are stored in your browser's local storage
-- **No cloud processing**: All encoding, decoding, and AI enhancement runs entirely on your device
-- **Amateur radio compliance**: You are responsible for ensuring proper licensing and identification when transmitting
+## Data Export and Sharing
 
-## Export & Sharing
+### Exporting Your Data
 
-When you export plans or data:
-- Exported files are created locally on your device
-- Optional encryption uses AES-256-GCM (passphrase never transmitted)
-- Sharing is peer-to-peer; we have no access to shared files
+- Exported files (GPX, KML, JSON) are created **locally**
+- Files are saved to **your device**
+- You control where exports go
 
-## Your Rights
+### Encrypted Plan Sharing
 
-You can:
-- Use GridDown without providing any personal information
-- Delete all stored data by clearing your browser's site data
-- Operate completely offline after initial setup
-- Export all your data at any time
-- Revoke device permissions at any time through browser settings
+- Uses **AES-256-GCM** encryption
+- Passphrase **never transmitted**—stays on your device
+- Sharing is **peer-to-peer** (you share the file directly)
+- BlackDot Technology has **no access** to shared files
+
+### What You Can Export
+
+- All waypoints and routes
+- Settings and preferences
+- Radiation tracks
+- Team/communication plans
+- SSTV image gallery
+
+---
+
+## Your Privacy Rights
+
+You have complete control over your data:
+
+| Right | How to Exercise |
+|-------|-----------------|
+| **Access your data** | View in app or export |
+| **Delete your data** | Clear browser site data |
+| **Export your data** | Use export features |
+| **Operate offline** | Download maps, disable network |
+| **Revoke permissions** | Browser settings → Site permissions |
+| **Use anonymously** | No account required |
+
+### Deleting All Data
+
+To completely remove all GridDown data:
+
+1. **Browser Settings** → Privacy/Security
+2. **Clear browsing data** or **Clear site data**
+3. Select the GridDown site/origin
+4. Clear storage (IndexedDB, localStorage, Cache)
+
+Or use: **Settings** → **Clear All Data** within GridDown
+
+---
 
 ## Children's Privacy
 
-GridDown does not knowingly collect information from children under 13. The application does not require or request any personal information.
+GridDown:
+- Does not knowingly collect information from children under 13
+- Does not require any personal information
+- Does not have age verification (none needed)
+- Is suitable for all ages as a navigation/planning tool
+
+---
+
+## International Users
+
+GridDown operates the same way globally:
+
+- **No data leaves your device** to our servers (we have none)
+- **Third-party APIs** may have their own privacy policies
+- **GDPR/CCPA compliance**: We collect no personal data to regulate
+- **Data residency**: Your data stays on your device in your jurisdiction
+
+---
 
 ## Changes to This Policy
 
-We may update this policy as features are added. Significant changes will be noted in the changelog.
+We may update this policy as features are added. Changes will be:
+
+- Documented in the [CHANGELOG](CHANGELOG.md)
+- Reflected in the "Last updated" date above
+- Available for review in the source repository
+
+**Continued use after changes constitutes acceptance.**
+
+---
+
+## Third-Party Privacy Policies
+
+For external services GridDown connects to, see their privacy policies:
+
+| Service | Privacy Policy |
+|---------|----------------|
+| OpenStreetMap | https://wiki.osmfoundation.org/wiki/Privacy_Policy |
+| Esri | https://www.esri.com/en-us/privacy/overview |
+| Open-Meteo | https://open-meteo.com/en/terms |
+| EPA AirNow | https://www.epa.gov/privacy |
+| USGS | https://www.usgs.gov/privacy-policy |
+| NASA | https://www.nasa.gov/privacy/ |
+
+---
 
 ## Contact
 
-Questions about this privacy policy can be directed to:
+Questions about this privacy policy:
 
 **BlackDot Technology**
+- **Privacy Inquiries**: privacy@blackdot.tech
+- **General Contact**: info@blackdot.tech
 
 ---
+
+## Related Documents
+
+- [Terms of Service](TERMS_OF_SERVICE.md) - Usage terms
+- [Disclaimer](DISCLAIMER.md) - Safety information
+- [Security Policy](SECURITY.md) - Vulnerability reporting
+- [License](LICENSE) - Software licensing
+
+---
+
+**© 2025 BlackDot Technology. All Rights Reserved.**
 
 *GridDown is dual-licensed software. See [LICENSE](LICENSE) for details.*

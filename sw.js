@@ -1,4 +1,4 @@
-const CACHE_NAME = 'griddown-v6.34.0';
+const CACHE_NAME = 'griddown-v6.47.0';
 const TILE_CACHE_NAME = 'griddown-tiles-v1';
 const STATIC_ASSETS = [
     './', 'index.html', 'manifest.json', 'favicon.ico', 'css/app.css',
@@ -13,7 +13,7 @@ const STATIC_ASSETS = [
     'js/modules/offline.js', 'js/modules/gps.js', 'js/modules/navigation.js',
     'js/modules/hiking.js',
     'js/modules/weather.js', 'js/modules/satweather.js', 'js/modules/alerts.js', 'js/modules/airquality.js', 'js/modules/rflos.js', 'js/modules/contingency.js', 'js/modules/measure.js', 
-    'js/modules/sunmoon.js', 'js/modules/celestial.js', 'js/modules/commplan.js', 'js/modules/terrain.js',
+    'js/modules/sunmoon.js', 'js/modules/celestial.js', 'js/modules/camera-sextant.js', 'js/modules/star-id.js', 'js/modules/rangefinder.js', 'js/modules/commplan.js', 'js/modules/terrain.js',
     'js/modules/nightmode.js', 'js/modules/sos.js', 'js/modules/radio.js',
     'js/modules/plansharing.js',
     'js/modules/declination.js',
@@ -27,7 +27,10 @@ const STATIC_ASSETS = [
     'js/modules/sarsat.js',
     'js/modules/sstv-ai.js',
     'js/modules/sstv-dsp.js',
+    'js/modules/landmark.js',
     'js/modules/search.js',
+    'js/modules/mobile.js',
+    'js/modules/wizard.js',
     'js/modules/onboarding.js',
     'js/modules/medical.js',
     'js/modules/fieldguides.js',
@@ -43,13 +46,12 @@ const STATIC_ASSETS = [
 ];
 
 // Tile server domains to cache
+// NOTE: Esri domains removed for commercial licensing compliance
 const TILE_DOMAINS = [
-    'tile.openstreetmap.org',           // Standard OSM
-    'tile.opentopomap.org',             // Terrain/Topo
-    'server.arcgisonline.com',          // Esri (satellite, labels, hillshade)
-    'basemap.nationalmap.gov',          // USGS (topo, imagery, hydro)
-    'apps.fs.usda.gov',                 // USFS (topo, roads, trails, recreation)
-    'gis.blm.gov',                      // BLM (surface management, grazing)
+    'tile.openstreetmap.org',           // Standard OSM (ODbL license)
+    'tile.opentopomap.org',             // Terrain/Topo (CC-BY-SA)
+    'basemap.nationalmap.gov',          // USGS (public domain - US Government)
+    'gis.blm.gov',                      // BLM (public domain - US Government)
     // Weather radar and satellite tiles (Iowa Environmental Mesonet)
     'mesonet.agron.iastate.edu'         // IEM - NEXRAD, GOES, MRMS, NWS warnings
 ];

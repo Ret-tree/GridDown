@@ -23,6 +23,7 @@ This document lists all external data sources used by GridDown, their licensing 
 | Nominatim/OSM | ODbL 1.0 | ✅ Yes | ✅ Yes |
 | USGS Water Services | Public Domain | ✅ Yes | Requested |
 | Esri Basemaps | Esri ToS | ⚠️ Non-commercial only | ✅ Yes |
+| APRS Protocol | Trademark | ✅ Yes | ✅ Yes |
 
 ---
 
@@ -283,6 +284,29 @@ Search powered by OpenStreetMap Nominatim
 
 ## Third-Party Libraries
 
+### APRS (Automatic Packet Reporting System)
+
+**Copyright**: Bob Bruninga, WB4APR (SK)  
+**Contact**: wb4apr@amsat.org  
+**Organization**: TAPR (Tucson Amateur Packet Radio Corporation)  
+**URL**: http://www.aprs.org/  
+
+**Attribution**:
+```
+APRS is a registered trademark of APRS Software and Bob Bruninga, WB4APR.
+Automatic Packet Reporting System (APRS) Copyright © Bob Bruninga WB4APR (SK).
+```
+
+**Terms Summary**:
+- APRS is an amateur radio-based system for real-time communication
+- The APRS protocol and trademark are the property of Bob Bruninga's estate
+- GridDown's APRS integration is for amateur radio operators with valid licenses
+- Users must comply with all amateur radio regulations when using APRS features
+
+**Note**: Bob Bruninga, WB4APR, the inventor of APRS, became a Silent Key (SK) on February 7, 2022. His contributions to amateur radio and the APRS community are gratefully acknowledged.
+
+---
+
 ### RadiaCode BLE Protocol
 
 **License**: MIT  
@@ -325,7 +349,8 @@ If you plan to distribute GridDown commercially (e.g., pre-installed on devices 
 5. ✅ **NEXRAD/IEM**: No restrictions (attribution appreciated)
 6. ✅ **EPA AirNow**: Include attribution and preliminary data disclaimer
 7. ✅ **Open-Meteo**: Include attribution
-8. ⚠️ **Esri Basemaps**: Either remove from commercial builds OR obtain Esri commercial license
+8. ✅ **APRS**: Include trademark attribution to Bob Bruninga, WB4APR
+9. ⚠️ **Esri Basemaps**: Either remove from commercial builds OR obtain Esri commercial license
 
 ---
 

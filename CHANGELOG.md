@@ -2,6 +2,687 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.47.0] - 2025-01-31
+
+### Added
+- **DISCLAIMER.md** - Comprehensive safety and liability disclaimer
+  - Navigation and position accuracy warnings
+  - Emergency features limitations
+  - Medical reference disclaimer
+  - Radio compliance requirements
+  - Hardware integration caveats
+  - Limitation of liability
+  - Assumption of risk acknowledgment
+  
+- **TERMS_OF_SERVICE.md** - Complete terms of service for web app usage
+  - License grant details (GPL v3 / Commercial)
+  - User responsibilities
+  - Privacy summary
+  - Third-party service attributions
+  - Intellectual property provisions
+  - Warranty disclaimers
+  - Limitation of liability
+  - Indemnification clause
+  - Dispute resolution process
+  - Export compliance notice
+
+- **SECURITY.md** - Vulnerability disclosure and security policy
+  - Supported versions table
+  - How to report vulnerabilities (security@blackdot.tech)
+  - Response timeline (48hr acknowledgment, severity-based fixes)
+  - Safe harbor for security researchers
+  - Scope definitions (in-scope vs out-of-scope)
+  - Security architecture documentation
+  - Known security considerations
+  - Security best practices for users
+
+- **APRS Attribution** - Proper crediting across all documentation
+  - APRS® registered trademark of Bob Bruninga, WB4APR (SK)
+  - Attribution added to: ATTRIBUTIONS.md, README.md, PRIVACY.md, DISCLAIMER.md
+  - Module header comment in js/modules/aprs.js with full attribution
+  - TAPR (Tucson Amateur Packet Radio) acknowledgment
+  - Memorial note for Bob Bruninga (SK February 7, 2022)
+
+### Changed
+- **README.md** - Comprehensive update
+  - Updated version to 6.47.0 (was incorrectly showing 6.36.0)
+  - Added Global Search System documentation (Ctrl+K)
+  - Added Situation Wizard documentation (F1)
+  - Added Mobile Enhancements documentation (FAB, battery, connection)
+  - Updated keyboard shortcuts table
+  - Updated file structure with new modules
+  - Updated Recent Highlights section
+  - Fixed license reference (dual-license, not MIT)
+  - Added links to all documentation files
+  - Added APRS trademark attribution in APRS Integration section
+  - Added APRS/TAPR to Acknowledgments section
+  
+- **PRIVACY.md** - Expanded and reorganized
+  - Added Global Search privacy details
+  - Added Situation Wizard privacy details
+  - Added Mobile Features privacy table
+  - Added Motion Sensors and Vibration permissions
+  - Added feature-specific privacy sections
+  - Added international users / GDPR section
+  - Added third-party privacy policy links
+  - Added related documents section
+  - Added APRS trademark note
+  
+- **ATTRIBUTIONS.md** - Added APRS section
+  - Full APRS attribution with copyright notice
+  - TAPR acknowledgment
+  - Link to aprs.org
+  - Added to summary table
+  - Added to commercial distribution checklist
+  
+- **js/modules/aprs.js** - Added attribution header
+  - Full copyright notice for Bob Bruninga, WB4APR
+  - Trademark acknowledgment
+  - Links to APRS.org and TAPR
+  - Licensing reminder for users
+
+### Documentation Status
+
+| Document | Lines | Status | Purpose |
+|----------|-------|--------|---------|
+| README.md | 845+ | ✅ Updated | Feature overview and getting started |
+| LICENSE | 205 | ✅ Current | Dual license (GPL v3 / Commercial) |
+| PRIVACY.md | 395 | ✅ Updated | Data handling practices |
+| DISCLAIMER.md | 297 | ✅ NEW | Safety and liability |
+| TERMS_OF_SERVICE.md | 369 | ✅ NEW | Usage terms and conditions |
+| SECURITY.md | 280 | ✅ NEW | Vulnerability reporting |
+| ATTRIBUTIONS.md | 385 | ✅ Updated | Third-party data source licensing |
+| CHANGELOG.md | 3,600+ | ✅ Updated | Version history |
+
+## [6.46.0] - 2025-01-31
+
+### Added
+- **Situation Wizard** - Decision tree that guides users to relevant features
+  
+  Stress-friendly guidance system with instant response (no AI delays),
+  100% reliable advice (no hallucinations), and complete offline support.
+  
+  **Access Methods**
+  - Press **F1** or **Ctrl+/** anywhere in the app
+  - Mobile: FAB menu → **❓ Help Me**
+  - Search: `Ctrl+K` → "help", "wizard", "I'm lost", "need help"
+  
+  **Decision Tree (33 nodes)**
+  ```
+  What's your situation?
+  ├── 🧭 Lost / Need Position
+  │   ├── GPS Working → Use locate button
+  │   ├── Can See Landmarks → Rangefinder Resection
+  │   ├── Can See Sky
+  │   │   ├── Daytime → Noon Sight
+  │   │   └── Nighttime → Star Navigation
+  │   └── None of These → Dead Reckoning
+  │
+  ├── 🆘 Emergency
+  │   ├── Need Rescue → SOS Panel (urgent)
+  │   ├── Medical Emergency → Medical Reference
+  │   ├── Need to Signal → Mirror/Strobe
+  │   └── Need Shelter → Weather + Terrain
+  │
+  ├── 📡 Need to Communicate
+  │   ├── Meshtastic/LoRa → Mesh panel
+  │   ├── Ham/GMRS Radio → Radio panel + frequencies
+  │   ├── APRS → APRS panel
+  │   └── No Radio Equipment → SMS/Satellite tips
+  │
+  ├── 🗺️ Navigation Help
+  │   ├── Follow a Route → Routes panel
+  │   ├── Bearing to Point → Compass
+  │   ├── Got Off Route → Return guidance
+  │   └── Terrain Navigation → Topo maps
+  │
+  ├── 📋 Trip Planning
+  │   ├── Build a Route → Route builder
+  │   ├── Logistics/Supplies → Calculator
+  │   ├── Contingency Plans → Bail-out points
+  │   └── Download Offline Maps → Offline panel
+  │
+  └── 🌤️ Weather / Environment
+      ├── Weather Forecast → Weather panel
+      ├── Barometric Pressure → Barometer
+      ├── Sun/Moon Times → Celestial panel
+      └── Radiation Monitoring → Radiacode
+  ```
+  
+  **Solution Screens Include**
+  - Numbered step-by-step instructions
+  - **Quick Action** buttons that open relevant panels
+  - 💡 **Tips** section with expert advice
+  - **Urgent** banner for emergencies (with animation)
+  
+  **Search Shortcuts**
+  | Search Query | Goes To |
+  |--------------|---------|
+  | "help", "wizard" | Wizard root |
+  | "I'm lost", "where am I" | Lost branch |
+  | "need help", "emergency" | Emergency branch |
+  
+  **Mobile FAB Integration**
+  The floating action button now includes a **❓ Help Me** option
+  that opens the wizard directly.
+
+## [6.45.0] - 2025-01-31
+
+### Added
+- **Mobile Enhancements Module**
+  
+  Low-risk mobile improvements that gracefully degrade on desktop.
+  All features use feature detection and CSS media queries to ensure
+  zero impact on desktop functionality.
+  
+  **Floating Action Button (FAB)**
+  
+  Quick access to essential actions on mobile devices:
+  ```
+  ┌─────────────────────────────┐
+  │                         🔍  │ ← Search
+  │                         📍  │ ← Add Waypoint  
+  │                         🧭  │ ← Compass
+  │                         🆘  │ ← Emergency SOS
+  │                         ⚡  │ ← FAB Trigger
+  └─────────────────────────────┘
+  ```
+  - Tap ⚡ to expand menu
+  - Tap outside or press Escape to close
+  - SOS action triggers warning haptic
+  - Hidden on screens wider than 768px
+  
+  **PWA Install Prompt**
+  
+  Smart banner prompts users to install GridDown:
+  - Appears 30 seconds after first use
+  - Respects dismissal for 7 days
+  - Detects if already installed (standalone mode)
+  - Shows success toast on install
+  
+  **Battery Status Indicator**
+  
+  Real-time battery monitoring in top-right corner:
+  - Shows percentage and charging status
+  - 🔋 Normal | 🪫 Low (<20%) | 🔌 Charging
+  - Critical warning toast at 10%
+  - Updates on level/charging changes
+  - Gracefully hidden if Battery API unavailable
+  
+  **Connection Status Indicator**
+  
+  Network status display:
+  - 📶 Online | 📵 Offline | 📶 Slow (2G)
+  - Toast notifications on connection changes
+  - Haptic feedback on reconnection
+  - Uses Network Information API when available
+  
+  **Enhanced Haptic Feedback**
+  
+  Consistent vibration patterns across the app:
+  | Pattern | Duration | Use Case |
+  |---------|----------|----------|
+  | tap | 10ms | Button taps |
+  | success | 10-50-10ms | Confirmations |
+  | warning | 30-50-30ms | Alerts, SOS |
+  | error | 50-30-50-30-50ms | Errors |
+  | navigation | 20ms | Turn guidance |
+  
+  Can be disabled via `MobileModule.setHapticEnabled(false)`
+  
+  **Desktop Safety Guarantees**
+  
+  | Feature | Desktop Behavior |
+  |---------|------------------|
+  | FAB | `display: none` via CSS |
+  | Status indicators | `display: none` via CSS |
+  | Install prompt | Event never fires on desktop browsers |
+  | Battery API | Returns early if unavailable |
+  | Vibrate API | No-op if unavailable |
+  | Touch detection | Returns false on desktop |
+
+## [6.44.0] - 2025-01-31
+
+### Added
+- **Phase 7: Help/Settings Search**
+  
+  Search for help topics and settings directly from the command palette (Ctrl+K).
+  
+  **Help Topics (20 topics)**
+  
+  | Category | Topics |
+  |----------|--------|
+  | Navigation | GPS & Location, Offline Maps, Route Navigation |
+  | Celestial | Celestial Navigation, Star Identification, Resection |
+  | Communication | Radio Frequencies, Meshtastic, APRS Tracking |
+  | Emergency | Emergency SOS, SARSAT Beacons |
+  | Tools | Distance Measurement, Compass Bearing, Waypoints |
+  | Weather | Weather Information, Barometer |
+  | Data | Import GPX/KML, Export Data |
+  | General | Keyboard Shortcuts, Night Mode |
+  
+  **Settings Options (15 settings)**
+  
+  | Setting | Action |
+  |---------|--------|
+  | Night Mode | Toggle red night vision mode |
+  | Units | Switch metric/imperial |
+  | Coordinate Format | Cycle DMS/Decimal/DDM |
+  | Map Layer | Change base layer |
+  | GPS Accuracy | Show/hide accuracy circle |
+  | Track Position | Auto-follow position |
+  | Sound Effects | Toggle sounds |
+  | Clear All Data | Factory reset (with confirm) |
+  | Export All Data | Backup as JSON |
+  | Bluetooth Devices | Manage connections |
+  
+  **Usage Examples**
+  ```
+  Ctrl+K → "gps" → ❓ GPS & Location (Help)
+  Ctrl+K → "night" → 🌙 Night Mode (Setting)
+  Ctrl+K → "export" → 📤 Export All Data
+  Ctrl+K → "keyboard" → ⌨️ Keyboard Shortcuts
+  ```
+
+- **Phase 8: Favorites System**
+  
+  Pin frequently used items to access them instantly when opening search.
+  
+  **Adding Favorites**
+  - **Ctrl+D** while result is selected to toggle favorite
+  - Click the ☆ star button on any search result
+  - Favorited items show ★ indicator
+  
+  **Favorites Panel**
+  When opening search (Ctrl+K) with no query, favorites appear first:
+  ```
+  ┌─────────────────────────────────────────┐
+  │ ⭐ Favorites                   [Clear All] │
+  │ ┌─────────────────────────────────────┐ │
+  │ │ 📍 Basecamp Alpha         × │ │
+  │ │ ⭐ Polaris (star)          × │ │
+  │ │ ⚡ Add Waypoint            × │ │
+  │ └─────────────────────────────────────┘ │
+  ├─────────────────────────────────────────┤
+  │ 🕐 Recent Searches            [Clear] │
+  │ waypoint  polaris  route              │
+  └─────────────────────────────────────────┘
+  ```
+  
+  **Features**
+  - Up to 20 favorites stored
+  - Click favorite to instantly activate
+  - Hover to reveal remove (×) button  
+  - Clear All button to reset favorites
+  - Persists across sessions (localStorage)
+  - Works with all search categories:
+    - Actions, Waypoints, Routes
+    - Celestial bodies, Landmarks
+    - Help topics, Settings
+  
+  **Enhanced Search Results**
+  - Star button (☆/★) on each result
+  - Favorited results have subtle gold highlight
+  - Favorite badge (★) in result title
+
+## [6.43.0] - 2025-01-31
+
+### Added
+- **Landmark Pack Search System**
+  
+  Search and use geographic landmarks from public domain databases for navigation
+  and rangefinder resection. All data sources are US Federal Government works,
+  which are not eligible for copyright (17 USC § 105).
+  
+  **Legal Status**
+  - All landmark data is PUBLIC DOMAIN (US Government works)
+  - No attribution required (though provided as good practice)
+  - Commercial use permitted without restriction
+  - Zero legal risk for distribution or sale
+  
+  **Data Sources**
+  
+  | Source | Data Type | Example |
+  |--------|-----------|---------|
+  | USGS GNIS | Peaks, summits, features | Mount Whitney (4,421m) |
+  | FAA DOF | Towers, antennas | Sutro Tower (298m) |
+  | NGS | Survey benchmarks | High-precision markers |
+  | USFS | Fire lookouts | Keller Peak Lookout |
+  
+  **Landmark Types**
+  
+  | Type | Icon | Use Case |
+  |------|------|----------|
+  | Summit/Peak | 🏔️ | Resection, navigation |
+  | Tower | 📡 | Resection (known height) |
+  | Survey Marker | 📍 | Precision positioning |
+  | Fire Lookout | 🔭 | Resection, emergency |
+  | Dam | 🌊 | Navigation reference |
+  | Bridge | 🌉 | Navigation reference |
+  
+  **Search Integration (Ctrl+K)**
+  ```
+  Ctrl+K → "whitney" → 🏔️ Mount Whitney (4,421m • USGS GNIS)
+  Ctrl+K → "tower" → 📡 Shows nearby towers
+  Ctrl+K → "l:peak" → Filter to landmarks only
+  ```
+  
+  **Landmark Actions**
+  When you select a landmark, an action modal appears with:
+  - 🗺️ **Show on Map** - Center map on landmark
+  - 📐 **Add to Resection** - Use for rangefinder position fix
+  - 📍 **Save as Waypoint** - Add to your waypoints
+  - 📋 **Copy Coordinates** - Copy lat/lon to clipboard
+  
+  **Rangefinder Resection Integration**
+  Landmarks can be directly added to the resection calculator:
+  1. Search for a visible peak or tower
+  2. Click "Add to Resection"
+  3. Take bearing/distance measurement
+  4. Repeat for 2-3 landmarks
+  5. Calculate position fix
+  
+  **Offline Landmark Packs**
+  Available packs (coming soon):
+  - California Peaks (847 summits, 95KB)
+  - California Towers (2,134 towers, 180KB)
+  - Nevada Peaks (412 summits, 48KB)
+  - Colorado 14ers & Peaks (634 summits, 72KB)
+  - Western Fire Lookouts (523 lookouts, 58KB)
+  
+  **GPX Import**
+  Import custom landmarks from GPX files:
+  ```javascript
+  LandmarkModule.importFromGPX(gpxContent);
+  ```
+  
+  **Sample Data Included**
+  21 sample landmarks are pre-loaded for demo:
+  - 10 California peaks (Whitney, Shasta, etc.)
+  - 3 Nevada peaks (Boundary, Wheeler, Charleston)
+  - 3 FAA towers (Sutro, Mt Wilson, etc.)
+  - 2 Fire lookouts
+  - 2 NGS benchmarks
+
+## [6.42.0] - 2025-01-31
+
+### Added
+- **Contextual Suggestions for Global Search**
+  
+  When opening search (Ctrl+K) with no query, the interface now shows intelligent
+  contextual suggestions based on current conditions and recent activity.
+  
+  **Suggestion Categories**
+  
+  | Category | Examples | Priority |
+  |----------|----------|----------|
+  | ⚠️ **Alerts** | Weather alerts, offline status | Highest (110) |
+  | ⭐ **Now Visible** | Visible stars/planets/Moon with altitude | High (50-90) |
+  | 🧭 **Navigation** | Active route, active hike, GPS status | High (85-100) |
+  | 🕐 **Recent** | Recently used actions | Medium (35-40) |
+  
+  **Celestial Suggestions**
+  - Automatically detects visible celestial bodies
+  - Shows current altitude and azimuth
+  - Only suggests bodies >15° above horizon (well visible)
+  - Checks: Sirius, Vega, Arcturus, Capella, Polaris, Betelgeuse
+  - Checks planets: Venus, Jupiter, Mars, Saturn
+  - Checks Moon visibility
+  
+  **Navigation Suggestions**
+  - Shows active route with progress percentage
+  - Shows active hike with duration and distance
+  - Suggests rangefinder resection when GPS signal is weak
+  
+  **Alert Suggestions**
+  - Weather alerts from WeatherModule
+  - Offline mode indicator
+  
+  **Quick Actions Grid**
+  - 4 one-tap action buttons: Add Waypoint, Measure, Compass, Stars
+  - Accessible even without typing
+  
+  **Recent Actions Tracking**
+  - Tracks which actions you use frequently
+  - Persists across sessions via localStorage
+  - Shows "Used X min/hours/days ago"
+  
+  **Usage**
+  ```
+  Ctrl+K (with empty search) →
+  ┌─────────────────────────────────────────┐
+  │ ⚠️ Alerts                               │
+  │   🌤️ Weather Alert: Winter Storm Watch  │
+  ├─────────────────────────────────────────┤
+  │ ⭐ Now Visible                          │
+  │   ⭐ Sirius - Alt 32° Az 180°           │
+  │   🪐 Jupiter - Alt 45° Az 220°          │
+  │   🌙 Moon - Alt 28° Az 90°              │
+  ├─────────────────────────────────────────┤
+  │ 🧭 Navigation                           │
+  │   🧭 Continue: Summit Trail (45% done)  │
+  ├─────────────────────────────────────────┤
+  │ 🕐 Recent                               │
+  │   📍 Add Waypoint - Used 2 hours ago    │
+  │   📏 Measure Distance - Used yesterday  │
+  ├─────────────────────────────────────────┤
+  │ [📍 Add] [📏 Measure] [🧭 Compass] [⭐] │
+  └─────────────────────────────────────────┘
+  ```
+
+## [6.41.0] - 2025-01-31
+
+### Added
+- **Enhanced Fuzzy Matching for Global Search**
+  
+  The global search (Ctrl+K) now features intelligent fuzzy matching that tolerates
+  typos, supports initials, and ranks results more accurately.
+  
+  **Matching Strategies (in priority order)**
+  
+  | Strategy | Example Query | Example Match | Score Range |
+  |----------|---------------|---------------|-------------|
+  | Exact | `eagle creek` | "Eagle Creek" | 100 |
+  | Prefix | `eagle` | "Eagleton" | 80-90 |
+  | Word-prefix | `eagle` | "Eagle Creek" | 80-85 |
+  | Typo tolerance | `bsaecamp` | "Basecamp Alpha" | 35-75 |
+  | Word boundary | `eagle trail` | "Eagle Creek Trail" | 50-80 |
+  | Initials | `ec` | "Eagle Creek" | 70 |
+  | Contains | `gle` | "Eagle Creek" | 40-55 |
+  | Subsequence | `egc` | "Eagle Creek" | 25-45 |
+  
+  **Typo Tolerance**
+  - Uses Levenshtein distance algorithm
+  - Allows 1 typo for words ≤4 chars
+  - Allows 2 typos for words 5-6 chars
+  - Allows 3 typos for words 7+ chars
+  - Common typos now find results: `bsaecamp` → "Basecamp", `polarus` → "Polaris"
+  
+  **Initials Matching**
+  - Two-letter queries match word initials: `ec` → "Eagle Creek"
+  - Supports 2-6 letter initial queries
+  - Works with multi-word names: `nyc` → "New York City"
+  
+  **Word Boundary Detection**
+  - Handles spaces, camelCase, snake_case, kebab-case
+  - Multi-word queries require all words to match
+  - `eagle trail` finds "Eagle Creek Trail" but not "Eagle Creek"
+  
+  **Improved Ranking**
+  - Word-prefix matches rank with prefix matches
+  - Typo matches score based on similarity ratio
+  - Position penalty for mid-string matches
+  - All match types properly ordered for intuitive results
+
+## [6.40.0] - 2025-01-31
+
+### Added
+- **Enhanced Global Search - Actions & Celestial Bodies**
+  
+  The global search (Ctrl+K) is now a powerful command palette supporting quick actions
+  and celestial body search in addition to existing waypoint/route search.
+  
+  **New Search Categories**
+  - ⚡ **Actions** - Execute commands directly from search
+  - ⭐ **Celestial** - Search stars, planets, Sun, and Moon
+  
+  **Action Commands (25+ commands)**
+  - Waypoint: Add Waypoint, Add Waypoint Here
+  - Routes: Create Route, Start/Stop Navigation
+  - Tools: Measure Distance, Take Bearing, Rangefinder Resection
+  - Celestial: Star Chart, Star ID, Camera Sextant, Start Observation
+  - Maps: Download Offline Maps, Change Map Layer
+  - Weather: Check Weather, Satellite Weather
+  - Comms: Communication Plan, Emergency SOS
+  - Hiking: Start Hike, Stop Hike
+  - View: Center on Position, Reset Map North
+  - Settings: Toggle Night Mode, Keyboard Shortcuts
+  
+  **Celestial Body Search**
+  - 18 navigation stars with constellation, magnitude, and keywords
+  - 4 planets (Venus, Mars, Jupiter, Saturn)
+  - Sun and Moon
+  - Live position display (altitude/azimuth) when available
+  - Searchable by name, constellation, or keywords (e.g., "north star", "orion", "summer triangle")
+  
+  **Usage Examples**
+  ```
+  Ctrl+K → "add waypoint" → Creates new waypoint
+  Ctrl+K → "polaris" → Shows Polaris with current position
+  Ctrl+K → "measure" → Activates distance measurement
+  Ctrl+K → "sos" → Opens emergency SOS panel
+  Ctrl+K → "vega" → Shows Vega: Lyra • Mag 0.0 • Alt 45° Az 320°
+  ```
+  
+  **Category Shortcuts**
+  - `a` - Actions only
+  - `s` - Celestial (stars) only
+  - `w` - Waypoints only
+  - `r` - Routes only
+  - `t` - Team members only
+  - `f` - Frequencies only
+  - `c` - Coordinates only
+
+## [6.39.0] - 2025-01-31
+
+### Added
+- **Rangefinder Resection - GPS-Denied Position Fixing**
+  
+  Calculate your position without GPS using distance measurements to known landmarks.
+  Works with any rangefinder (laser, optical) or even estimated distances.
+  
+  **Features**
+  - Add landmarks from waypoints or by tapping on map
+  - Enter measured distances in meters
+  - Real-time GDOP (Geometric Dilution of Precision) indicator
+  - Trilateration algorithm calculates position from 3+ measurements
+  - Accuracy estimation with 95% confidence interval
+  - Residual analysis showing per-landmark measurement errors
+  - Apply calculated position to map
+  
+  **Technical Details**
+  - Gauss-Newton nonlinear least squares solver
+  - Local ENU coordinate conversion for numerical stability
+  - Haversine distance calculations for geographic accuracy
+  - GDOP quality ratings: Excellent (<2), Good (<4), Moderate (<6), Poor (>6)
+  
+  **Real-World Use Cases**
+  - Wildfire evacuation when GPS is degraded by smoke
+  - Canyon/mine environments with no satellite visibility
+  - Electronic warfare scenarios with GPS jamming
+  - Backup navigation for SAR teams
+  
+  **Location**
+  Navigation Panel → GPS-Denied Position section
+  
+  **Workflow**
+  1. Add 3+ landmarks (known points visible from your position)
+  2. Measure distance to each with any rangefinder
+  3. Enter distances into GridDown
+  4. Calculate position fix
+  5. Apply to map
+
+## [6.38.0] - 2025-01-31
+
+### Added
+- **Star Identification (Phase 8e) - Augmented Reality Star Finding**
+  
+  Point your phone at the night sky to automatically identify stars and celestial bodies.
+  
+  **Features**
+  - Real-time star identification using device orientation sensors
+  - Visual overlay showing star names, magnitudes, and constellations
+  - Automatic identification of 57 navigation stars, 4 planets, and the Moon
+  - Brightness-scaled star markers with constellation labels
+  - Selection highlighting with tap-to-select functionality
+  - Recommended targets list sorted by observation suitability
+  
+  **Technical Details**
+  - Uses DeviceOrientationEvent for camera pointing direction
+  - Compass heading (alpha) for azimuth direction
+  - Pitch angle (beta) for altitude calculation
+  - Gnomonic projection for screen coordinate mapping
+  - 60° horizontal × 45° vertical field of view estimation
+  - Real-time sensor smoothing with circular averaging for compass
+  
+  **Smart Recommendations**
+  - Scores stars by: brightness, altitude, azimuth spread
+  - Prefers mid-altitude (30-60°) for easier observation
+  - Highlights first-magnitude navigation stars
+  - Always recommends Moon and visible planets
+  - Provides observation reasoning for each target
+  
+  **Integration**
+  - Located in Celestial panel → Tools tab
+  - "Observe This Object" button pre-selects body in Observe tab
+  - Works alongside Camera Sextant for complete workflow
+  - Shares observer position with other celestial tools
+
+## [6.37.0] - 2025-01-31
+
+### Added
+- **Camera Sextant (Phase 8c) - Emergency Celestial Navigation**
+  
+  Use your phone's camera and sensors to measure celestial body altitudes without specialized equipment.
+  
+  **Features**
+  - Real-time altitude measurement using device orientation sensors
+  - Live camera view with crosshairs for body targeting
+  - Bubble level indicator for accurate measurements
+  - Horizon calibration for improved accuracy
+  - Multi-sample averaging for better precision
+  - Direct integration with celestial observation workflow
+  
+  **Technical Details**
+  - Uses DeviceOrientationEvent for pitch angle (altitude)
+  - Uses accelerometer for gravity reference and level detection
+  - Estimated accuracy: ±1-2° (vs 0.1° for real sextant)
+  - Supports horizon calibration to reduce systematic errors
+  - Real-time smoothing with configurable sample window
+  
+  **Usage**
+  1. Open Celestial panel → Observe tab
+  2. Click "Start Camera Sextant"
+  3. Point phone at horizon, tap "Calibrate Horizon"
+  4. Point at celestial body, level the bubble
+  5. Tap "Capture Altitude" to record measurement
+  6. Click "Use This Measurement" to populate observation form
+  
+  **Accuracy Guidance**
+  - Best accuracy: calibrated, level bubble, stable hold
+  - Normal accuracy: ~1.5° (90 nautical miles position error)
+  - Poor conditions: ~2.5° when moving or uncalibrated
+  - Multiple captures and averaging improves precision
+  
+  **Emergency Value**
+  - Works with no sextant, no GPS, just a smartphone
+  - Suitable for rough position estimation in survival situations
+  - Combine with noon sight or Polaris for latitude fix
+
+### Changed
+- Reorganized Observe tab to prominently feature Camera Sextant
+- Manual observation section renamed for clarity
+
 ## [6.26.2] - 2025-01-31
 
 ### Fixed
@@ -2365,3 +3046,162 @@ Total: 6,100+ lines of code, 110+ exported functions, 100% test coverage
 - Test coverage: 100%
 - External dependencies: None
 - Fully offline capable
+
+## [6.35.0] - 2025-01-31
+
+### Added - Celestial Navigation Module Phase 8: Inertial Navigation / PDR
+
+#### GPS-Denied Navigation
+Complete Pedestrian Dead Reckoning (PDR) system using device motion sensors for navigation without GPS. Works in tunnels, buildings, and during GPS jamming/spoofing.
+
+#### Core Functions
+
+**Sensor Management:**
+- `checkSensorAvailability()` - Check accelerometer, gyroscope, magnetometer availability
+- `requestSensorPermission()` - Request iOS 13+ motion sensor permission
+
+**Initialization & Control:**
+- `initInertialNav(options)` - Initialize with start position, step length, declination
+- `startInertialTracking()` - Begin sensor-based position tracking
+- `stopInertialTracking()` - Stop tracking, return summary
+- `resetInertialNav(position)` - Reset to known position
+
+**State & Position:**
+- `getInertialState()` - Get current position, heading, speed, confidence, drift
+- `getInertialTrack(maxPoints)` - Get position history for plotting
+- `getPositionUncertainty()` - Get error ellipse parameters
+
+**Calibration:**
+- `calibrateStepLength(knownDistance, stepCount)` - Calibrate step length using known distance
+- `calibrateGyroBias(duration)` - Calibrate gyroscope bias (hold still for 5s)
+
+**Fix Updates:**
+- `updateInertialFix(position, fixType)` - Apply known fix to reset drift
+- `performZUPT()` - Zero Velocity Update when stationary
+
+#### Sensor Algorithms
+
+**Step Detection:**
+- Accelerometer peak detection with low-pass filtering
+- Minimum step interval: 250ms, Maximum: 2000ms
+- Acceleration threshold: 1.2g for step trigger
+- Adaptive step timing validation
+
+**Heading Determination:**
+- Gyroscope integration for magnetic-free heading
+- Magnetometer for absolute reference
+- Complementary filter fusion (98% gyro, 2% magnetic)
+- Automatic gyro bias correction
+
+**Position Calculation:**
+- Step count × calibrated step length = distance
+- Heading-based position update (x=east, y=north)
+- Relative position in meters + absolute lat/lon conversion
+
+**Drift Estimation:**
+- 2% of distance traveled base drift rate
+- Confidence degrades with distance and time
+- Uncertainty ellipse with along-track/cross-track error
+
+#### UI Components
+
+**IMU Tab in Celestial Panel (📱):**
+- Sensor availability status display
+- Real-time position, heading, speed, steps
+- Visual confidence bar with color coding
+- Start/Stop tracking controls
+- ZUPT button for stationary updates
+- Fix update from map position
+
+**Calibration Interface:**
+- Step length calibration with known distance input
+- Gyroscope bias calibration (5-second hold)
+- Magnetic declination setting
+- Calibration status indicators
+
+#### Rendering Widgets:
+- `renderInertialStatusWidget()` - Main tracking status display
+- `renderInertialCalibrationWidget()` - Calibration controls
+- `renderInertialNavWidget(lat, lon)` - Combined widget
+- `renderInertialTrack(ctx, meterToPixel, options)` - Canvas track renderer
+
+#### Technical Specifications
+
+| Parameter | Value |
+|-----------|-------|
+| Step length default | 75 cm |
+| Step length range | 30-150 cm |
+| Step interval | 250-2000 ms |
+| Accel threshold | 1.2g |
+| Drift rate | 2% of distance |
+| Gyro fusion weight | 98% |
+| Min calibration steps | 10 |
+| History buffer | 1000 points |
+
+#### Use Cases
+- Building/tunnel navigation
+- GPS jamming scenarios
+- Indoor positioning
+- Hiking in canyons/dense forest
+- Maritime below-deck navigation
+- Tactical movement tracking
+
+### Test Results
+- 112/112 tests passed
+- All sensor functions validated
+- State management verified
+- Calibration algorithms tested
+- UI rendering confirmed
+
+### Module Statistics
+- Total lines: 7,190
+- Exported functions: 133
+- UI tabs: 7 (Almanac, Observe, Fix, Tools, DR, IMU, Training)
+- Sensor APIs: DeviceMotionEvent, DeviceOrientationEvent
+
+## [6.36.0] - 2025-01-31
+
+### Changed - Commercial Licensing Compliance
+
+Removed all Esri basemap services that require commercial licensing for paid distribution.
+
+#### Removed Services
+| Service | Reason |
+|---------|--------|
+| Esri World Imagery (satellite) | Commercial license required |
+| Esri USA Topo Maps | Commercial license required |
+| Esri National Geographic | Commercial license required |
+| Esri World Hillshade | Commercial license required |
+| Esri World Labels | Commercial license required |
+| Esri World Transportation | Commercial license required |
+
+#### Retained Services (Commercially Safe)
+
+**Global Coverage:**
+- OpenStreetMap (ODbL license - free with attribution)
+- OpenTopoMap (CC-BY-SA - free with attribution)
+
+**US Coverage (Public Domain - US Government):**
+- USGS Topo - Official USGS topographic maps
+- USGS Imagery - Satellite/aerial imagery
+- USGS Imagery + Topo - Hybrid overlay
+- USGS Hydro - Water features
+- BLM Surface Management - Federal land ownership
+
+#### Files Modified
+- `js/map.js` - Removed Esri tile definitions
+- `js/modules/map.js` - Removed Esri tile definitions
+- `js/panels.js` - Updated layer UI
+- `js/modules/panels.js` - Updated layer UI  
+- `js/modules/offline.js` - Removed Esri tile URLs
+- `sw.js` - Removed Esri domains from cache whitelist
+
+#### Migration Notes
+- Users who had Esri satellite selected will automatically fall back to USGS Imagery
+- USGS Imagery provides US coverage equivalent to satellite for tactical purposes
+- International users can use OpenStreetMap + OpenTopoMap for global coverage
+- Consider MapTiler or Stadia Maps API keys for global satellite (requires paid plan)
+
+### Fixed
+- Layer switcher now cycles through available (safe) basemaps only
+- Legacy state handling updated to redirect satellite → USGS Imagery

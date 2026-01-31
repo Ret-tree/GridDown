@@ -112,6 +112,9 @@ Connect to [RF Sentinel](https://github.com/yourrepo/rf-sentinel) for comprehens
 - NATO phonetic alphabet reference
 
 ### APRS Integration
+
+*APRS® is a registered trademark of APRS Software and Bob Bruninga, WB4APR (SK). See [ATTRIBUTIONS.md](ATTRIBUTIONS.md).*
+
 - Connect to APRS TNC devices (Mobilinkd, etc.) via **Web Bluetooth**
 - Real-time position reporting and tracking
 - **Distance and bearing** to each station from your position
@@ -453,6 +456,68 @@ Comprehensive offline reference library with **600+ entries** covering:
 - Reduced motion option
 - Screen reader compatible
 
+### 🔍 Global Search System (NEW in v6.40-6.44)
+
+Unified search across all app features with **Ctrl+K** (desktop) or FAB button (mobile).
+
+**8 Search Categories**:
+| Category | Icon | Examples |
+|----------|------|----------|
+| Actions | ⚡ | Add waypoint, Start navigation, Toggle night mode |
+| Celestial | ⭐ | Stars (Polaris, Sirius), Planets (Mars, Venus), Sun/Moon |
+| Landmarks | 🏔️ | 3,100+ peaks, summits, and geographic features |
+| Waypoints | 📍 | Your saved waypoints |
+| Routes | 🛣️ | Your saved routes |
+| Team | 👥 | Team members and rally points |
+| Help | ❓ | 20 searchable help topics |
+| Settings | ⚙️ | 15 quick-toggle settings |
+
+**Features**:
+- Fuzzy matching with typo tolerance
+- Category filtering with Tab/Shift+Tab
+- Favorites system (Ctrl+D to favorite, max 20)
+- Recent searches history
+- Keyboard navigation (↑/↓/Enter/Esc)
+
+### ❓ Situation Wizard (NEW in v6.46)
+
+Decision tree that guides users to relevant features based on their situation. Designed for stress scenarios where users can't remember feature names.
+
+**Access**: Press **F1** or **Ctrl+/** anywhere, or tap "Help Me" in mobile FAB menu.
+
+**Decision Tree (33 nodes)**:
+```
+What's your situation?
+├── 🧭 Lost / Need Position
+│   ├── GPS Working → Locate instructions
+│   ├── Can See Landmarks → Resection guide
+│   ├── Can See Sky → Celestial navigation
+│   └── None of These → Dead reckoning
+├── 🆘 Emergency
+│   ├── Need Rescue → SOS panel
+│   ├── Medical → First aid reference
+│   ├── Need to Signal → Mirror/strobe
+│   └── Need Shelter → Weather + terrain
+├── 📡 Communication (Meshtastic/Radio/APRS)
+├── 🗺️ Navigation Help
+├── 📋 Trip Planning
+└── 🌤️ Weather / Environment
+```
+
+**Solution screens include**: Step-by-step instructions, Quick Action buttons, Expert tips.
+
+### 📱 Mobile Enhancements (NEW in v6.45)
+
+Mobile-specific features that gracefully degrade on desktop:
+
+| Feature | Description |
+|---------|-------------|
+| **Floating Action Button** | Quick access to Search, Help, Waypoint, Compass, SOS |
+| **PWA Install Prompt** | Smart banner prompts installation after 30 seconds |
+| **Battery Status** | Real-time battery percentage with low-battery warnings |
+| **Connection Status** | Online/offline indicator with toast notifications |
+| **Enhanced Haptics** | Tactile feedback patterns for buttons, alerts, navigation |
+
 ### Measurement Tools
 - Distance measurement between points
 - Area calculation for polygons
@@ -548,30 +613,39 @@ GridDown/
         ├── aprs.js         # APRS integration
         ├── meshtastic.js   # Mesh networking
         ├── radiacode.js    # Gamma spectrometer
-        ├── rfsentinel.js   # RF Sentinel integration (NEW)
+        ├── rfsentinel.js   # RF Sentinel integration
         ├── sstv.js         # SSTV encode/decode
         ├── sstv-ai.js      # SSTV AI enhancement
         ├── sstv-dsp.js     # SSTV DSP (waterfall, slant, drift)
         ├── sarsat.js       # SARSAT PLB/ELT/EPIRB beacon receiver
         ├── team.js         # Team management
         ├── medical.js      # Medical reference
-        ├── fieldguides.js  # Offline field guides (NEW)
-        ├── streamgauges.js # USGS water data (NEW)
-        ├── barometer.js    # Barometric altimeter (NEW)
-        ├── rflos.js        # RF line-of-sight (NEW)
+        ├── fieldguides.js  # Offline field guides
+        ├── streamgauge.js  # USGS water data
+        ├── barometer.js    # Barometric altimeter
+        ├── rflos.js        # RF line-of-sight
+        ├── celestial.js    # Celestial navigation (8-phase) (NEW)
+        ├── star-id.js      # Star identification
+        ├── camera-sextant.js # Camera-based sextant
         ├── sos.js          # Emergency features
         ├── measure.js      # Distance/area tool
-        ├── search.js       # Location search
+        ├── search.js       # Global search system (NEW)
+        ├── landmark.js     # Landmark database (NEW)
+        ├── wizard.js       # Situation wizard (NEW)
+        ├── mobile.js       # Mobile enhancements (NEW)
         ├── print.js        # Print/PDF export
         ├── plansharing.js  # Encrypted sharing
         ├── nightmode.js    # Night vision modes
+        ├── alerts.js       # Alert system
+        ├── airquality.js   # EPA AirNow integration
+        ├── satweather.js   # Satellite weather imagery
         ├── onboarding.js   # First-run tour
         ├── undo.js         # Undo/redo
-        ├── networkstatus.js    # Offline indicator (NEW)
-        ├── networkquality.js   # Connection quality (NEW)
-        ├── storagemonitor.js   # Storage quota (NEW)
-        ├── update.js           # Update notifications (NEW)
-        └── compatibility.js    # Browser detection (NEW)
+        ├── networkstatus.js    # Offline indicator
+        ├── networkquality.js   # Connection quality
+        ├── storagemonitor.js   # Storage quota
+        ├── update.js           # Update notifications
+        └── compatibility.js    # Browser detection
 ```
 
 ---
@@ -592,15 +666,59 @@ GridDown/
 
 ---
 
+## 🔧 Troubleshooting
+
+### GPS / Location Issues
+
+**Safari/iOS Console Message**: `CoreLocationProvider: kCLErrorLocationUnknown`
+
+This is **NOT a GridDown bug** - it's an iOS/macOS system message that appears when:
+- Location services are disabled in device settings
+- Device is indoors with poor GPS signal  
+- Device is in airplane mode
+- GPS hardware hasn't acquired satellites yet
+
+**Solutions**:
+1. Enable Location Services: Settings → Privacy → Location Services
+2. Grant location permission to your browser
+3. Move outdoors or near a window for better GPS signal
+4. Wait 30-60 seconds for GPS to acquire satellites
+5. Use "Set Manual Position" if GPS is unavailable
+
+**Firefox/Android**: If location fails, check that location permission is granted in browser settings.
+
+### Offline Maps Not Loading
+
+If cached tiles don't appear offline:
+1. Ensure tiles were downloaded while online
+2. Check storage quota (Settings → Storage)
+3. Clear browser cache and re-download tiles
+4. Try a different map layer
+
+### Web Bluetooth Connection Failed
+
+For APRS, Meshtastic, or RadiaCode:
+1. Ensure Bluetooth is enabled on your device
+2. Use Chrome, Edge, or Opera (Firefox/Safari don't support Web Bluetooth)
+3. Device must be in pairing mode
+4. Stay within Bluetooth range (~10m)
+
+---
+
 ## ⌨️ Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
+| `Ctrl+K` | Open global search |
+| `F1` or `Ctrl+/` | Open situation wizard |
 | `Ctrl+Z` | Undo |
 | `Ctrl+Shift+Z` | Redo |
-| `Escape` | Close modal/panel |
+| `Ctrl+D` | Toggle favorite (in search) |
+| `Escape` | Close modal/panel/search |
 | `+` / `-` | Zoom in/out |
 | `N` | Reset map to north |
+| `Tab` | Next search category |
+| `Shift+Tab` | Previous search category |
 
 ---
 
@@ -690,11 +808,19 @@ GridDown/
 
 ## 📜 License
 
-MIT License - See [LICENSE](LICENSE) for details.
+GridDown is dual-licensed:
+- **Community License (GPL v3)** - Free for personal, educational, and non-commercial use
+- **Commercial License** - Required for business use and hardware bundling
+
+See [LICENSE](LICENSE) for complete details.
 
 ## 🔒 Privacy
 
 GridDown collects no personal data and operates offline-first. See [PRIVACY.md](PRIVACY.md) for details.
+
+## ⚠️ Disclaimer
+
+GridDown is a supplementary tool, not a substitute for professional emergency services or proper training. See [DISCLAIMER.md](DISCLAIMER.md) for complete safety and liability information.
 
 ---
 
@@ -708,6 +834,7 @@ GridDown collects no personal data and operates offline-first. See [PRIVACY.md](
 - Weather and elevation data from [Open-Meteo](https://open-meteo.com/)
 - Stream gauge data from [USGS National Water Information System](https://waterservices.usgs.gov/)
 - Geocoding from [OpenStreetMap Nominatim](https://nominatim.org/)
+- **APRS®** (Automatic Packet Reporting System) - Copyright © [Bob Bruninga, WB4APR](http://www.aprs.org/) (SK). APRS is a registered trademark. Special thanks to [TAPR](https://tapr.org/) (Tucson Amateur Packet Radio) for their contributions to amateur radio.
 - RadiaCode BLE protocol from [cdump/radiacode](https://github.com/cdump/radiacode) and [mkgeiger/RadiaCode](https://github.com/mkgeiger/RadiaCode) (MIT)
 - Icons inspired by Lucide/Feather icon sets
 - MQTT.js for browser-based MQTT over WebSocket
@@ -720,25 +847,33 @@ See [ATTRIBUTIONS.md](ATTRIBUTIONS.md) for complete data source licensing inform
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 
-**Current Version: 6.34.0** (January 2025)
+**Current Version: 6.47.0** (January 2025)
 
 ### Recent Highlights
-- **v6.23.0** - Air Quality Index (AQI) integration via EPA AirNow (US/Canada/Mexico)
-- **v6.22.9** - NASA GIBS satellite imagery integration (commercial-safe, public domain)
-- **v6.22.7** - Weather overlay licensing cleanup, removed API-key-dependent layers
+- **v6.47.0** - Documentation update - Added DISCLAIMER.md, TERMS_OF_SERVICE.md, updated README
+- **v6.46.0** - Situation Wizard - Decision tree for stress-friendly feature discovery
+- **v6.45.0** - Mobile Enhancements - FAB, battery/connection status, PWA install prompt
+- **v6.44.0** - Search Favorites and Help/Settings search integration
+- **v6.43.0** - Landmark pack search with 3,100+ public domain locations
+- **v6.42.0** - Contextual search suggestions based on time/location
+- **v6.40.0** - Global Search System with fuzzy matching (Ctrl+K)
+- **v6.23.0** - Air Quality Index (AQI) integration via EPA AirNow
+- **v6.22.9** - NASA GIBS satellite imagery integration
 - **v6.21.0** - Comprehensive accessibility improvements (ARIA attributes)
-- **v6.20.0** - Modular architecture refactoring (panels.js split into 19 modules)
-- **v6.19.9** - SARSAT 406 MHz PLB/ELT/EPIRB beacon receiver integration
-- **v6.19.7** - SSTV image annotation with drawing tools and auto-flatten for TX
-- **v6.19.4** - DSP module with waterfall display and auto-slant correction
-- **v6.19.0** - SSTV encode/decode with 12 modes, callsign overlay, map capture
-- **v6.18.0** - RF Sentinel integration with multi-protocol RF detection
+- **v6.20.0** - Modular architecture refactoring
+- **v6.19.9** - SARSAT 406 MHz beacon receiver integration
+- **v6.19.0** - SSTV encode/decode with 12 modes
+- **v6.18.0** - RF Sentinel multi-protocol RF detection
 
 ### Documentation
 - [User Guide](docs/GridDown_User_Guide.docx) - Comprehensive user manual
 - [Hardware Compatibility Guide](docs/HARDWARE_GUIDE.md) - Radios, cables, and accessories
 - [Architecture Overview](docs/ARCHITECTURE.md) - Technical documentation
 - [Privacy Policy](PRIVACY.md) - Data handling practices
+- [Terms of Service](TERMS_OF_SERVICE.md) - Usage terms and conditions
+- [Disclaimer](DISCLAIMER.md) - Safety and liability information
+- [Security Policy](SECURITY.md) - Vulnerability reporting
+- [Attributions](ATTRIBUTIONS.md) - Third-party data sources and licensing
 
 ---
 
