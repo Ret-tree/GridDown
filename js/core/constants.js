@@ -401,6 +401,7 @@ const Constants = (function() {
         { id: 'contingency', icon: 'shield', label: 'Planning' },
         { id: 'weather', icon: 'weather', label: 'Weather' },
         { id: 'sunmoon', icon: 'sun', label: 'Sun/Moon' },
+        { id: 'celestial', icon: 'star', label: 'Celestial' },
         { id: 'gps', icon: 'locate', label: 'GPS' },
         { id: 'coords', icon: 'crosshair', label: 'Coords' },
         { id: 'radio', icon: 'antenna', label: 'Radio' },
