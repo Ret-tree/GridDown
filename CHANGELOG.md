@@ -2,6 +2,470 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.52.0] - 2025-02-01
+
+### Added - Device Detection & Connection Guidance
+
+This release adds intelligent device detection and connection guidance to help users connect their Meshtastic devices correctly, with special handling for BLE-only devices like the WisMesh Pocket.
+
+#### Device Capability Database
+Comprehensive database of Meshtastic hardware models with capabilities:
+
+| Device | Bluetooth | Serial | GPS | WiFi | Battery | Screen |
+|--------|-----------|--------|-----|------|---------|--------|
+| WisMesh Pocket | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| WisMesh Tap | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| T-Echo | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| T-Beam | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Heltec V3 | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
+| RAK WisBlock | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ |
+| Station G2 | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
+
+#### Device Type Selector
+Pre-connection device selection buttons:
+- **WisMesh Pocket** - Auto-disables Serial button
+- **T-Echo** - Auto-disables Serial button  
+- **T-Beam** - Both connections enabled
+- **Heltec** - Both connections enabled
+- **Other** - Both connections enabled (default)
+
+#### Dynamic Connection Button State
+- Serial/USB button automatically disabled when BLE-only device selected
+- Visual feedback with reduced opacity and tooltip explanation
+- Prevents connection attempts that will fail
+
+#### Context-Sensitive Help Messages
+- ⚠️ Warning for BLE-only devices: "WisMesh Pocket only supports Bluetooth. The USB port is for charging only."
+- ℹ️ Info for dual-mode devices: "T-Beam supports both Bluetooth and Serial/USB connections."
+
+#### Connected Device Info Card
+After connection, displays:
+- Device name and type
+- Firmware version with update status
+- Capability badges (Bluetooth, Serial, GPS, WiFi, Screen)
+- Device-specific notes
+
+#### Quick Reference Guide
+Always-visible reference in connection panel:
+- **Bluetooth only:** WisMesh Pocket/Tap, T-Echo, RAK Tracker
+- **Both supported:** T-Beam, Heltec, Station G2, WisBlock
+
+### New Functions (MeshtasticModule)
+
+#### Device Capabilities
+- `getDeviceCapabilities(hwModel)` - Get capabilities for any hardware model
+- `getConnectedDeviceCapabilities()` - Get capabilities of connected device
+- `deviceSupportsSerial()` - Check if current device supports Serial
+- `deviceSupportsBluetooth()` - Check if current device supports Bluetooth
+- `getConnectionRecommendation(hwModel)` - Get recommended connection method
+- `getCommonDevices()` - Get list of common devices for UI
+- `detectDeviceFromName(name)` - Detect device type from Bluetooth name
+
+### New Constants
+- `DeviceCapabilities` - Full database of device capabilities
+
+### UI Components Added
+
+#### Device Selection Panel
+```
+┌─────────────────────────────────────────────┐
+│  SELECT YOUR DEVICE                         │
+│                                             │
+│  [📱 WisMesh Pocket] [📱 T-Echo] [📡 T-Beam]│
+│  [📡 Heltec] [🔧 Other]                     │
+│                                             │
+│  ⚠️ WisMesh Pocket only supports Bluetooth. │
+│     The USB port is for charging only.      │
+│                                             │
+│  [📶 Bluetooth]  [🔌 Serial/USB (disabled)] │
+│                                             │
+│  Bluetooth only: WisMesh Pocket/Tap, T-Echo │
+│  Both supported: T-Beam, Heltec, WisBlock   │
+└─────────────────────────────────────────────┘
+```
+
+#### Connected Device Card
+```
+┌─────────────────────────────────────────────┐
+│  CONNECTED DEVICE                           │
+│                                             │
+│  📱 RAK WisMesh Pocket                      │
+│     Firmware 2.5.6 • ✓ Up to date          │
+│                                             │
+│  [📶 Bluetooth] [📍 GPS] [🖥️ Screen]        │
+│                                             │
+│  Consumer portable device - Bluetooth only  │
+└─────────────────────────────────────────────┘
+```
+
+### Device Database Coverage
+- RAK: WisBlock 4631, WisBlock 11200, Tracker 2560, WisMesh Tap, WisMesh Pocket
+- LilyGo: T-Beam (all versions), T-Echo, T-LoRa (V1, V2, T3 S3)
+- Heltec: V1, V2, V2.1, V3, Wireless Stick Lite V3
+- B&Q: Nano G1, G1 Explorer, G2 Ultra
+- Seeed: Wio WM1110
+- Stations: G1, G2
+
+---
+
+## [6.51.0] - 2025-02-01
+
+### Added - Phase 2: Quick Setup & Field UX
+
+This release implements the complete field UX package for Meshtastic, making it easy to get teams up and running quickly with optimized settings for different operational scenarios.
+
+#### First-Run Setup Wizard
+- **4-step guided setup** - Name → Region → Pair Device → Scenario
+- **Identity configuration** - Set your mesh name and 4-character short ID
+- **Region selection** - Required for legal radio operation
+- **Device pairing** - Bluetooth or Serial/USB connection
+- **Scenario selection** - Apply optimized presets in one click
+
+#### Scenario Presets
+Pre-configured settings optimized for specific use cases:
+
+| Preset | Modem | Hop Limit | Position Interval | Use Case |
+|--------|-------|-----------|-------------------|----------|
+| 🔍 Search & Rescue | Long Slow | 5 | 2 min | Wilderness SAR operations |
+| 🎯 Field Exercise | Long Fast | 4 | 5 min | Training and practice |
+| 🎪 Event Coverage | Medium Fast | 3 | 3 min | Festivals, races, events |
+| 🤫 Low Profile | Long Moderate | 2 | 15 min | Minimal transmissions |
+| 🚨 Emergency | Very Long Slow | 7 | 1 min | Crisis response |
+| ⚙️ Custom | (current) | (current) | (current) | User-defined |
+
+Each preset includes:
+- Optimized modem preset for range/speed tradeoff
+- Appropriate hop limit for mesh topology
+- Position broadcast interval tuned to scenario
+- Scenario-specific canned messages
+
+#### Canned Messages Bar
+Quick-send buttons for common field communications:
+- **Context-aware** - Messages change based on active scenario
+- **One-tap sending** - Send "OK", "Copy", "At Rally", "RTB", etc.
+- **Auto-icons** - Icons assigned based on message content
+- **Customizable** - Set your own canned messages
+
+Default Messages: OK, Copy, Moving, At rally point, RTB, Need assistance, Holding position, Task complete
+
+SAR Messages: Found subject, Need medical, Grid clear, Returning to CP, At assignment, Copy all
+
+#### Mesh Health Dashboard Widget
+Real-time mesh network health monitoring:
+- **Health score** - 0-100 numeric score with status (Excellent/Good/Fair/Poor)
+- **Active node count** - Nodes seen within 5 minutes
+- **Signal distribution** - Breakdown by signal quality
+- **Average signal** - Mean SNR and RSSI across mesh
+- **Queue status** - Shows pending outbound messages
+- **Current scenario** - Displays active preset
+
+#### Enhanced QR Team Onboarding
+- **Generate team QR** - Create shareable QR code with channel + scenario
+- **Scan to join** - Import channel settings from QR code or URL
+- **Share URL** - Copy or share channel URL directly
+- **Scenario bundling** - QR includes preset settings
+
+### New Functions (MeshtasticModule)
+
+#### Scenario Management
+- `getScenarioPresets()` - Get all available scenario presets
+- `getScenarioPreset(id)` - Get specific scenario by ID
+- `getActiveScenario()` - Get currently active scenario
+- `applyScenarioPreset(id, applyToDevice)` - Apply scenario settings
+
+#### Canned Messages
+- `getCannedMessages()` - Get messages for active scenario
+- `setCustomCannedMessages(messages)` - Set custom messages
+- `sendCannedMessage(id)` - Send a canned message by ID
+- `sendCannedByShortcut(num)` - Send by shortcut number (1-8)
+
+#### Mesh Health
+- `getMeshHealth()` - Get comprehensive mesh health status
+- `getMeshHealthColor(status)` - Get color for health status
+
+#### Setup Wizard
+- `isWizardCompleted()` - Check if first-run wizard completed
+- `completeWizard()` - Mark wizard as completed
+- `resetWizard()` - Reset wizard status
+- `getWizardSteps()` - Get wizard step definitions
+
+#### Team Onboarding
+- `generateTeamOnboardingQR()` - Generate QR code data
+- `joinFromQR(qrData)` - Join team from QR code or URL
+
+### New Constants
+- `ScenarioPresets` - All scenario preset definitions
+- `DefaultCannedMessages` - Default canned message set
+- `WizardSteps` - Wizard step definitions
+- `MeshHealthThresholds` - Health calculation thresholds
+
+### UI Components Added
+
+#### Scenario Selector (disconnected state)
+Buttons to select scenario before connecting:
+- Shows all presets with icons
+- Highlights active scenario
+- Displays scenario description
+
+#### Mesh Health Widget (connected state)
+Dashboard showing:
+- Circular health score indicator
+- Active scenario badge
+- Node counts and signal distribution
+- Queue status indicator
+
+#### Canned Messages Bar
+Row of quick-send buttons below message input:
+- 8 message slots
+- Contextual icons
+- Tap to send immediately
+
+#### Team QR Modal
+- QR code display (placeholder - requires QR library)
+- Channel URL display
+- Copy and Share buttons
+
+#### Setup Wizard Modal
+- Step indicator (1-4)
+- Animated step transitions
+- Device connection status
+- Scenario selection grid
+
+### Technical Details
+
+#### Scenario Application Flow
+```
+User selects scenario
+    ↓
+applyScenarioPreset(scenarioId)
+    ↓
+Update state.activeScenario
+    ↓
+If connected & settings defined:
+    ├── setModemPreset()
+    ├── setHopLimit()
+    └── Update positionBroadcastSecs
+    ↓
+Save to localStorage
+    ↓
+Emit 'meshtastic:scenario_changed'
+```
+
+#### Mesh Health Calculation
+- **Excellent** (90-100): 5+ active nodes with good signal
+- **Good** (70-89): 3-4 active nodes
+- **Fair** (40-69): 1-2 active nodes
+- **Poor** (10-39): Connected but no other nodes
+- **Disconnected** (0): Not connected to device
+
+### Events Emitted
+- `meshtastic:scenario_changed` - Scenario preset changed
+- `meshtastic:canned_messages_updated` - Custom messages set
+- `meshtastic:wizard_completed` - First-run wizard completed
+- `meshtastic:team_joined` - Joined team via QR/URL
+
+---
+
+## [6.50.0] - 2025-02-01
+
+### Added - Phase 1.5: Store-and-Forward Queue
+
+This release implements offline message queuing for Meshtastic, allowing messages to be composed and queued when the mesh network is unavailable, then automatically sent when connectivity is restored.
+
+#### Store-and-Forward Queue System
+- **Automatic queuing** - Messages are queued when device is disconnected or mesh is unavailable
+- **Automatic retry** - Queued messages automatically send when connection is restored
+- **Exponential backoff** - Failed messages retry with increasing delays to avoid flooding
+- **Queue persistence** - Queued messages survive app restarts (saved to localStorage)
+- **Queue management** - View queued messages, clear queue, cancel individual messages
+
+#### Message Status Indicators
+- **🕐 Queued** - Message waiting in queue (amber)
+- **○ Pending** - Message about to send (gray)
+- **✓ Sent** - Message sent to mesh (green)
+- **✓✓ Delivered** - ACK received from recipient (green)
+- **👁 Read** - Read receipt received (blue)
+- **✗ Failed** - Send failed after max retries (red)
+
+#### Queue UI Features
+- **Queue status banner** - Shows count of queued messages with clear option
+- **Status icons** - Each sent message shows current delivery status
+- **Offline composition** - Type and queue messages even when disconnected
+- **Queue button** - Send button changes to 🕐 when disconnected
+
+### New Functions (MeshtasticModule)
+- `getQueueStatus()` - Get queue count, messages, and statistics
+- `clearOutboundQueue(markAsFailed)` - Clear all queued messages
+- `retryQueuedMessage(messageId)` - Retry a specific queued message
+- `cancelQueuedMessage(messageId)` - Cancel a queued message
+- `processOutboundQueue()` - Force process the queue
+- `checkMeshConnectivity()` - Check mesh network status
+
+### New Constants
+- `QUEUE_MAX_SIZE` = 50 messages
+- `QUEUE_RETRY_INTERVAL` = 5 seconds
+- `QUEUE_MAX_RETRIES` = 5 attempts
+- `QUEUE_RETRY_BACKOFF` = 2x multiplier
+- `DeliveryStatus.QUEUED` - New status for queued messages
+
+### Changed
+- `sendTextMessage()` now queues messages when disconnected instead of failing
+- Message input enabled even when disconnected (for offline composition)
+- Send button shows 🕐 when disconnected to indicate queuing
+- Connection state changes start/stop the queue processor
+
+### Technical Details
+
+#### Queue Processing Flow
+```
+User sends message
+    ↓
+Check connectivity
+    ↓
+Connected? ─────→ Send immediately → Update status to SENT
+    ↓ No
+Queue message → Status = QUEUED → Save to storage
+    ↓
+Connection restored
+    ↓
+Queue processor runs (every 5s)
+    ↓
+Process ready messages → Send → Update status
+    ↓
+Success? ─────→ Remove from queue → Status = SENT
+    ↓ No
+Increment retries → Calculate backoff → Schedule retry
+    ↓
+Max retries? → Status = FAILED → Remove from queue
+```
+
+#### Events Emitted
+- `meshtastic:queue_loaded` - Queue loaded from storage
+- `meshtastic:message_queued` - Message added to queue
+- `meshtastic:queue_full` - Queue reached max capacity
+- `meshtastic:queue_message_sent` - Queued message sent successfully
+- `meshtastic:queue_message_failed` - Queued message failed max retries
+- `meshtastic:queue_message_cancelled` - Queued message cancelled
+- `meshtastic:queue_cleared` - Queue cleared
+
+---
+
+## [6.49.0] - 2025-02-01
+
+### Added - Real Meshtastic Device Integration
+
+This release integrates the official `@meshtastic/js` library for real device communication, replacing the placeholder implementation.
+
+#### Real Device Communication
+- **@meshtastic/js integration** - Uses official Meshtastic JavaScript library via esm.sh CDN
+- **Real BLE connection** - Proper Web Bluetooth communication with device protobuf protocol
+- **Real Serial connection** - Proper Web Serial communication with device protobuf protocol
+- **Automatic library loading** - Libraries load on-demand from CDN when connecting
+
+#### Device Configuration (Read/Write)
+- **Read real config** - Config is now read from actual device (region, modem preset, tx power, hop limit)
+- **Write real config** - Configuration changes are sent to and applied on the device
+- **Config sync** - Local state automatically syncs with device config
+
+#### Real-time Data
+- **Node database sync** - Receives actual node info from mesh network
+- **Position updates** - Real positions from mesh nodes with SNR/RSSI
+- **Message handling** - Real text messages from mesh network
+- **Telemetry data** - Battery level, voltage, channel utilization from devices
+
+### New Files
+- `js/modules/meshtastic-client.js` - ES module wrapper for @meshtastic/js library
+
+### Changed
+- **connectBluetooth()** - Now uses MeshtasticClient for real BLE communication
+- **connectSerial()** - Now uses MeshtasticClient for real Serial communication
+- **disconnect()** - Properly disconnects via MeshtasticClient
+- **setRegion()** / **setModemPreset()** / **setTxPower()** / **setHopLimit()** - Send real config to device
+- **getDeviceConfig()** - Returns real device config when connected
+- **requestDeviceConfig()** - Triggers real config refresh from device
+
+### Technical Details
+
+#### Library Integration
+The official @meshtastic libraries are loaded from esm.sh CDN:
+- `@meshtastic/core@2.6.7` - Core device communication
+- `@meshtastic/transport-web-bluetooth@2.6.7` - Web Bluetooth transport
+- `@meshtastic/transport-web-serial@2.6.7` - Web Serial transport
+- `@meshtastic/protobufs@2.6.7` - Protobuf definitions
+
+#### Callback System
+New callback handlers sync MeshtasticClient events with GridDown state:
+- `setupMeshtasticClientCallbacks()` - Initializes event handlers
+- `syncDeviceConfigFromClient()` - Syncs config to GridDown state
+- `handleNodeInfoFromClient()` - Processes node info from mesh
+- `handlePositionFromClient()` - Processes position updates
+- `handleMessageFromClient()` - Processes text messages
+
+#### Graceful Fallback
+If MeshtasticClient is unavailable (offline, library load failure):
+- Falls back to basic BLE/Serial connection (limited functionality)
+- Config changes are queued and logged for manual verification
+- Users are informed to use Meshtastic app for full configuration
+
+### Compatibility Notes
+- Requires internet connection on first use to load libraries
+- Libraries are cached by browser for subsequent offline use
+- Compatible with Meshtastic firmware 2.3.0 and later
+- Tested with RAK WisMesh Pocket, T-Beam, Heltec devices
+
+---
+
+## [6.48.0] - 2025-02-01
+
+### Added - Meshtastic Phase 1 Enhancements
+
+#### Device Configuration
+- **Region selection** - Configure device region (US, EU 433/868, ANZ, Japan, etc.)
+- **Modem preset selection** - Choose from Long Fast, Long Slow, Medium, Short Fast, etc.
+- **TX Power adjustment** - Set transmit power from 1-30 dBm or use device default
+- **Hop limit configuration** - Set hop limit from 1-7 for mesh relay depth
+- **Configuration modal** - New ⚙️ Config button when connected opens settings dialog
+
+#### Signal Quality Display
+- **SNR/RSSI per node** - Signal-to-Noise Ratio and Received Signal Strength displayed
+- **Signal quality rating** - Excellent/Good/Fair/Poor based on signal metrics
+- **Color-coded indicators** - Visual signal strength in team position cards
+- **Node signal dashboard** - Comprehensive signal view in config modal
+
+#### Channel URL Import/Export
+- **Import channel URLs** - Paste `meshtastic://` or web URLs to import channels
+- **Export channel URLs** - Copy channel URL or QR data to share with team
+- **Multiple URL formats** - Support for meshtastic://, web URLs, and raw base64
+
+#### Firmware Version Checking
+- **Version display** - Shows current firmware version when connected
+- **Update status** - Indicates if firmware is current, outdated, or has update available
+- **Hardware model detection** - Displays device hardware model (T-Beam, Heltec, RAK, etc.)
+- **Capability indicators** - Shows GPS, WiFi, Bluetooth capabilities
+
+### Changed
+- **Team position cards** - Now show signal quality badge and SNR/RSSI details
+- **Meshtastic connection panel** - Added Config button and Channel URL import section
+- **Node info handling** - Captures firmware version, hardware model, and signal data
+
+### Technical Details
+
+#### New Constants Added
+- `RegionCode` - 22 region codes matching Meshtastic protobuf
+- `ModemPreset` - 8 modem preset options
+- `SignalQuality` - Thresholds for excellent/good/fair/poor ratings
+- `TxPowerLevels` - Valid TX power values
+- `MIN_RECOMMENDED_FIRMWARE` / `LATEST_STABLE_FIRMWARE` - Version checking
+
+#### New Functions Added
+- `getDeviceConfig()` / `setRegion()` / `setModemPreset()` / `setTxPower()` / `setHopLimit()`
+- `parseChannelUrl()` / `generateChannelUrl()` / `importChannelFromUrl()` / `exportChannelAsUrl()`
+- `calculateSignalQuality()` / `formatSignalQuality()` / `getSignalQualityColor()`
+- `checkFirmwareStatus()` / `getNodeFirmwareStatus()` / `getMyFirmwareStatus()`
+- `getRegionOptions()` / `getModemPresetOptions()` / `getHwModelName()`
+
+---
+
 ## [6.47.0] - 2025-01-31
 
 ### Added

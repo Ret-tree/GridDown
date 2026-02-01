@@ -1,4 +1,4 @@
-const CACHE_NAME = 'griddown-v6.47.0';
+const CACHE_NAME = 'griddown-v6.52.0';
 const TILE_CACHE_NAME = 'griddown-tiles-v1';
 const STATIC_ASSETS = [
     './', 'index.html', 'manifest.json', 'favicon.ico', 'css/app.css',
@@ -20,6 +20,7 @@ const STATIC_ASSETS = [
     'js/modules/print.js',
     'js/modules/undo.js',
     'js/modules/meshtastic.js',
+    'js/modules/meshtastic-client.js',
     'js/modules/aprs.js',
     'js/modules/radiacode.js',
     'js/modules/rfsentinel.js',
