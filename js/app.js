@@ -210,6 +210,30 @@ const App = (function() {
                 });
             }
             
+            // Initialize CoT Bridge module (TAKModule)
+            if (typeof TAKModule !== 'undefined') {
+                TAKModule.init();
+                console.log('CoT Bridge module initialized');
+                
+                // Setup event listeners to refresh panels on CoT events
+                Events.on('tak:connection_changed', () => {
+                    if (State.get('activePanel') === 'team') {
+                        PanelsModule.render();
+                    }
+                });
+                
+                Events.on('tak:positions_updated', () => {
+                    if (State.get('activePanel') === 'team') {
+                        PanelsModule.render();
+                    }
+                    MapModule.render();
+                });
+                
+                Events.on('tak:markers_updated', () => {
+                    MapModule.render();
+                });
+            }
+            
             // Initialize APRS module
             if (typeof APRSModule !== 'undefined') {
                 APRSModule.init();
