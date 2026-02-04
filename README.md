@@ -73,7 +73,7 @@ Connect to [RF Sentinel](https://github.com/yourrepo/rf-sentinel) for comprehens
 | **Aircraft** | ADS-B 1090 MHz | ✈️ Blue | Commercial and GA aircraft |
 | **Ships** | AIS 162 MHz | 🚢 Cyan | Maritime vessels |
 | **Drones** | Remote ID 2.4 GHz | 🛸 Amber | UAVs with Remote ID |
-| **FPV Drones** | Various RF | 🎮 Red | FPV/analog drones via RF signature |
+| **FPV Drones** | Various RF | 🎮 Red | FPV/analog drones via passive RF monitoring |
 | **Radiosondes** | 400 MHz | 🎈 Purple | Weather balloons |
 | **APRS** | 144.39 MHz | 📻 Green | Amateur radio stations |
 
@@ -97,7 +97,7 @@ Connect to [RF Sentinel](https://github.com/yourrepo/rf-sentinel) for comprehens
 
 ### FPV Drone Detection (NEW in v6.57)
 - Dedicated FPV Drone Detections panel with protocol/frequency/signal info
-- Displays both Remote ID and FPV/RF-detected drones
+- Displays both Remote ID and passively detected FPV drones
 - Signal strength, frequency band, and protocol identification
 
 ### Map Rendering
@@ -886,7 +886,7 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 **Current Version: 6.57.3** (February 2025)
 
 ### Recent Highlights
-- **v6.57.3** - FPV Drone Detections panel - View RF-detected FPV drones with protocol/frequency/signal info
+- **v6.57.3** - FPV Drone Detections panel - View passively detected FPV drones with protocol/frequency/signal info
 - **v6.57.2** - RF Sentinel FPV drone support - Receive both Remote ID and FPV/RF drones
 - **v6.57.1** - CoT Bridge Setup Wizard - Guided setup for bridge connection
 - **v6.57.0** - CoT Bridge - Bidirectional Cursor on Target integration with ATAK/WinTAK
