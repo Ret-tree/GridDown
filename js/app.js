@@ -27,6 +27,16 @@ const App = (function() {
             
             // Initialize storage
             await Storage.init();
+            
+            // Request persistent storage to prevent OS from evicting cached map tiles
+            if (navigator.storage && navigator.storage.persist) {
+                try {
+                    const persisted = await navigator.storage.persist();
+                    console.log(`Persistent storage: ${persisted ? 'granted' : 'denied'}`);
+                } catch (e) {
+                    // Non-critical — gracefully degrade
+                }
+            }
             updateLoadingStatus('Loading data...');
 
             // Initialize state
