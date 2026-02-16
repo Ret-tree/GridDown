@@ -618,8 +618,8 @@ const TerrainModule = (function() {
         
         // Get sun position data if SunMoonModule is available
         let sunData = null;
-        if (typeof SunMoonModule !== 'undefined') {
-            sunData = SunMoonModule.calculateForLocation(lat, lon, date);
+        if (typeof SunMoonModule !== 'undefined' && SunMoonModule.getSunTimes) {
+            sunData = SunMoonModule.getSunTimes(date, lat, lon);
         }
 
         const aspect = slopeData.aspect;
