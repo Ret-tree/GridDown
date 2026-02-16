@@ -6,8 +6,38 @@ const MapModule = (function() {
     'use strict';
     
     let canvas, ctx;
+    
+    // P2: Effective DPR used for canvas scaling — may be capped below native on mobile
+    // to reduce GPU fill rate. All canvas↔CSS coordinate conversions must use this value.
+    let effectiveDpr = 1;
     let tileCache = new Map();
     let pendingTiles = new Set();
+    
+    // P0: RAF-based render scheduling to prevent excessive redraws during gestures.
+    // On 120Hz touch devices, input events can fire 120+/sec — this ensures the
+    // canvas is only repainted once per display refresh regardless of event rate.
+    let renderScheduled = false;
+    function scheduleRender() {
+        if (!renderScheduled) {
+            renderScheduled = true;
+            requestAnimationFrame(() => {
+                renderScheduled = false;
+                render();
+            });
+        }
+    }
+    
+    // P1: Debounced position save for continuous gestures (drag/pinch).
+    // Avoids IndexedDB writes + WMM declination recalc on every touchmove.
+    // Final position is always saved on gesture end via direct saveMapPosition().
+    let savePositionTimer = null;
+    function debouncedSaveMapPosition() {
+        if (savePositionTimer) clearTimeout(savePositionTimer);
+        savePositionTimer = setTimeout(() => {
+            saveMapPosition();
+            savePositionTimer = null;
+        }, 250);
+    }
     
     // Cached DOM references
     let zoomLevelEl = null;
@@ -218,7 +248,7 @@ const MapModule = (function() {
         // Subscribe to GPS position updates
         if (typeof GPSModule !== 'undefined') {
             GPSModule.subscribe(() => {
-                render(); // Re-render map when GPS position updates
+                scheduleRender(); // Re-render map when GPS position updates
             });
         }
         
@@ -543,13 +573,20 @@ const MapModule = (function() {
     }
 
     function resize() {
-        const dpr = window.devicePixelRatio || 1;
+        const nativeDpr = window.devicePixelRatio || 1;
+        // P2: Cap DPR on touch devices to reduce canvas pixel count.
+        // At native 2.0 on a 1920×1200 tablet, canvas is 3840×2400 (9.2M pixels).
+        // At 1.5, it's 2880×1800 (5.2M pixels) — 43% fewer pixels, visually identical
+        // for 256px raster map tiles on a 10" display.
+        const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+        effectiveDpr = isTouch ? Math.min(nativeDpr, 1.5) : nativeDpr;
+        
         const rect = canvas.parentElement.getBoundingClientRect();
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
+        canvas.width = rect.width * effectiveDpr;
+        canvas.height = rect.height * effectiveDpr;
         canvas.style.width = rect.width + 'px';
         canvas.style.height = rect.height + 'px';
-        ctx.scale(dpr, dpr);
+        ctx.scale(effectiveDpr, effectiveDpr);
         render();
     }
 
@@ -562,8 +599,8 @@ const MapModule = (function() {
     }
 
     function latLonToPixel(lat, lon) {
-        const width = canvas.width / (window.devicePixelRatio || 1);
-        const height = canvas.height / (window.devicePixelRatio || 1);
+        const width = canvas.width / effectiveDpr;
+        const height = canvas.height / effectiveDpr;
         const n = Math.pow(2, mapState.zoom);
         
         const centerX = (mapState.lon + 180) / 360 * n;
@@ -591,8 +628,8 @@ const MapModule = (function() {
     }
 
     function pixelToLatLon(pixelX, pixelY) {
-        const width = canvas.width / (window.devicePixelRatio || 1);
-        const height = canvas.height / (window.devicePixelRatio || 1);
+        const width = canvas.width / effectiveDpr;
+        const height = canvas.height / effectiveDpr;
         const n = Math.pow(2, mapState.zoom);
         
         // Un-rotate the pixel position if map is rotated
@@ -697,8 +734,8 @@ const MapModule = (function() {
     function render() {
         if (!ctx) return;
         
-        const width = canvas.width / (window.devicePixelRatio || 1);
-        const height = canvas.height / (window.devicePixelRatio || 1);
+        const width = canvas.width / effectiveDpr;
+        const height = canvas.height / effectiveDpr;
         const layers = State.get('mapLayers');
         
         // Update active layers based on state
@@ -941,7 +978,7 @@ const MapModule = (function() {
                     }
                     
                     loadTile(wrappedTileX, tileY, effectiveZoom, layerKey)
-                        .then(() => render())
+                        .then(() => scheduleRender())
                         .catch(() => {});
                 }
             }
@@ -1106,7 +1143,7 @@ const MapModule = (function() {
                     img.onload = () => {
                         tileCache.set(cacheKey, { img, loaded: true });
                         pendingTiles.delete(cacheKey);
-                        render();
+                        scheduleRender();
                     };
                     
                     img.onerror = () => {
@@ -2491,7 +2528,7 @@ const MapModule = (function() {
                 const bounds = OfflineModule.handleDrawMove(coords);
                 if (bounds) {
                     mapState.drawEnd = pos;
-                    render();
+                    scheduleRender();
                 }
             }
             return;
@@ -2513,10 +2550,10 @@ const MapModule = (function() {
             while (mapState.lon > 180) mapState.lon -= 360;
             while (mapState.lon < -180) mapState.lon += 360;
             mapState.dragStart = { x: e.clientX, y: e.clientY };
-            render();
-            saveMapPosition();
+            scheduleRender();
+            debouncedSaveMapPosition();
         } else {
-            render();
+            scheduleRender();
         }
     }
 
@@ -2546,7 +2583,7 @@ const MapModule = (function() {
         mapState.isDrawingRegion = false;
         State.Map.setMousePosition(null);
         canvas.style.cursor = 'crosshair';
-        render();
+        scheduleRender();
     }
 
     function handleWheel(e) {
@@ -2565,7 +2602,7 @@ const MapModule = (function() {
         
         zoomLevelEl.textContent = mapState.zoom + 'z';
         updateScaleBar();
-        render();
+        scheduleRender();
         saveMapPosition();
     }
 
@@ -2697,8 +2734,8 @@ const MapModule = (function() {
             State.Waypoints.select(clickedWp);
             Events.emit(Events.EVENTS.WAYPOINT_SELECT, clickedWp);
         } else {
-            const width = canvas.width / (window.devicePixelRatio || 1);
-            const height = canvas.height / (window.devicePixelRatio || 1);
+            const width = canvas.width / effectiveDpr;
+            const height = canvas.height / effectiveDpr;
             Events.emit(Events.EVENTS.MAP_CLICK, { x: (x / width) * 100, y: (y / height) * 100, lat: clickCoords.lat, lon: clickCoords.lon });
         }
     }
@@ -2885,8 +2922,8 @@ const MapModule = (function() {
         switch (action) {
             case 'add-waypoint':
                 // Create waypoint at this location
-                const width = canvas.width / (window.devicePixelRatio || 1);
-                const height = canvas.height / (window.devicePixelRatio || 1);
+                const width = canvas.width / effectiveDpr;
+                const height = canvas.height / effectiveDpr;
                 const pixel = latLonToPixel(lat, lon);
                 Events.emit(Events.EVENTS.MAP_CLICK, { 
                     x: (pixel.x / width) * 100, 
@@ -3443,7 +3480,7 @@ const MapModule = (function() {
                     const bounds = OfflineModule.handleDrawMove(coords);
                     if (bounds) {
                         mapState.drawEnd = { x, y };
-                        render();
+                        scheduleRender();
                     }
                 }
                 return;
@@ -3477,8 +3514,8 @@ const MapModule = (function() {
                 while (mapState.lon > 180) mapState.lon -= 360;
                 while (mapState.lon < -180) mapState.lon += 360;
                 mapState.dragStart = { x: touch.clientX, y: touch.clientY };
-                render();
-                saveMapPosition();
+                scheduleRender();
+                debouncedSaveMapPosition();
             }
             
         } else if (e.touches.length === 2 && gestureState.isActive) {
@@ -3540,7 +3577,7 @@ const MapModule = (function() {
                 // Clamp latitude
                 mapState.lat = Math.max(-85, Math.min(85, mapState.lat));
                 
-                render();
+                scheduleRender();
                 updateScaleBar();
                 updateCompassRose();
                 
