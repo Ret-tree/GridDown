@@ -18,7 +18,7 @@
  * - MQTT: Real-time pub/sub via MQTT over WebSocket (requires Mosquitto)
  * - REST polling: Periodic fetch every 5 seconds (fallback)
  * 
- * @version 1.5.0
+ * @version 1.2.0
  */
 const RFSentinelModule = (function() {
     'use strict';
@@ -28,7 +28,7 @@ const RFSentinelModule = (function() {
     const CONFIG = {
         // Connection settings
         defaultHost: 'rfsentinel.local',
-        defaultPort: 8080,
+        defaultPort: 8000,
         defaultConnectionMethod: 'auto',  // 'auto' | 'websocket' | 'mqtt' | 'rest'
         wsReconnectDelayMs: 5000,
         wsMaxReconnectAttempts: 10,
@@ -171,13 +171,11 @@ const RFSentinelModule = (function() {
         // Connection
         connected: false,
         connecting: false,
-        autoReconnect: false,  // Persist: auto-reconnect on page load if true
         connectionMethod: CONFIG.defaultConnectionMethod,  // 'auto' | 'websocket' | 'mqtt' | 'rest'
         connectionMode: null,  // Actual mode used: 'websocket' | 'mqtt' | 'rest' | null
         host: CONFIG.defaultHost,
         port: CONFIG.defaultPort,
         mqttPort: CONFIG.mqttPort,
-        useHttps: 'auto',  // 'auto' | true | false — protocol for API/WS connections
         
         // WebSocket
         ws: null,
@@ -271,13 +269,8 @@ const RFSentinelModule = (function() {
             rfSentinelEvents = EventManager.createScopedManager(EventManager.SCOPES.RFSENTINEL || 'rfsentinel');
         }
         
-        // Load saved settings then auto-reconnect if previously connected
-        loadSettings().then(() => {
-            if (state.autoReconnect && state.host) {
-                console.log(`RFSentinel: Auto-reconnecting to ${state.host}:${state.port} (method: ${state.connectionMethod})`);
-                connect();
-            }
-        });
+        // Load saved settings
+        loadSettings();
         
         initialized = true;
         console.log('RFSentinelModule initialized');
@@ -308,8 +301,6 @@ const RFSentinelModule = (function() {
                 state.mqttPort = settings.mqttPort || CONFIG.mqttPort;
                 state.connectionMethod = settings.connectionMethod || CONFIG.defaultConnectionMethod;
                 state.weatherSource = settings.weatherSource || 'internet';
-                state.useHttps = settings.useHttps !== undefined ? settings.useHttps : 'auto';
-                state.autoReconnect = settings.autoReconnect || false;
                 
                 // Load track type toggles
                 if (settings.trackTypeSettings) {
@@ -335,8 +326,6 @@ const RFSentinelModule = (function() {
                 mqttPort: state.mqttPort,
                 connectionMethod: state.connectionMethod,
                 weatherSource: state.weatherSource,
-                useHttps: state.useHttps,
-                autoReconnect: state.autoReconnect,
                 trackTypeSettings: state.trackTypeSettings
             });
         } catch (e) {
@@ -346,52 +335,16 @@ const RFSentinelModule = (function() {
 
     // ==================== Connection Management ====================
 
-    /**
-     * Determine whether to use HTTPS/WSS for connections.
-     * 'auto' mode: uses HTTP for local-looking hosts (.local, private IPs),
-     * matches page protocol for everything else.
-     */
-    function shouldUseHttps() {
-        if (state.useHttps === true) return true;
-        if (state.useHttps === false) return false;
-        
-        // Auto-detect
-        const host = state.host || '';
-        
-        // Local hostnames and private IPs → HTTP (usually no valid TLS cert)
-        if (host.endsWith('.local') ||
-            host === 'localhost' ||
-            host.startsWith('127.') ||
-            host.startsWith('10.') ||
-            host.startsWith('192.168.') ||
-            host.startsWith('172.16.') || host.startsWith('172.17.') ||
-            host.startsWith('172.18.') || host.startsWith('172.19.') ||
-            host.startsWith('172.2') || host.startsWith('172.30.') ||
-            host.startsWith('172.31.')) {
-            return false;
-        }
-        
-        // Non-local host: match page protocol if available
-        if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
-            return true;
-        }
-        
-        return false;
-    }
-
     function getBaseUrl() {
-        const protocol = shouldUseHttps() ? 'https' : 'http';
-        return `${protocol}://${state.host}:${state.port}`;
+        return `http://${state.host}:${state.port}`;
     }
 
     function getWsUrl() {
-        const protocol = shouldUseHttps() ? 'wss' : 'ws';
-        return `${protocol}://${state.host}:${state.port}/ws`;
+        return `ws://${state.host}:${state.port}/ws`;
     }
 
     function getMqttWsUrl() {
-        const protocol = shouldUseHttps() ? 'wss' : 'ws';
-        return `${protocol}://${state.host}:${state.mqttPort}/mqtt`;
+        return `ws://${state.host}:${state.mqttPort}/mqtt`;
     }
 
     /**
@@ -416,7 +369,6 @@ const RFSentinelModule = (function() {
         }
         
         state.connecting = true;
-        state.autoReconnect = true;
         
         if (host) state.host = host;
         if (port) state.port = port;
@@ -430,10 +382,9 @@ const RFSentinelModule = (function() {
         emitEvent('connecting', { host: state.host, port: state.port, method });
         
         // For non-MQTT methods, verify server is reachable via health check
-        // Uses 3 retries with increasing timeouts to handle slow mDNS resolution
         if (method !== 'mqtt') {
             try {
-                const health = await checkHealth(3, 8000);
+                const health = await checkHealth();
                 if (!health || health.status !== 'ok') {
                     throw new Error('Server health check failed');
                 }
@@ -472,13 +423,6 @@ const RFSentinelModule = (function() {
             return true;
         } catch (e) {
             console.warn('RFSentinel: WebSocket failed, falling back to REST:', e);
-            
-            // Clean up failed WebSocket before starting REST
-            // This prevents delayed onclose from clobbering REST connection state
-            if (state.ws) {
-                try { state.ws.close(); } catch (_) {}
-                state.ws = null;
-            }
             
             // Fall back to REST polling
             try {
@@ -544,9 +488,6 @@ const RFSentinelModule = (function() {
     function disconnect() {
         console.log('RFSentinel: Disconnecting...');
         
-        // User explicitly disconnected — don't auto-reconnect on next load
-        state.autoReconnect = false;
-        
         // Close WebSocket
         if (state.ws) {
             state.ws.close();
@@ -599,9 +540,6 @@ const RFSentinelModule = (function() {
         
         emitEvent('disconnected', {});
         
-        // Persist autoReconnect = false so we don't reconnect on next page load
-        saveSettings();
-        
         // Trigger map refresh
         if (typeof MapModule !== 'undefined') {
             MapModule.render();
@@ -622,22 +560,15 @@ const RFSentinelModule = (function() {
                 return;
             }
             
-            // Guard against double resolve/reject
-            let settled = false;
-            
             const connectTimeout = setTimeout(() => {
                 if (state.ws && state.ws.readyState === WebSocket.CONNECTING) {
-                    console.warn('RFSentinel: WebSocket connection timeout, closing');
-                    // Only close — let onclose handle the rejection
                     state.ws.close();
+                    reject(new Error('WebSocket connection timeout'));
                 }
             }, 10000);
             
             state.ws.onopen = () => {
                 clearTimeout(connectTimeout);
-                if (settled) return;
-                settled = true;
-                
                 console.log('RFSentinel: WebSocket connected');
                 
                 state.connected = true;
@@ -661,20 +592,13 @@ const RFSentinelModule = (function() {
                 clearTimeout(connectTimeout);
                 console.log('RFSentinel: WebSocket closed', event.code, event.reason);
                 
-                // Guard: if connection already fell back to REST, don't clobber state
-                if (state.connectionMode === 'rest') {
-                    console.log('RFSentinel: WebSocket onclose ignored — already using REST');
-                    return;
-                }
-                
-                if (state.connected && state.connectionMode === 'websocket') {
+                if (state.connected) {
                     state.connected = false;
                     emitEvent('disconnected', { code: event.code, reason: event.reason });
                     
                     // Attempt reconnect
                     scheduleWebSocketReconnect();
-                } else if (!settled) {
-                    settled = true;
+                } else if (state.connecting) {
                     state.connecting = false;
                     reject(new Error('WebSocket closed during connect'));
                 }
@@ -1197,10 +1121,7 @@ const RFSentinelModule = (function() {
         if (!state.connected) return;
         
         try {
-            const response = await fetch(
-                `${getBaseUrl()}/api/tracks?max_age=${CONFIG.trackMaxAgeSeconds}`,
-                { cache: 'no-store' }  // Prevent browser caching stale track data
-            );
+            const response = await fetch(`${getBaseUrl()}/api/tracks?max_age=${CONFIG.trackMaxAgeSeconds}`);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             
             const tracks = await response.json();
@@ -1243,61 +1164,29 @@ const RFSentinelModule = (function() {
         }, CONFIG.healthCheckIntervalMs);
     }
 
-    async function checkHealth(retries = 1, timeoutMs = 5000) {
-        const attempts = Math.max(1, retries);
-        
-        for (let attempt = 1; attempt <= attempts; attempt++) {
-            try {
-                const response = await fetch(`${getBaseUrl()}/health`, {
-                    signal: AbortSignal.timeout(timeoutMs),
-                    cache: 'no-store'
-                });
-                
-                if (!response.ok) {
-                    if (attempt < attempts) {
-                        console.warn(`RFSentinel: Health check attempt ${attempt}/${attempts} got HTTP ${response.status}, retrying...`);
-                        continue;
-                    }
-                    return null;
-                }
-                
-                const health = await response.json();
-                state.lastHealthCheck = Date.now();
-                state.serverHealth = health;
-                
-                if (attempt > 1) {
-                    console.log(`RFSentinel: Health check succeeded on attempt ${attempt}/${attempts}`);
-                }
-                
-                return health;
-            } catch (e) {
-                if (attempt < attempts) {
-                    console.warn(`RFSentinel: Health check attempt ${attempt}/${attempts} failed (${e.message}), retrying...`);
-                } else {
-                    console.warn('RFSentinel: Health check error:', e);
-                    return null;
-                }
-            }
+    async function checkHealth() {
+        try {
+            const response = await fetch(`${getBaseUrl()}/health`, {
+                signal: AbortSignal.timeout(5000)
+            });
+            
+            if (!response.ok) return null;
+            
+            const health = await response.json();
+            state.lastHealthCheck = Date.now();
+            state.serverHealth = health;
+            
+            return health;
+        } catch (e) {
+            console.warn('RFSentinel: Health check error:', e);
+            return null;
         }
-        
-        return null;
     }
 
     // ==================== Track Management ====================
 
     function handleTrackUpdate(track) {
         if (!track || !track.id) return;
-        
-        // Flatten metadata into top-level (REST API returns metadata as nested
-        // dict, but WebSocket sends fields at top-level — normalize here so
-        // rendering code can always use track.callsign, track.squawk, etc.)
-        if (track.metadata && typeof track.metadata === 'object') {
-            for (const [key, value] of Object.entries(track.metadata)) {
-                if (!(key in track)) {
-                    track[key] = value;
-                }
-            }
-        }
         
         // Normalize track type
         const type = normalizeTrackType(track.type);
@@ -1914,19 +1803,15 @@ const RFSentinelModule = (function() {
         ctx.save();
         ctx.globalAlpha = alpha;
         
-        // Draw based on track type with distinct silhouette icons
+        // Draw based on track type
         if (track.type === 'aircraft') {
             renderAircraft(ctx, x, y, track, color, isEmergency);
         } else if (track.type === 'ship') {
             renderShip(ctx, x, y, track, color, isEmergency);
         } else if (track.type === 'drone') {
             renderDrone(ctx, x, y, track, color, isEmergency);
-        } else if (track.type === 'radiosonde') {
-            renderRadiosonde(ctx, x, y, color, isEmergency);
-        } else if (track.type === 'aprs') {
-            renderAPRS(ctx, x, y, color, isEmergency);
         } else {
-            // Fallback generic marker for unknown types
+            // Generic marker for radiosonde, aprs
             renderGenericMarker(ctx, x, y, typeConfig, isEmergency);
         }
         
@@ -1939,63 +1824,40 @@ const RFSentinelModule = (function() {
                 ctx.fillStyle = '#fff';
                 ctx.strokeStyle = 'rgba(0,0,0,0.7)';
                 ctx.lineWidth = 2;
-                const labelY = y + 22;
-                ctx.strokeText(label, x, labelY);
-                ctx.fillText(label, x, labelY);
+                ctx.strokeText(label, x, y + 20);
+                ctx.fillText(label, x, y + 20);
             }
         }
         
         ctx.restore();
     }
 
-    /**
-     * Render aircraft as top-down airplane silhouette
-     * Fuselage + swept wings + horizontal stabilizer, rotates with heading
-     */
     function renderAircraft(ctx, x, y, track, color, isEmergency) {
         const heading = track.heading || track.track || 0;
-        const fillColor = isEmergency ? '#ef4444' : color;
-        const strokeColor = isEmergency ? '#fff' : 'rgba(255,255,255,0.6)';
         
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate((heading * Math.PI) / 180);
         
-        // Fuselage
+        // Aircraft shape
         ctx.beginPath();
-        ctx.moveTo(0, -14);    // Nose
-        ctx.lineTo(2, -10);    // Nose taper right
-        ctx.lineTo(2, -4);     // Fuselage right before wing
-        ctx.lineTo(11, 0);     // Right wing tip
-        ctx.lineTo(11, 2);     // Right wing trailing edge tip
-        ctx.lineTo(2, 0);      // Right wing root trailing edge
-        ctx.lineTo(2, 8);      // Fuselage right before tail
-        ctx.lineTo(6, 11);     // Right stabilizer tip
-        ctx.lineTo(6, 12);     // Right stabilizer trailing edge
-        ctx.lineTo(1, 10);     // Right stabilizer root
-        ctx.lineTo(0, 11);     // Tail center
-        ctx.lineTo(-1, 10);    // Left stabilizer root
-        ctx.lineTo(-6, 12);    // Left stabilizer trailing edge
-        ctx.lineTo(-6, 11);    // Left stabilizer tip
-        ctx.lineTo(-2, 8);     // Fuselage left before tail
-        ctx.lineTo(-2, 0);     // Left wing root trailing edge
-        ctx.lineTo(-11, 2);    // Left wing trailing edge tip
-        ctx.lineTo(-11, 0);    // Left wing tip
-        ctx.lineTo(-2, -4);    // Fuselage left before wing
-        ctx.lineTo(-2, -10);   // Nose taper left
+        ctx.moveTo(0, -12);  // Nose
+        ctx.lineTo(8, 8);    // Right wing tip
+        ctx.lineTo(0, 4);    // Tail
+        ctx.lineTo(-8, 8);   // Left wing tip
         ctx.closePath();
         
-        ctx.fillStyle = fillColor;
+        ctx.fillStyle = isEmergency ? '#ef4444' : color;
         ctx.fill();
-        ctx.strokeStyle = strokeColor;
+        ctx.strokeStyle = isEmergency ? '#fff' : 'rgba(255,255,255,0.6)';
         ctx.lineWidth = 1;
         ctx.stroke();
         
-        // Emergency pulse ring
+        // Emergency pulse
         if (isEmergency) {
             const pulse = (Math.sin(Date.now() / 150) + 1) / 2;
             ctx.beginPath();
-            ctx.arc(0, 0, 18 + pulse * 10, 0, Math.PI * 2);
+            ctx.arc(0, 0, 15 + pulse * 10, 0, Math.PI * 2);
             ctx.strokeStyle = `rgba(239, 68, 68, ${0.5 - pulse * 0.3})`;
             ctx.lineWidth = 2;
             ctx.stroke();
@@ -2004,232 +1866,47 @@ const RFSentinelModule = (function() {
         ctx.restore();
     }
 
-    /**
-     * Render ship as top-down vessel hull with superstructure
-     * Pointed bow + hull + bridge block, rotates with heading/COG
-     */
     function renderShip(ctx, x, y, track, color, isEmergency) {
         const heading = track.heading || track.cog || 0;
-        const fillColor = isEmergency ? '#ef4444' : color;
-        const strokeColor = isEmergency ? '#fff' : 'rgba(255,255,255,0.6)';
         
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate((heading * Math.PI) / 180);
         
-        // Hull outline - pointed bow, wider stern
+        // Ship shape (boat-like)
         ctx.beginPath();
-        ctx.moveTo(0, -13);    // Bow point
-        ctx.lineTo(4, -6);     // Forward starboard
-        ctx.lineTo(5, 0);      // Mid starboard (beam)
-        ctx.lineTo(5, 7);      // Aft starboard
-        ctx.lineTo(4, 10);     // Stern starboard
-        ctx.lineTo(-4, 10);    // Stern port
-        ctx.lineTo(-5, 7);     // Aft port
-        ctx.lineTo(-5, 0);     // Mid port (beam)
-        ctx.lineTo(-4, -6);    // Forward port
+        ctx.moveTo(0, -10);   // Bow
+        ctx.lineTo(6, 0);     // Starboard
+        ctx.lineTo(6, 8);     // Starboard stern
+        ctx.lineTo(-6, 8);    // Port stern
+        ctx.lineTo(-6, 0);    // Port
         ctx.closePath();
         
-        ctx.fillStyle = fillColor;
+        ctx.fillStyle = isEmergency ? '#ef4444' : color;
         ctx.fill();
-        ctx.strokeStyle = strokeColor;
+        ctx.strokeStyle = isEmergency ? '#fff' : 'rgba(255,255,255,0.6)';
         ctx.lineWidth = 1;
-        ctx.stroke();
-        
-        // Superstructure / bridge (lighter block near aft)
-        ctx.beginPath();
-        ctx.rect(-3, 2, 6, 5);
-        ctx.fillStyle = isEmergency ? '#fca5a5' : lightenColor(color, 0.35);
-        ctx.fill();
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 0.5;
         ctx.stroke();
         
         ctx.restore();
     }
 
-    /**
-     * Render drone as quadcopter silhouette
-     * Central body + 4 motor arms + rotor circles
-     */
     function renderDrone(ctx, x, y, track, color, isEmergency) {
-        const heading = track.heading || 0;
-        const fillColor = isEmergency ? '#ef4444' : color;
-        const strokeColor = isEmergency ? '#fff' : 'rgba(255,255,255,0.6)';
-        
-        ctx.save();
-        ctx.translate(x, y);
-        if (heading) {
-            ctx.rotate((heading * Math.PI) / 180);
-        }
-        
-        // Motor arms (X pattern)
-        ctx.strokeStyle = fillColor;
-        ctx.lineWidth = 2;
+        // Drone as diamond shape
         ctx.beginPath();
-        ctx.moveTo(-8, -8); ctx.lineTo(8, 8);    // Arm NW to SE
-        ctx.moveTo(8, -8);  ctx.lineTo(-8, 8);    // Arm NE to SW
-        ctx.stroke();
-        
-        // Central body (rounded square)
-        ctx.beginPath();
-        ctx.arc(0, 0, 4, 0, Math.PI * 2);
-        ctx.fillStyle = fillColor;
-        ctx.fill();
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        
-        // Four rotor circles at arm tips
-        const rotorRadius = 3.5;
-        const armPositions = [[-8, -8], [8, -8], [8, 8], [-8, 8]];
-        armPositions.forEach(([rx, ry]) => {
-            ctx.beginPath();
-            ctx.arc(rx, ry, rotorRadius, 0, Math.PI * 2);
-            ctx.strokeStyle = fillColor;
-            ctx.lineWidth = 1;
-            ctx.stroke();
-        });
-        
-        // Direction indicator (front dot) - forward is up
-        ctx.beginPath();
-        ctx.arc(0, -4.5, 1.5, 0, Math.PI * 2);
-        ctx.fillStyle = strokeColor;
-        ctx.fill();
-        
-        // Emergency pulse ring
-        if (isEmergency) {
-            const pulse = (Math.sin(Date.now() / 150) + 1) / 2;
-            ctx.beginPath();
-            ctx.arc(0, 0, 16 + pulse * 10, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(239, 68, 68, ${0.5 - pulse * 0.3})`;
-            ctx.lineWidth = 2;
-            ctx.stroke();
-        }
-        
-        ctx.restore();
-    }
-
-    /**
-     * Render radiosonde as weather balloon with payload gondola
-     * Circle balloon + tether line + small payload box
-     */
-    function renderRadiosonde(ctx, x, y, color, isEmergency) {
-        const fillColor = isEmergency ? '#ef4444' : color;
-        const strokeColor = isEmergency ? '#fff' : 'rgba(255,255,255,0.6)';
-        
-        ctx.save();
-        
-        // Balloon (oval, slightly taller than wide)
-        ctx.beginPath();
-        ctx.ellipse(x, y - 5, 6, 8, 0, 0, Math.PI * 2);
-        ctx.fillStyle = fillColor;
-        ctx.fill();
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        
-        // Balloon highlight (small shine)
-        ctx.beginPath();
-        ctx.ellipse(x - 2, y - 8, 1.5, 2.5, -0.3, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,0.25)';
-        ctx.fill();
-        
-        // Tether line
-        ctx.beginPath();
-        ctx.moveTo(x, y + 3);
-        ctx.lineTo(x - 1, y + 7);
-        ctx.lineTo(x + 1, y + 9);
-        ctx.lineTo(x, y + 12);
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 0.8;
-        ctx.stroke();
-        
-        // Payload gondola (small rectangle)
-        ctx.beginPath();
-        ctx.rect(x - 2.5, y + 12, 5, 4);
-        ctx.fillStyle = isEmergency ? '#fca5a5' : lightenColor(color, 0.3);
-        ctx.fill();
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 0.8;
-        ctx.stroke();
-        
-        ctx.restore();
-    }
-
-    /**
-     * Render APRS station as radio tower / antenna
-     * Vertical mast + triangular base + signal arcs
-     */
-    function renderAPRS(ctx, x, y, color, isEmergency) {
-        const fillColor = isEmergency ? '#ef4444' : color;
-        const strokeColor = isEmergency ? '#fff' : 'rgba(255,255,255,0.6)';
-        const parentAlpha = ctx.globalAlpha || 1;
-        
-        ctx.save();
-        
-        // Tower mast (vertical line)
-        ctx.beginPath();
-        ctx.moveTo(x, y - 12);
+        ctx.moveTo(x, y - 8);
+        ctx.lineTo(x + 8, y);
         ctx.lineTo(x, y + 8);
-        ctx.strokeStyle = fillColor;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        // Triangular base / guy-wire supports
-        ctx.beginPath();
-        ctx.moveTo(x, y + 1);      // Mast attachment point
-        ctx.lineTo(x - 6, y + 8);  // Left base
-        ctx.lineTo(x + 6, y + 8);  // Right base
+        ctx.lineTo(x - 8, y);
         ctx.closePath();
-        ctx.fillStyle = fillColor;
-        ctx.globalAlpha = parentAlpha * 0.5;
-        ctx.fill();
-        ctx.globalAlpha = parentAlpha;  // Restore cleanly
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 0.8;
-        ctx.stroke();
         
-        // Antenna tip (small diamond at top)
-        ctx.beginPath();
-        ctx.moveTo(x, y - 14);    // Top
-        ctx.lineTo(x + 2, y - 12);
-        ctx.lineTo(x, y - 10);
-        ctx.lineTo(x - 2, y - 12);
-        ctx.closePath();
-        ctx.fillStyle = fillColor;
+        ctx.fillStyle = isEmergency ? '#ef4444' : color;
         ctx.fill();
-        
-        // Signal arcs (two small arcs emanating from antenna)
-        ctx.strokeStyle = fillColor;
+        ctx.strokeStyle = isEmergency ? '#fff' : 'rgba(255,255,255,0.6)';
         ctx.lineWidth = 1;
-        ctx.globalAlpha = parentAlpha * 0.6;
-        
-        // Right arc
-        ctx.beginPath();
-        ctx.arc(x, y - 12, 5, -Math.PI * 0.4, Math.PI * 0.1);
         ctx.stroke();
-        
-        // Left arc
-        ctx.beginPath();
-        ctx.arc(x, y - 12, 5, Math.PI * 0.9, Math.PI * 1.4);
-        ctx.stroke();
-        
-        // Outer arcs (fainter)
-        ctx.globalAlpha = parentAlpha * 0.3;
-        ctx.beginPath();
-        ctx.arc(x, y - 12, 8, -Math.PI * 0.35, Math.PI * 0.05);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(x, y - 12, 8, Math.PI * 0.95, Math.PI * 1.35);
-        ctx.stroke();
-        
-        ctx.restore();
     }
 
-    /**
-     * Fallback generic marker for unknown track types
-     */
     function renderGenericMarker(ctx, x, y, typeConfig, isEmergency) {
         // Circle marker
         ctx.beginPath();
@@ -2239,24 +1916,6 @@ const RFSentinelModule = (function() {
         ctx.strokeStyle = isEmergency ? '#fff' : 'rgba(255,255,255,0.6)';
         ctx.lineWidth = 1;
         ctx.stroke();
-    }
-
-    /**
-     * Lighten a hex color by a given amount for icon detail elements
-     * @param {string} hex - Hex color string (e.g. '#3b82f6')
-     * @param {number} amount - Lighten factor 0-1
-     * @returns {string} Lightened hex color
-     */
-    function lightenColor(hex, amount) {
-        try {
-            const num = parseInt(hex.replace('#', ''), 16);
-            const r = Math.min(255, ((num >> 16) & 0xff) + Math.round(255 * amount));
-            const g = Math.min(255, ((num >> 8) & 0xff) + Math.round(255 * amount));
-            const b = Math.min(255, (num & 0xff) + Math.round(255 * amount));
-            return `rgb(${r},${g},${b})`;
-        } catch (e) {
-            return hex;
-        }
     }
     
     /**
@@ -2405,8 +2064,6 @@ const RFSentinelModule = (function() {
         setHost: (host) => { state.host = host; saveSettings(); },
         setPort: (port) => { state.port = port; saveSettings(); },
         setMqttPort: (port) => { state.mqttPort = port; saveSettings(); },
-        getUseHttps: () => state.useHttps,
-        setUseHttps: (val) => { state.useHttps = val; saveSettings(); },
         checkHealth,
         isMqttAvailable,
         

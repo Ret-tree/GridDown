@@ -6,12 +6,55 @@ const PanelsModule = (function() {
     let container;
     let measurePanelEl = null;
     let initialized = false;
+    let lastRenderedPanel = null;
+    
+    // Scroll preservation for panel re-renders
+    let _savedPanelScroll = 0;
+    function _saveScroll() { _savedPanelScroll = container ? container.scrollTop : 0; }
+    function _restoreScroll() {
+        const s = _savedPanelScroll;
+        if (s > 0 && container) {
+            requestAnimationFrame(() => { if (container) container.scrollTop = s; });
+        }
+    }
+    
+    // Cached DOM references to avoid repeated getElementById calls
+    let modalContainer = null;
+    
+    // Lazy getter for dynamically created SSTV content element
+    function getSstvContent() {
+        if (!sstvContentEl || !sstvContentEl.isConnected) {
+            sstvContentEl = document.getElementById('sstv-content');
+        }
+        return sstvContentEl;
+    }
+    let sstvContentEl = null;
+    
+    // Cached DOM references for dynamic panel elements.
+    // Populated after panel renders, invalidated on panel switch.
+    const domCache = {
+        _refs: {},
+        get(id) {
+            let el = this._refs[id];
+            if (!el || !el.isConnected) {
+                el = document.getElementById(id);
+                this._refs[id] = el;
+            }
+            return el;
+        },
+        clear() {
+            this._refs = {};
+        }
+    };
     
     // Track delegated event handlers for cleanup
     let coordConverterState = {
         parsedCoords: null,
         inputTimeout: null
     };
+    
+    // Track visual feedback timeouts to prevent stacking on rapid clicks
+    let feedbackTimeouts = {};
 
     function init() {
         // Prevent double initialization
@@ -23,12 +66,15 @@ const PanelsModule = (function() {
         container = document.getElementById('panel-content');
         if (!container) return;
         
+        // Cache hot DOM references
+        modalContainer = document.getElementById('modal-container');
+        
         // Setup event delegation for panel interactions
         setupEventDelegation();
         
         render();
         State.subscribe(render, ['activePanel', 'waypoints', 'routes', 'mapLayers', 'selectedWaypoint', 'selectedVehicle', 'waypointFilter', 'mapRegions', 'teamMembers']);
-        const offlineBtn = document.getElementById('offline-toggle');
+        const offlineBtn = domCache.get('offline-toggle');
         if (offlineBtn) offlineBtn.onclick = () => { State.UI.toggleOffline(); updateOfflineToggle(); };
         updateOfflineToggle();
         
@@ -138,6 +184,96 @@ const PanelsModule = (function() {
             return;
         }
         
+        // ---- Communication Plan delegation ----
+        
+        // Save comm plan
+        if (target.closest('#save-comm-plan')) {
+            commPlan.emergency.distressWord = container.querySelector('#distress-word')?.value || 'MAYDAY';
+            commPlan.emergency.duressWord = container.querySelector('#duress-word')?.value || '';
+            commPlan.emergency.emergencyChannel = container.querySelector('#emergency-channel')?.value || '';
+            commPlan.emergency.rallyPoint = container.querySelector('#rally-point')?.value || '';
+            commPlan.schedule.missedCheckInProtocol = container.querySelector('#missed-protocol-text')?.value || '';
+            commPlan.notes = container.querySelector('#comm-notes')?.value || '';
+            saveCommPlan();
+            return;
+        }
+        
+        // Export comm plan
+        if (target.closest('#comm-export-btn')) {
+            exportCommPlan();
+            return;
+        }
+        
+        // Add buttons (channels, callsigns, check-ins, protocols)
+        if (target.closest('#add-channel-btn')) { openChannelModal(); return; }
+        if (target.closest('#add-callsign-btn')) { openCallSignModal(); return; }
+        if (target.closest('#add-checkin-btn')) { openCheckInModal(); return; }
+        if (target.closest('#add-protocol-btn')) { openProtocolModal(); return; }
+        
+        // Edit buttons (data-edit-*)
+        const editChannel = target.closest('[data-edit-channel]');
+        if (editChannel) {
+            const channel = commPlan.channels.find(c => c.id === editChannel.dataset.editChannel);
+            if (channel) openChannelModal(channel);
+            return;
+        }
+        const editCallsign = target.closest('[data-edit-callsign]');
+        if (editCallsign) {
+            const cs = commPlan.callSigns.find(c => c.id === editCallsign.dataset.editCallsign);
+            if (cs) openCallSignModal(cs);
+            return;
+        }
+        const editCheckin = target.closest('[data-edit-checkin]');
+        if (editCheckin) {
+            const ck = commPlan.schedule.checkIns.find(c => c.id === editCheckin.dataset.editCheckin);
+            if (ck) openCheckInModal(ck);
+            return;
+        }
+        const editProtocol = target.closest('[data-edit-protocol]');
+        if (editProtocol) {
+            const ep = commPlan.emergency.protocols.find(p => p.id === editProtocol.dataset.editProtocol);
+            if (ep) openProtocolModal(ep);
+            return;
+        }
+        
+        // Delete buttons (data-delete-*)
+        const deleteChannel = target.closest('[data-delete-channel]');
+        if (deleteChannel) {
+            if (confirm('Delete this channel?')) {
+                commPlan.channels = commPlan.channels.filter(c => c.id !== deleteChannel.dataset.deleteChannel);
+                saveCommPlan();
+                renderComms();
+            }
+            return;
+        }
+        const deleteCallsign = target.closest('[data-delete-callsign]');
+        if (deleteCallsign) {
+            if (confirm('Delete this call sign?')) {
+                commPlan.callSigns = commPlan.callSigns.filter(c => c.id !== deleteCallsign.dataset.deleteCallsign);
+                saveCommPlan();
+                renderComms();
+            }
+            return;
+        }
+        const deleteCheckin = target.closest('[data-delete-checkin]');
+        if (deleteCheckin) {
+            if (confirm('Delete this check-in?')) {
+                commPlan.schedule.checkIns = commPlan.schedule.checkIns.filter(c => c.id !== deleteCheckin.dataset.deleteCheckin);
+                saveCommPlan();
+                renderComms();
+            }
+            return;
+        }
+        const deleteProtocol = target.closest('[data-delete-protocol]');
+        if (deleteProtocol) {
+            if (confirm('Delete this protocol?')) {
+                commPlan.emergency.protocols = commPlan.emergency.protocols.filter(p => p.id !== deleteProtocol.dataset.deleteProtocol);
+                saveCommPlan();
+                renderComms();
+            }
+            return;
+        }
+        
         // Data action buttons (copy-gps, copy-map, use-gps, use-map)
         const actionBtn = target.closest('[data-action]');
         if (actionBtn) {
@@ -150,7 +286,14 @@ const PanelsModule = (function() {
      * Handle delegated change events
      */
     function handleDelegatedChange(e) {
-        // Handle schedule toggles, selects, etc.
+        const target = e.target;
+        
+        // Schedule enabled toggle
+        if (target.id === 'schedule-enabled') {
+            commPlan.schedule.enabled = target.checked;
+            saveCommPlan();
+            renderComms();
+        }
     }
     
     /**
@@ -400,7 +543,7 @@ const PanelsModule = (function() {
     }
 
     function updateOfflineToggle() {
-        const btn = document.getElementById('offline-toggle');
+        const btn = domCache.get('offline-toggle');
         const icon = document.getElementById('offline-icon');
         const text = document.getElementById('offline-text');
         const offline = State.get('isOffline');
@@ -410,7 +553,14 @@ const PanelsModule = (function() {
     }
 
     function render() {
+        domCache.clear();
         const panel = State.get('activePanel');
+        
+        // Preserve scroll position when re-rendering the same panel (e.g., tab switch)
+        const isSamePanel = (panel === lastRenderedPanel);
+        const savedScroll = isSamePanel && container ? container.scrollTop : 0;
+        lastRenderedPanel = panel;
+        
         switch (panel) {
             case 'sos': renderSOS(); break;
             case 'waypoints': renderWaypoints(); break;
@@ -436,6 +586,12 @@ const PanelsModule = (function() {
             case 'fieldguides': renderFieldGuides(); break;
             default: renderMapLayers();
         }
+        
+        // Restore scroll position for same-panel re-renders (tab switches, etc.)
+        if (isSamePanel && savedScroll > 0 && container) {
+            container.scrollTop = savedScroll;
+        }
+        
         const panelEl = document.getElementById('panel');
         if (Helpers.isMobile() && State.get('isPanelOpen')) panelEl.classList.add('panel--open');
         else panelEl.classList.remove('panel--open');
@@ -464,6 +620,7 @@ const PanelsModule = (function() {
     }
 
     function renderMapLayers() {
+        _saveScroll(); _restoreScroll();
         const layers = State.get('mapLayers');
         
         // Get current base layer
@@ -519,7 +676,13 @@ const PanelsModule = (function() {
         // Get expanded state from localStorage or default (with try-catch for private browsing)
         let expandedState = {};
         try {
-            expandedState = JSON.parse(localStorage.getItem('gd_layer_expanded') || '{}');
+            // Migrate from old key name if present
+            const oldState = localStorage.getItem('gd_layer_expanded');
+            if (oldState) {
+                localStorage.setItem('griddown_layer_expanded', oldState);
+                localStorage.removeItem('gd_layer_expanded');
+            }
+            expandedState = JSON.parse(localStorage.getItem('griddown_layer_expanded') || '{}');
         } catch (e) {
             console.warn('Could not read layer expanded state from localStorage:', e);
         }
@@ -645,9 +808,9 @@ const PanelsModule = (function() {
                 
                 // Save state (with try-catch for private browsing/quota)
                 try {
-                    const state = JSON.parse(localStorage.getItem('gd_layer_expanded') || '{}');
+                    const state = JSON.parse(localStorage.getItem('griddown_layer_expanded') || '{}');
                     state[catKey] = !isExpanded;
-                    localStorage.setItem('gd_layer_expanded', JSON.stringify(state));
+                    localStorage.setItem('griddown_layer_expanded', JSON.stringify(state));
                 } catch (e) {
                     console.warn('Could not save layer expanded state to localStorage:', e);
                 }
@@ -938,6 +1101,7 @@ const PanelsModule = (function() {
     }
 
     function renderRoutes() {
+        _saveScroll(); _restoreScroll();
         const routes = State.get('routes');
         const waypoints = State.get('waypoints');
         const builderState = RouteBuilderModule.getState();
@@ -1075,9 +1239,9 @@ const PanelsModule = (function() {
                                     <div class="card__title">${r.name}</div>
                                     <div class="card__subtitle">${r.points?.length || 0} points ${r.source ? `• ${r.source}` : ''}</div>
                                 </div>
-                                <button class="btn btn--secondary" data-elevation-route="${r.id}" style="padding:6px" title="Elevation Profile">📈</button>
-                                <button class="btn btn--secondary" data-edit-route="${r.id}" style="padding:6px">✏️</button>
-                                <button class="btn btn--secondary" data-delete-route="${r.id}" style="padding:6px">🗑️</button>
+                                <button class="btn btn--secondary" data-elevation-route="${r.id}" style="padding:6px" title="Elevation Profile" aria-label="View elevation profile for ${Helpers.escapeHtml(r.name)}">📈</button>
+                                <button class="btn btn--secondary" data-edit-route="${r.id}" style="padding:6px" title="Edit route" aria-label="Edit ${Helpers.escapeHtml(r.name)}">✏️</button>
+                                <button class="btn btn--secondary" data-delete-route="${r.id}" style="padding:6px" title="Delete route" aria-label="Delete ${Helpers.escapeHtml(r.name)}">🗑️</button>
                             </div>
                             <div class="stat-grid stat-grid--3" style="margin-top:12px;padding:12px;background:rgba(0,0,0,0.2);border-radius:8px">
                                 <div style="text-align:center">
@@ -1510,13 +1674,14 @@ const PanelsModule = (function() {
                     
                 } catch (err) {
                     console.error('Elevation analysis error:', err);
-                    loadingEl.innerHTML = `<div style="color:rgba(255,255,255,0.5)">Error: ${err.message}</div>`;
+                    loadingEl.innerHTML = `<div style="color:rgba(255,255,255,0.5)">Error: ${Helpers.escapeHtml(err.message)}</div>`;
                 }
             };
         });
     }
 
     function renderLogistics() {
+        _saveScroll(); _restoreScroll();
         const config = LogisticsModule.getConfig();
         const profiles = LogisticsModule.getProfiles();
         const routes = State.get('routes');
@@ -1760,6 +1925,7 @@ const PanelsModule = (function() {
     }
 
     async function renderOffline() {
+        _saveScroll(); _restoreScroll();
         const regions = State.get('mapRegions') || [];
         const downloadedRegions = regions.filter(r => r.status === 'downloaded' || r.status === 'partial');
         const isDownloading = OfflineModule.isDownloadInProgress();
@@ -2124,7 +2290,7 @@ const PanelsModule = (function() {
      * Show download configuration modal for a region
      */
     function showDownloadRegionModal(bounds) {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         // Default settings
         const defaultMinZoom = 10;
@@ -2135,11 +2301,11 @@ const PanelsModule = (function() {
         const preview = OfflineModule.getDownloadPreview(bounds, defaultMinZoom, defaultMaxZoom, defaultLayers);
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:420px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:420px">
                     <div class="modal__header">
                         <h3 class="modal__title">Download Region</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <!-- Region bounds preview -->
@@ -2268,7 +2434,7 @@ const PanelsModule = (function() {
         (async () => {
             const syncStatus = await OfflineModule.getBackgroundSyncStatus();
             const syncOption = document.getElementById('background-sync-option');
-            const syncCheckbox = document.getElementById('use-background-sync');
+            const syncCheckbox = domCache.get('use-background-sync');
             
             if (!syncStatus.supported) {
                 syncOption.innerHTML = `
@@ -2306,8 +2472,8 @@ const PanelsModule = (function() {
         
         // Update preview when options change
         const updatePreview = () => {
-            const minZoom = parseInt(document.getElementById('min-zoom').value);
-            const maxZoom = parseInt(document.getElementById('max-zoom').value);
+            const minZoom = parseInt(domCache.get('min-zoom').value);
+            const maxZoom = parseInt(domCache.get('max-zoom').value);
             const layers = getSelectedLayers();
             
             const newPreview = OfflineModule.getDownloadPreview(bounds, minZoom, maxZoom, layers);
@@ -2317,8 +2483,8 @@ const PanelsModule = (function() {
         };
         
         // Attach change handlers to all layer checkboxes
-        document.getElementById('min-zoom').onchange = updatePreview;
-        document.getElementById('max-zoom').onchange = updatePreview;
+        domCache.get('min-zoom').onchange = updatePreview;
+        domCache.get('max-zoom').onchange = updatePreview;
         allLayerKeys.forEach(key => {
             const checkbox = document.getElementById(`layer-${key}`);
             if (checkbox) checkbox.onchange = updatePreview;
@@ -2326,17 +2492,17 @@ const PanelsModule = (function() {
         
         // Close modal
         const closeModal = () => { modalContainer.innerHTML = ''; };
-        document.getElementById('modal-close').onclick = closeModal;
-        document.getElementById('modal-cancel').onclick = closeModal;
-        document.getElementById('modal-backdrop').onclick = (e) => {
+        domCache.get('modal-close').onclick = closeModal;
+        domCache.get('modal-cancel').onclick = closeModal;
+        domCache.get('modal-backdrop').onclick = (e) => {
             if (e.target.id === 'modal-backdrop') closeModal();
         };
         
         // Start download
         document.getElementById('modal-download').onclick = async () => {
             const name = document.getElementById('region-name').value || `Region ${new Date().toLocaleDateString()}`;
-            const minZoom = parseInt(document.getElementById('min-zoom').value);
-            const maxZoom = parseInt(document.getElementById('max-zoom').value);
+            const minZoom = parseInt(domCache.get('min-zoom').value);
+            const maxZoom = parseInt(domCache.get('max-zoom').value);
             const layers = getSelectedLayers();
             
             if (layers.length === 0) {
@@ -2345,7 +2511,7 @@ const PanelsModule = (function() {
             }
             
             const regionConfig = { name, bounds, minZoom, maxZoom, layers };
-            const useBackgroundSync = document.getElementById('use-background-sync')?.checked;
+            const useBackgroundSync = domCache.get('use-background-sync')?.checked;
             
             closeModal();
             
@@ -3024,17 +3190,17 @@ const PanelsModule = (function() {
      * Open manual position entry modal
      */
     function openManualPositionModal() {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         if (!modalContainer) return;
         
         const currentManual = typeof GPSModule !== 'undefined' ? GPSModule.getManualPosition() : null;
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:420px;width:90%">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:420px;width:90%">
                     <div class="modal__header">
                         <h3 class="modal__title">📌 Set Manual Position</h3>
-                        <button class="modal__close" id="modal-close">&times;</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">&times;</button>
                     </div>
                     <div class="modal__body">
                         <p style="font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:16px">
@@ -3103,7 +3269,7 @@ const PanelsModule = (function() {
         };
         
         // Setup event handlers
-        const input = document.getElementById('manual-position-input');
+        const input = domCache.get('manual-position-input');
         const preview = document.getElementById('manual-position-preview');
         const saveBtn = document.getElementById('manual-position-save-btn');
         
@@ -3164,7 +3330,7 @@ const PanelsModule = (function() {
         // Save button
         if (saveBtn) {
             saveBtn.onclick = () => {
-                const coordInput = document.getElementById('manual-position-input');
+                const coordInput = domCache.get('manual-position-input');
                 const nameInput = document.getElementById('manual-position-name');
                 const altInput = document.getElementById('manual-position-altitude');
                 
@@ -3301,8 +3467,8 @@ const PanelsModule = (function() {
                         </div>
                         <div style="display:flex;gap:16px;margin-top:8px;font-size:11px;color:rgba(255,255,255,0.5)">
                             <span>CPS: ${RadiaCodeModule.formatCountRate(reading.countRate)}</span>
-                            <span>Total: ${reading.totalDose.toFixed(3)} μSv</span>
-                            <span>Temp: ${reading.temperature.toFixed(1)}°C</span>
+                            <span>Session: ${RadiaCodeModule.getDoseLog().currentSessionDose.toFixed(3)} μSv</span>
+                            <span>Lifetime: ${RadiaCodeModule.getDoseLog().cumulativeDose.toFixed(3)} μSv</span>
                         </div>
                     </div>
                     
@@ -3325,6 +3491,16 @@ const PanelsModule = (function() {
                             <span style="color:#ef4444">●</span> Recording track • ${RadiaCodeModule.getCurrentTrack()?.points?.length || 0} points
                         </div>
                     ` : ''}
+                    
+                    <!-- Heatmap Toggle + Dose Log -->
+                    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
+                        <button class="btn btn--secondary radiacode-heatmap-btn" style="flex:1;font-size:11px;padding:6px;${RadiaCodeModule.isHeatmapEnabled() ? 'background:rgba(34,197,94,0.2);border-color:rgba(34,197,94,0.4)' : ''}">
+                            🗺️ Heatmap ${RadiaCodeModule.isHeatmapEnabled() ? 'ON' : 'OFF'}
+                        </button>
+                        <button class="btn btn--secondary radiacode-dose-reset-btn" style="font-size:11px;padding:6px" title="Reset cumulative dose log">
+                            🔄 Reset Dose
+                        </button>
+                    </div>
                 ` : `
                     <!-- Not Connected -->
                     ${!isConnecting ? `
@@ -3474,6 +3650,30 @@ const PanelsModule = (function() {
                 openRadiaCodeTrackModal(trackId);
             };
         });
+        
+        // Heatmap toggle
+        const heatmapBtn = container.querySelector('.radiacode-heatmap-btn');
+        if (heatmapBtn) {
+            heatmapBtn.onclick = () => {
+                RadiaCodeModule.setHeatmapEnabled(!RadiaCodeModule.isHeatmapEnabled());
+                renderTeam();
+                if (typeof MapModule !== 'undefined') MapModule.render();
+            };
+        }
+        
+        // Dose log reset
+        const doseResetBtn = container.querySelector('.radiacode-dose-reset-btn');
+        if (doseResetBtn) {
+            doseResetBtn.onclick = () => {
+                if (confirm('Reset cumulative dose log? This clears all session history.')) {
+                    RadiaCodeModule.resetDoseLog();
+                    renderTeam();
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('Dose log reset', 'info');
+                    }
+                }
+            };
+        }
     }
     
     /**
@@ -3481,70 +3681,87 @@ const PanelsModule = (function() {
      */
     function openRadiaCodeSpectrumModal() {
         if (typeof RadiaCodeModule === 'undefined') return;
-        
-        const modalContainer = document.getElementById('modal-container');
         if (!modalContainer) return;
         
         const spectrum = RadiaCodeModule.getSpectrum();
         const peaks = RadiaCodeModule.findPeaks();
         const isotopes = RadiaCodeModule.identifyIsotopes();
         
-        // Find max count for scaling
-        const maxCount = Math.max(...spectrum.counts, 1);
+        // Total counts for display
+        const totalCounts = spectrum.counts.reduce((a, b) => a + b, 0);
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:600px;width:95%">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:660px;width:95%">
                     <div class="modal__header">
                         <h3 class="modal__title">📊 Gamma Spectrum</h3>
-                        <button class="modal__close" id="modal-close">&times;</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">&times;</button>
                     </div>
-                    <div class="modal__body">
-                        <div style="margin-bottom:16px;display:flex;gap:16px;font-size:12px;color:rgba(255,255,255,0.6)">
+                    <div class="modal__body" style="padding:12px">
+                        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;font-size:12px;color:rgba(255,255,255,0.6)">
                             <span>Duration: ${spectrum.duration.toFixed(1)}s</span>
+                            <span>Total: ${totalCounts.toLocaleString()} counts</span>
                             <span>Peaks: ${peaks.length}</span>
                             <span>Isotopes: ${isotopes.length}</span>
                         </div>
                         
+                        <!-- Scale Toggle -->
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                            <span style="font-size:11px;color:rgba(255,255,255,0.5)">Scale:</span>
+                            <button id="spectrum-scale-toggle" class="btn btn--secondary" style="font-size:11px;padding:3px 10px;min-width:60px">Log</button>
+                            <span style="flex:1"></span>
+                            <span style="font-size:10px;color:rgba(255,255,255,0.3)">Tap chart for reading</span>
+                        </div>
+                        
                         <!-- Spectrum Chart -->
-                        <div style="height:200px;background:rgba(0,0,0,0.3);border-radius:8px;padding:8px;margin-bottom:16px;overflow:hidden;position:relative">
-                            <canvas id="spectrum-canvas" width="600" height="180" style="width:100%;height:100%"></canvas>
+                        <div style="position:relative;background:rgba(0,0,0,0.4);border-radius:8px;padding:0;margin-bottom:12px;border:1px solid rgba(255,255,255,0.08)">
+                            <canvas id="spectrum-canvas" style="width:100%;height:220px;display:block;cursor:crosshair"></canvas>
+                            <div id="spectrum-tooltip" style="display:none;position:absolute;background:rgba(0,0,0,0.85);border:1px solid rgba(255,255,255,0.2);border-radius:6px;padding:6px 10px;font-size:11px;color:#fff;pointer-events:none;z-index:10;white-space:nowrap"></div>
                         </div>
                         
                         <!-- Identified Isotopes -->
                         ${isotopes.length > 0 ? `
-                            <div class="section-label">Identified Isotopes</div>
-                            <div style="display:grid;gap:8px;max-height:200px;overflow-y:auto">
-                                ${isotopes.map(match => `
-                                    <div style="padding:10px;background:rgba(255,255,255,0.05);border-radius:8px;display:flex;align-items:center;gap:12px">
-                                        <div style="width:40px;height:40px;border-radius:8px;background:rgba(34,197,94,0.2);display:flex;align-items:center;justify-content:center">
-                                            <span style="font-size:14px;font-weight:700">${match.isotope.name.split('-')[0]}</span>
+                            <div style="font-size:12px;font-weight:600;color:rgba(255,255,255,0.7);margin-bottom:8px">☢️ Identified Isotopes</div>
+                            <div style="display:grid;gap:6px;max-height:200px;overflow-y:auto">
+                                ${isotopes.map(match => {
+                                    const confPct = (match.confidence * 100).toFixed(0);
+                                    const confColor = match.confidence > 0.7 ? '#22c55e' : match.confidence > 0.4 ? '#eab308' : '#f97316';
+                                    return `
+                                    <div style="padding:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.06);border-radius:8px;display:flex;align-items:center;gap:12px">
+                                        <div style="width:40px;height:40px;border-radius:8px;background:rgba(34,197,94,0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                                            <span style="font-size:13px;font-weight:700;color:#22c55e">${match.isotope.name.split('-')[0]}</span>
                                         </div>
-                                        <div style="flex:1">
-                                            <div style="font-weight:600">${match.isotope.name}</div>
-                                            <div style="font-size:11px;color:rgba(255,255,255,0.5)">${match.isotope.notes}</div>
+                                        <div style="flex:1;min-width:0">
+                                            <div style="font-weight:600;font-size:13px">${match.isotope.name}
+                                                <span style="font-size:10px;font-weight:400;color:rgba(255,255,255,0.4);margin-left:4px">t½ ${match.isotope.halfLife}</span>
+                                            </div>
+                                            <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px">${match.isotope.notes}</div>
                                         </div>
-                                        <div style="text-align:right">
-                                            <div style="font-size:12px;font-family:monospace">${match.peak.energy.toFixed(1)} keV</div>
-                                            <div style="font-size:10px;color:rgba(255,255,255,0.4)">${(match.confidence * 100).toFixed(0)}% conf</div>
+                                        <div style="text-align:right;flex-shrink:0">
+                                            <div style="font-size:12px;font-family:'IBM Plex Mono',monospace">${match.peak.energy.toFixed(1)} keV</div>
+                                            <div style="font-size:10px;color:${confColor};font-weight:600">${confPct}%</div>
+                                            <div style="width:40px;height:3px;background:rgba(255,255,255,0.1);border-radius:2px;margin-top:3px">
+                                                <div style="width:${confPct}%;height:100%;background:${confColor};border-radius:2px"></div>
+                                            </div>
                                         </div>
                                     </div>
-                                `).join('')}
+                                `}).join('')}
                             </div>
                         ` : `
-                            <div style="padding:20px;text-align:center;color:rgba(255,255,255,0.4)">
-                                No isotopes identified. Accumulate more counts for better analysis.
+                            <div style="padding:20px;text-align:center;color:rgba(255,255,255,0.4);font-size:13px">
+                                No isotopes identified yet. Accumulate more counts for better analysis.
                             </div>
                         `}
                     </div>
-                    <div class="modal__footer">
-                        <button class="btn btn--secondary" id="spectrum-reset-btn">
-                            🔄 Reset Spectrum
+                    <div class="modal__footer" style="display:flex;gap:8px;flex-wrap:wrap">
+                        <button class="btn btn--secondary" id="spectrum-reset-btn" style="font-size:12px">
+                            🔄 Reset
                         </button>
-                        <button class="btn btn--secondary" id="spectrum-refresh-btn">
-                            📥 Refresh Data
+                        <button class="btn btn--secondary" id="spectrum-refresh-btn" style="font-size:12px">
+                            📥 Refresh
                         </button>
-                        <button class="btn btn--primary" id="modal-close-btn">Close</button>
+                        <span style="flex:1"></span>
+                        <button class="btn btn--primary" id="modal-close-btn" style="font-size:12px">Close</button>
                     </div>
                 </div>
             </div>
@@ -3559,7 +3776,7 @@ const PanelsModule = (function() {
             if (e.target.id === 'modal-backdrop') closeModal();
         };
         
-        // Reset spectrum button
+        // Reset spectrum
         modalContainer.querySelector('#spectrum-reset-btn').onclick = () => {
             RadiaCodeModule.resetSpectrum();
             closeModal();
@@ -3568,55 +3785,288 @@ const PanelsModule = (function() {
             }
         };
         
-        // Refresh data button
+        // Refresh data
         modalContainer.querySelector('#spectrum-refresh-btn').onclick = () => {
             RadiaCodeModule.requestSpectrum();
             if (typeof ModalsModule !== 'undefined') {
                 ModalsModule.showToast('Requesting spectrum data...', 'info');
             }
-            // Re-open modal after a delay to show updated data
-            setTimeout(() => {
-                openRadiaCodeSpectrumModal();
-            }, 500);
+            setTimeout(() => openRadiaCodeSpectrumModal(), 500);
         };
         
-        // Draw spectrum on canvas
+        // ==================== Spectrum Chart Rendering ====================
+        let useLogScale = true;
         const canvas = document.getElementById('spectrum-canvas');
-        if (canvas) {
+        const tooltip = document.getElementById('spectrum-tooltip');
+        const scaleToggle = document.getElementById('spectrum-scale-toggle');
+        
+        if (!canvas) return;
+        
+        function drawSpectrum() {
+            // High-DPI canvas sizing
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * dpr;
+            canvas.height = rect.height * dpr;
             const ctx = canvas.getContext('2d');
-            const width = canvas.width;
-            const height = canvas.height;
+            ctx.scale(dpr, dpr);
+            
+            const W = rect.width;
+            const H = rect.height;
+            const PAD_L = 44;   // left padding for Y-axis labels
+            const PAD_R = 10;
+            const PAD_T = 16;   // top padding for isotope labels
+            const PAD_B = 24;   // bottom for energy axis
+            const chartW = W - PAD_L - PAD_R;
+            const chartH = H - PAD_T - PAD_B;
+            
+            // Calibration-aware energy range
+            const cal = spectrum.calibration;
+            const maxEnergy = cal[0] + cal[1] * 1023 + cal[2] * 1023 * 1023;
+            const energyRange = Math.ceil(maxEnergy / 500) * 500; // round up to nearest 500 keV
+            
+            // Channel to X pixel
+            function chToX(ch) {
+                const energy = cal[0] + cal[1] * ch + cal[2] * ch * ch;
+                return PAD_L + (energy / energyRange) * chartW;
+            }
+            
+            // Energy to X pixel
+            function eToX(energy) {
+                return PAD_L + (energy / energyRange) * chartW;
+            }
+            
+            // Find max count for scaling
+            const maxCount = Math.max(...spectrum.counts, 1);
+            const logMax = Math.log10(Math.max(maxCount, 10));
+            
+            // Count to Y pixel
+            function countToY(count) {
+                if (useLogScale) {
+                    if (count <= 0) return PAD_T + chartH;
+                    const logVal = Math.log10(count);
+                    return PAD_T + chartH - (logVal / logMax) * chartH;
+                } else {
+                    return PAD_T + chartH - (count / maxCount) * chartH;
+                }
+            }
             
             // Clear
-            ctx.clearRect(0, 0, width, height);
+            ctx.clearRect(0, 0, W, H);
             
-            // Draw spectrum bars
-            const barWidth = width / 256; // Show 256 bins (downsample from 1024)
-            ctx.fillStyle = '#22c55e';
+            // Background grid
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.lineWidth = 1;
             
-            for (let i = 0; i < 256; i++) {
-                // Average 4 channels per bin
-                const sum = spectrum.counts[i*4] + spectrum.counts[i*4+1] + spectrum.counts[i*4+2] + spectrum.counts[i*4+3];
-                const avg = sum / 4;
-                const barHeight = (avg / maxCount) * height * 0.9;
-                ctx.fillRect(i * barWidth, height - barHeight, barWidth - 1, barHeight);
+            // Horizontal grid lines (Y-axis)
+            if (useLogScale) {
+                for (let exp = 0; exp <= logMax; exp++) {
+                    const y = countToY(Math.pow(10, exp));
+                    ctx.beginPath();
+                    ctx.moveTo(PAD_L, y);
+                    ctx.lineTo(W - PAD_R, y);
+                    ctx.stroke();
+                }
+            } else {
+                for (let i = 0; i <= 4; i++) {
+                    const val = (maxCount / 4) * i;
+                    const y = countToY(val);
+                    ctx.beginPath();
+                    ctx.moveTo(PAD_L, y);
+                    ctx.lineTo(W - PAD_R, y);
+                    ctx.stroke();
+                }
             }
             
-            // Mark peaks
-            ctx.fillStyle = '#ef4444';
+            // Vertical grid lines (energy)
+            for (let keV = 500; keV < energyRange; keV += 500) {
+                const x = eToX(keV);
+                ctx.beginPath();
+                ctx.moveTo(x, PAD_T);
+                ctx.lineTo(x, PAD_T + chartH);
+                ctx.stroke();
+            }
+            
+            // Draw spectrum as filled area
+            ctx.beginPath();
+            ctx.moveTo(chToX(0), PAD_T + chartH);
+            for (let ch = 0; ch < 1024; ch++) {
+                const x = chToX(ch);
+                const y = countToY(spectrum.counts[ch]);
+                ctx.lineTo(x, y);
+            }
+            ctx.lineTo(chToX(1023), PAD_T + chartH);
+            ctx.closePath();
+            
+            // Gradient fill
+            const grad = ctx.createLinearGradient(0, PAD_T, 0, PAD_T + chartH);
+            grad.addColorStop(0, 'rgba(34,197,94,0.5)');
+            grad.addColorStop(1, 'rgba(34,197,94,0.05)');
+            ctx.fillStyle = grad;
+            ctx.fill();
+            
+            // Spectrum line
+            ctx.beginPath();
+            for (let ch = 0; ch < 1024; ch++) {
+                const x = chToX(ch);
+                const y = countToY(spectrum.counts[ch]);
+                if (ch === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.strokeStyle = '#22c55e';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+            
+            // Peak markers + energy labels
+            ctx.font = '9px system-ui, sans-serif';
+            ctx.textAlign = 'center';
             peaks.forEach(peak => {
-                const x = (peak.channel / 1024) * width;
-                ctx.fillRect(x - 1, 0, 2, height);
+                const x = chToX(peak.channel);
+                const y = countToY(peak.counts);
+                
+                // Dashed vertical line at peak
+                ctx.save();
+                ctx.setLineDash([3, 3]);
+                ctx.strokeStyle = 'rgba(239,68,68,0.5)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(x, PAD_T + chartH);
+                ctx.stroke();
+                ctx.restore();
+                
+                // Peak dot
+                ctx.beginPath();
+                ctx.arc(x, y, 3, 0, Math.PI * 2);
+                ctx.fillStyle = '#ef4444';
+                ctx.fill();
+                
+                // Energy label above peak
+                const label = peak.energy.toFixed(0) + ' keV';
+                ctx.fillStyle = 'rgba(255,255,255,0.6)';
+                ctx.fillText(label, x, Math.max(y - 8, PAD_T + 8));
             });
             
-            // Energy axis labels
+            // Isotope annotations on chart
+            const labelledPositions = [];
+            isotopes.forEach(match => {
+                const x = eToX(match.isotope.energy);
+                if (x < PAD_L || x > W - PAD_R) return;
+                
+                // Avoid overlapping labels
+                const tooClose = labelledPositions.some(lx => Math.abs(lx - x) < 45);
+                
+                // Triangular marker at top
+                ctx.beginPath();
+                ctx.moveTo(x - 4, PAD_T + 2);
+                ctx.lineTo(x + 4, PAD_T + 2);
+                ctx.lineTo(x, PAD_T + 8);
+                ctx.closePath();
+                ctx.fillStyle = match.confidence > 0.5 ? '#fbbf24' : 'rgba(251,191,36,0.5)';
+                ctx.fill();
+                
+                if (!tooClose) {
+                    // Isotope name label
+                    ctx.font = 'bold 10px system-ui, sans-serif';
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(match.isotope.name, x, PAD_T - 2);
+                    labelledPositions.push(x);
+                }
+            });
+            
+            // Y-axis labels (counts)
+            ctx.font = '9px system-ui, sans-serif';
             ctx.fillStyle = 'rgba(255,255,255,0.4)';
-            ctx.font = '10px system-ui';
-            ctx.textAlign = 'center';
-            for (let keV = 0; keV <= 3000; keV += 500) {
-                const x = (keV / 3000) * width;
-                ctx.fillText(`${keV}`, x, height - 2);
+            ctx.textAlign = 'right';
+            if (useLogScale) {
+                for (let exp = 0; exp <= logMax; exp++) {
+                    const y = countToY(Math.pow(10, exp));
+                    ctx.fillText(exp === 0 ? '1' : '10^' + exp, PAD_L - 4, y + 3);
+                }
+            } else {
+                for (let i = 0; i <= 4; i++) {
+                    const val = Math.round((maxCount / 4) * i);
+                    const y = countToY(val);
+                    ctx.fillText(val >= 1000 ? (val / 1000).toFixed(1) + 'k' : val.toString(), PAD_L - 4, y + 3);
+                }
             }
+            
+            // X-axis labels (energy)
+            ctx.textAlign = 'center';
+            ctx.fillStyle = 'rgba(255,255,255,0.45)';
+            ctx.font = '10px system-ui, sans-serif';
+            const step = energyRange <= 1500 ? 200 : 500;
+            for (let keV = 0; keV <= energyRange; keV += step) {
+                const x = eToX(keV);
+                if (x < PAD_L - 5 || x > W - PAD_R + 5) continue;
+                ctx.fillText(keV + ' keV', x, H - 4);
+            }
+            
+            // Axis lines
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(PAD_L, PAD_T);
+            ctx.lineTo(PAD_L, PAD_T + chartH);
+            ctx.lineTo(W - PAD_R, PAD_T + chartH);
+            ctx.stroke();
+        }
+        
+        // Initial draw
+        drawSpectrum();
+        
+        // Scale toggle
+        if (scaleToggle) {
+            scaleToggle.onclick = () => {
+                useLogScale = !useLogScale;
+                scaleToggle.textContent = useLogScale ? 'Log' : 'Linear';
+                drawSpectrum();
+            };
+        }
+        
+        // Crosshair tooltip on hover/tap
+        if (canvas && tooltip) {
+            const handlePointer = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const PAD_L = 44, PAD_R = 10, PAD_T = 16, PAD_B = 24;
+                const chartW = rect.width - PAD_L - PAD_R;
+                
+                if (mx < PAD_L || mx > rect.width - PAD_R) {
+                    tooltip.style.display = 'none';
+                    return;
+                }
+                
+                const cal = spectrum.calibration;
+                const maxEnergy = cal[0] + cal[1] * 1023 + cal[2] * 1023 * 1023;
+                const energyRange = Math.ceil(maxEnergy / 500) * 500;
+                const energy = ((mx - PAD_L) / chartW) * energyRange;
+                
+                // Find closest channel
+                let bestCh = 0;
+                let bestDiff = Infinity;
+                for (let ch = 0; ch < 1024; ch++) {
+                    const chE = cal[0] + cal[1] * ch + cal[2] * ch * ch;
+                    const diff = Math.abs(chE - energy);
+                    if (diff < bestDiff) { bestDiff = diff; bestCh = ch; }
+                }
+                
+                const counts = spectrum.counts[bestCh];
+                tooltip.innerHTML = `<strong>${energy.toFixed(1)} keV</strong> (ch ${bestCh})<br>Counts: ${counts.toLocaleString()}`;
+                tooltip.style.display = 'block';
+                
+                // Position tooltip avoiding edges
+                const ttW = tooltip.offsetWidth;
+                let left = mx + 12;
+                if (left + ttW > rect.width) left = mx - ttW - 12;
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = (e.clientY - rect.top - 40) + 'px';
+            };
+            
+            canvas.addEventListener('pointermove', handlePointer);
+            canvas.addEventListener('pointerdown', handlePointer);
+            canvas.addEventListener('pointerleave', () => { tooltip.style.display = 'none'; });
         }
     }
     
@@ -3626,7 +4076,7 @@ const PanelsModule = (function() {
     function openRadiaCodeTrackModal(trackId) {
         if (typeof RadiaCodeModule === 'undefined') return;
         
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         if (!modalContainer) return;
         
         const track = RadiaCodeModule.getTrack(trackId);
@@ -3635,11 +4085,11 @@ const PanelsModule = (function() {
         const duration = track.stats.duration ? Math.round(track.stats.duration / 60000) : 0;
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:450px;width:90%">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:450px;width:90%">
                     <div class="modal__header">
                         <h3 class="modal__title">☢️ ${track.name}</h3>
-                        <button class="modal__close" id="modal-close">&times;</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">&times;</button>
                     </div>
                     <div class="modal__body">
                         <!-- Track Stats -->
@@ -3673,10 +4123,17 @@ const PanelsModule = (function() {
                         ` : ''}
                     </div>
                     <div class="modal__footer">
-                        <button class="btn btn--secondary" id="export-track-geojson">
-                            📤 Export GeoJSON
+                        <button class="btn btn--secondary" id="export-track-csv" style="font-size:12px">
+                            📋 CSV
                         </button>
-                        <button class="btn btn--danger" id="delete-track-btn">
+                        <button class="btn btn--secondary" id="export-track-gpx" style="font-size:12px">
+                            🗺️ GPX
+                        </button>
+                        <button class="btn btn--secondary" id="export-track-geojson" style="font-size:12px">
+                            📤 GeoJSON
+                        </button>
+                        <span style="flex:1"></span>
+                        <button class="btn btn--danger" id="delete-track-btn" style="font-size:12px">
                             🗑️ Delete
                         </button>
                     </div>
@@ -3705,6 +4162,40 @@ const PanelsModule = (function() {
                 URL.revokeObjectURL(url);
                 if (typeof ModalsModule !== 'undefined') {
                     ModalsModule.showToast('Track exported', 'success');
+                }
+            }
+        };
+        
+        // Export CSV
+        modalContainer.querySelector('#export-track-csv').onclick = () => {
+            const csv = RadiaCodeModule.exportTrackCSV(trackId);
+            if (csv) {
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `radiation-track-${trackId}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+                if (typeof ModalsModule !== 'undefined') {
+                    ModalsModule.showToast('CSV exported', 'success');
+                }
+            }
+        };
+        
+        // Export GPX
+        modalContainer.querySelector('#export-track-gpx').onclick = () => {
+            const gpx = RadiaCodeModule.exportTrackGPX(trackId);
+            if (gpx) {
+                const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `radiation-track-${trackId}.gpx`;
+                a.click();
+                URL.revokeObjectURL(url);
+                if (typeof ModalsModule !== 'undefined') {
+                    ModalsModule.showToast('GPX exported', 'success');
                 }
             }
         };
@@ -3897,7 +4388,7 @@ const PanelsModule = (function() {
                                             
                                             <!-- Go To Button -->
                                             ${!isMe && m.lat && m.lon ? `
-                                                <button class="btn btn--secondary" data-goto-team="${m.id}" style="padding:6px 10px;font-size:11px" title="Go to location">
+                                                <button class="btn btn--secondary" data-goto-team="${m.id}" data-goto-lat="${m.lat}" data-goto-lon="${m.lon}" data-goto-name="${Helpers.escapeHtml(m.name)}" style="padding:6px 10px;font-size:11px" title="Go to location" aria-label="Go to ${Helpers.escapeHtml(m.name)} on map">
                                                     🎯
                                                 </button>
                                             ` : ''}
@@ -4016,6 +4507,7 @@ const PanelsModule = (function() {
     }
 
     function renderTeam() {
+        _saveScroll(); _restoreScroll();
         const team = State.get('teamMembers');
         const waypoints = State.get('waypoints') || [];
         const routes = State.get('routes') || [];
@@ -4229,7 +4721,7 @@ const PanelsModule = (function() {
                                     </button>
                                 ` : ''}
                                 ${!m.isMe && m.lat && m.lon ? `
-                                    <button class="btn btn--secondary" data-goto-team="${m.id}" style="padding:6px 8px;font-size:10px" title="Go to location">
+                                    <button class="btn btn--secondary" data-goto-team="${m.id}" data-goto-lat="${m.lat}" data-goto-lon="${m.lon}" data-goto-name="${escapeHtml(m.name)}" style="padding:6px 8px;font-size:10px" title="Go to location" aria-label="Go to ${escapeHtml(m.name)} on map">
                                         🎯
                                     </button>
                                 ` : ''}
@@ -4506,14 +4998,14 @@ const PanelsModule = (function() {
                         helpMessage.style.borderColor = 'rgba(245,158,11,0.3)';
                         helpIcon.textContent = '⚠️';
                         helpIcon.parentElement.style.color = '#f59e0b';
-                        helpText.innerHTML = `<strong>${deviceName}</strong> only supports Bluetooth. The USB port is for charging only.`;
+                        helpText.innerHTML = `<strong>${Helpers.escapeHtml(deviceName)}</strong> only supports Bluetooth. The USB port is for charging only.`;
                     } else if (supportsBle && supportsSerial) {
                         helpMessage.style.display = 'block';
                         helpMessage.style.background = 'rgba(59,130,246,0.1)';
                         helpMessage.style.borderColor = 'rgba(59,130,246,0.2)';
                         helpIcon.textContent = 'ℹ️';
                         helpIcon.parentElement.style.color = '#3b82f6';
-                        helpText.innerHTML = `<strong>${deviceName}</strong> supports both Bluetooth and Serial/USB connections.`;
+                        helpText.innerHTML = `<strong>${Helpers.escapeHtml(deviceName)}</strong> supports both Bluetooth and Serial/USB connections.`;
                     } else {
                         helpMessage.style.display = 'none';
                     }
@@ -4568,12 +5060,22 @@ const PanelsModule = (function() {
             };
         }
         
+        // New Device Setup
+        const deviceSetupBtn = container.querySelector('#mesh-device-setup-btn');
+        if (deviceSetupBtn) {
+            deviceSetupBtn.onclick = () => openDeviceSetupModal();
+        }
+        
         // Disconnect
         const disconnectBtn = container.querySelector('#mesh-disconnect-btn');
         if (disconnectBtn) {
             disconnectBtn.onclick = async () => {
-                await MeshtasticModule.disconnect();
-                ModalsModule.showToast('Disconnected from Meshtastic', 'info');
+                try {
+                    await MeshtasticModule.disconnect();
+                    ModalsModule.showToast('Disconnected from Meshtastic', 'info');
+                } catch (err) {
+                    ModalsModule.showToast('Disconnect error: ' + err.message, 'error');
+                }
                 renderTeam();
             };
         }
@@ -4582,8 +5084,12 @@ const PanelsModule = (function() {
         const broadcastBtn = container.querySelector('#mesh-broadcast-btn');
         if (broadcastBtn) {
             broadcastBtn.onclick = async () => {
-                await MeshtasticModule.broadcastPosition();
-                ModalsModule.showToast('Position broadcast sent', 'success');
+                try {
+                    await MeshtasticModule.broadcastPosition();
+                    ModalsModule.showToast('Position broadcast sent', 'success');
+                } catch (err) {
+                    ModalsModule.showToast('Broadcast failed: ' + err.message, 'error');
+                }
             };
         }
         
@@ -4735,7 +5241,11 @@ const PanelsModule = (function() {
         if (checkinBtn) {
             checkinBtn.onclick = async () => {
                 if (isConnected) {
-                    await MeshtasticModule.sendCheckin('OK');
+                    try {
+                        await MeshtasticModule.sendCheckin('OK');
+                    } catch (err) {
+                        ModalsModule.showToast('Check-in failed: ' + err.message, 'error');
+                    }
                 } else {
                     ModalsModule.showToast('Connect to Meshtastic first', 'error');
                 }
@@ -4747,7 +5257,11 @@ const PanelsModule = (function() {
         if (checkinHelpBtn) {
             checkinHelpBtn.onclick = async () => {
                 if (isConnected) {
-                    await MeshtasticModule.sendCheckin('NEED HELP');
+                    try {
+                        await MeshtasticModule.sendCheckin('NEED HELP');
+                    } catch (err) {
+                        ModalsModule.showToast('Check-in failed: ' + err.message, 'error');
+                    }
                 }
             };
         }
@@ -4795,8 +5309,12 @@ const PanelsModule = (function() {
             btn.onclick = async () => {
                 const scenarioId = btn.dataset.scenario;
                 if (typeof MeshtasticModule !== 'undefined') {
-                    await MeshtasticModule.applyScenarioPreset(scenarioId);
-                    ModalsModule.showToast(`Applied ${scenarioId} preset`, 'success');
+                    try {
+                        await MeshtasticModule.applyScenarioPreset(scenarioId);
+                        ModalsModule.showToast(`Applied ${scenarioId} preset`, 'success');
+                    } catch (err) {
+                        ModalsModule.showToast('Preset failed: ' + err.message, 'error');
+                    }
                     renderTeam();
                 }
             };
@@ -4858,10 +5376,12 @@ const PanelsModule = (function() {
         // Go to team member location
         container.querySelectorAll('[data-goto-team]').forEach(btn => {
             btn.onclick = () => {
-                const member = team.find(m => m.id === btn.dataset.gotoTeam);
-                if (member && member.lat && member.lon && typeof MapModule !== 'undefined') {
-                    MapModule.setCenter(member.lat, member.lon, 15);
-                    ModalsModule.showToast(`Centered on ${member.name}`, 'info');
+                const lat = parseFloat(btn.dataset.gotoLat);
+                const lon = parseFloat(btn.dataset.gotoLon);
+                const name = btn.dataset.gotoName || 'Member';
+                if (lat && lon && typeof MapModule !== 'undefined') {
+                    MapModule.setCenter(lat, lon, 15);
+                    ModalsModule.showToast(`Centered on ${name}`, 'info');
                 }
             };
         });
@@ -5222,6 +5742,11 @@ const PanelsModule = (function() {
                     </button>
                 </div>
                 
+                <!-- New Device Setup -->
+                <button class="btn btn--secondary" id="mesh-device-setup-btn" style="width:100%;margin-top:8px;padding:10px;font-size:12px" ${!apiSupport.bluetooth && !apiSupport.serial ? 'disabled' : ''}>
+                    📱 New Device Setup — <span style="color:rgba(255,255,255,0.5)">skip the Meshtastic app</span>
+                </button>
+                
                 <!-- Quick reference -->
                 <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.1)">
                     <div style="font-size:10px;color:rgba(255,255,255,0.35)">
@@ -5378,7 +5903,7 @@ const PanelsModule = (function() {
      * Open traceroute modal for selecting target node
      */
     function openTracerouteModal(preselectedNodeId = null, preselectedNodeName = null) {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         if (!modalContainer) return;
         
         // Get available nodes
@@ -5414,11 +5939,11 @@ const PanelsModule = (function() {
         }).join('');
         
         modalContainer.innerHTML = `
-            <div class="modal-overlay" id="traceroute-modal">
-                <div class="modal" style="max-width:400px">
+            <div class="modal-backdrop" id="traceroute-modal">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:400px">
                     <div class="modal__header">
                         <h3 class="modal__title">🔍 Trace Route</h3>
-                        <button class="modal__close" id="close-traceroute-modal">&times;</button>
+                        <button class="modal__close" id="close-traceroute-modal" aria-label="Close dialog">&times;</button>
                     </div>
                     <div class="modal__content">
                         <div style="font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:12px">
@@ -5490,13 +6015,13 @@ const PanelsModule = (function() {
                 selectedNodeId = btn.dataset.nodeId;
                 selectedNodeName = btn.dataset.nodeName;
                 
-                const startBtn = document.getElementById('start-traceroute-btn');
+                const startBtn = domCache.get('start-traceroute-btn');
                 if (startBtn) startBtn.disabled = false;
             };
         });
         
         // Start traceroute
-        const startBtn = document.getElementById('start-traceroute-btn');
+        const startBtn = domCache.get('start-traceroute-btn');
         if (startBtn) {
             startBtn.onclick = async () => {
                 if (!selectedNodeId) return;
@@ -5583,7 +6108,7 @@ const PanelsModule = (function() {
      * Open Telemetry Export Modal
      */
     function openTelemetryExportModal() {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         if (!modalContainer) return;
         
         // Get export summary
@@ -5592,11 +6117,11 @@ const PanelsModule = (function() {
             : { nodesCount: 0, messagesCount: 0, traceroutesCount: 0, hasData: false };
         
         modalContainer.innerHTML = `
-            <div class="modal-overlay" id="export-modal">
-                <div class="modal" style="max-width:450px">
+            <div class="modal-backdrop" id="export-modal">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:450px">
                     <div class="modal__header">
                         <h3 class="modal__title">📊 Export Telemetry</h3>
-                        <button class="modal__close" id="close-export-modal">&times;</button>
+                        <button class="modal__close" id="close-export-modal" aria-label="Close dialog">&times;</button>
                     </div>
                     <div class="modal__content">
                         <div style="font-size:12px;color:rgba(255,255,255,0.6);margin-bottom:16px">
@@ -5759,7 +6284,7 @@ const PanelsModule = (function() {
      * Open Team QR Code Modal for sharing
      */
     function openTeamQRModal() {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         const qrData = typeof MeshtasticModule !== 'undefined'
             ? MeshtasticModule.generateTeamOnboardingQR()
@@ -5773,11 +6298,11 @@ const PanelsModule = (function() {
         const scenario = qrData.scenario || { icon: '⚙️', name: 'Custom' };
         
         modalContainer.innerHTML = `
-            <div class="modal-overlay" id="team-qr-modal">
-                <div class="modal" style="max-width:400px">
+            <div class="modal-backdrop" id="team-qr-modal">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:400px">
                     <div class="modal__header">
                         <h3 class="modal__title">📱 Team Onboarding QR</h3>
-                        <button class="modal__close" id="close-team-qr-modal">&times;</button>
+                        <button class="modal__close" id="close-team-qr-modal" aria-label="Close dialog">&times;</button>
                     </div>
                     <div class="modal__content">
                         <div style="text-align:center;margin-bottom:16px">
@@ -5829,6 +6354,8 @@ const PanelsModule = (function() {
         document.getElementById('copy-team-url-btn').onclick = () => {
             navigator.clipboard.writeText(qrData.url).then(() => {
                 ModalsModule.showToast('URL copied to clipboard', 'success');
+            }).catch(() => {
+                ModalsModule.showToast('Could not copy URL', 'error');
             });
         };
         
@@ -5848,16 +6375,724 @@ const PanelsModule = (function() {
             } else {
                 navigator.clipboard.writeText(qrData.url).then(() => {
                     ModalsModule.showToast('URL copied (sharing not supported)', 'info');
+                }).catch(() => {
+                    ModalsModule.showToast('Could not copy URL', 'error');
                 });
             }
         };
+    }
+    
+    // =========================================================================
+    // NEW DEVICE SETUP MODAL
+    // =========================================================================
+    
+    /**
+     * Full device setup for brand-new pre-flashed Meshtastic devices.
+     * Eliminates the need to download the Meshtastic app.
+     * Walks through: Connect → Identity → Region → Radio → Done
+     */
+    function openDeviceSetupModal() {
+        const apiSupport = typeof MeshtasticModule !== 'undefined'
+            ? MeshtasticModule.checkApiSupport()
+            : { bluetooth: false, serial: false };
+        
+        const regionOptions = typeof MeshtasticModule !== 'undefined'
+            ? MeshtasticModule.getRegionOptions()
+            : [];
+        
+        const modemOptions = typeof MeshtasticModule !== 'undefined'
+            ? MeshtasticModule.getModemPresetOptions()
+            : [];
+        
+        // State for the wizard
+        let setupState = {
+            connected: false,
+            connectionType: null,
+            deviceConfig: null,
+            firmwareVersion: null,
+            hwModel: null,
+            longName: '',
+            shortName: '',
+            region: 1, // US default
+            modemPreset: 0, // LONG_FAST default
+            txPower: 0, // device default
+            hopLimit: 3,
+            positionBroadcastSecs: 120,
+            gpsEnabled: true
+        };
+        
+        modalContainer.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:520px">
+                    <div class="modal__header">
+                        <h3 class="modal__title">📱 New Device Setup</h3>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
+                    </div>
+                    <div class="modal__body" style="max-height:75vh;overflow-y:auto">
+                        
+                        <!-- Step Progress -->
+                        <div style="display:flex;justify-content:center;gap:4px;margin-bottom:20px">
+                            <div class="setup-step active" data-setup-step="1">1</div>
+                            <div style="width:24px;height:2px;background:rgba(255,255,255,0.1);align-self:center" class="setup-step-line" data-line="1"></div>
+                            <div class="setup-step" data-setup-step="2">2</div>
+                            <div style="width:24px;height:2px;background:rgba(255,255,255,0.1);align-self:center" class="setup-step-line" data-line="2"></div>
+                            <div class="setup-step" data-setup-step="3">3</div>
+                            <div style="width:24px;height:2px;background:rgba(255,255,255,0.1);align-self:center" class="setup-step-line" data-line="3"></div>
+                            <div class="setup-step" data-setup-step="4">4</div>
+                            <div style="width:24px;height:2px;background:rgba(255,255,255,0.1);align-self:center" class="setup-step-line" data-line="4"></div>
+                            <div class="setup-step" data-setup-step="5">5</div>
+                        </div>
+                        
+                        <!-- ===== STEP 1: CONNECT ===== -->
+                        <div id="setup-step-1" class="setup-panel">
+                            <div style="text-align:center;margin-bottom:20px">
+                                <span style="font-size:48px">📡</span>
+                                <h4 style="margin:12px 0 4px">Connect Your Device</h4>
+                                <p style="font-size:12px;color:rgba(255,255,255,0.5)">
+                                    Power on your Meshtastic device and connect via Bluetooth or USB.
+                                    No Meshtastic app required — GridDown configures the device directly.
+                                </p>
+                            </div>
+                            
+                            <div style="display:flex;gap:12px;margin-bottom:16px">
+                                <button class="btn btn--primary" id="setup-connect-ble" style="flex:1;padding:20px" ${!apiSupport.bluetooth ? 'disabled title="Bluetooth not supported in this browser"' : ''}>
+                                    <div style="font-size:28px;margin-bottom:8px">📶</div>
+                                    <div style="font-size:13px;font-weight:600">Bluetooth</div>
+                                    <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:4px">All Meshtastic devices</div>
+                                </button>
+                                <button class="btn btn--secondary" id="setup-connect-serial" style="flex:1;padding:20px" ${!apiSupport.serial ? 'disabled title="Web Serial not supported in this browser"' : ''}>
+                                    <div style="font-size:28px;margin-bottom:8px">🔌</div>
+                                    <div style="font-size:13px;font-weight:600">USB Cable</div>
+                                    <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:4px">T-Beam, Heltec, Station G2</div>
+                                </button>
+                            </div>
+                            
+                            <div id="setup-connect-status" style="text-align:center;padding:16px;background:rgba(255,255,255,0.03);border-radius:10px;margin-bottom:16px">
+                                <div style="font-size:12px;color:rgba(255,255,255,0.4)">
+                                    Make sure your device is powered on and in range
+                                </div>
+                            </div>
+                            
+                            <div style="padding:10px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.15);border-radius:8px;font-size:11px;color:rgba(255,255,255,0.6)">
+                                <strong style="color:#60a5fa">💡 Tip:</strong> If your device has never been configured, the Bluetooth name
+                                will be "Meshtastic_XXXX". For USB, make sure the cable supports data (not just charging).
+                            </div>
+                        </div>
+                        
+                        <!-- ===== STEP 2: IDENTITY ===== -->
+                        <div id="setup-step-2" class="setup-panel" style="display:none">
+                            <div style="text-align:center;margin-bottom:16px">
+                                <span style="font-size:48px">👤</span>
+                                <h4 style="margin:12px 0 4px">Device Identity</h4>
+                                <p style="font-size:12px;color:rgba(255,255,255,0.5)">
+                                    Set the name that other mesh users will see for this device
+                                </p>
+                            </div>
+                            
+                            <!-- Device info card -->
+                            <div id="setup-device-info" style="padding:12px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.15);border-radius:10px;margin-bottom:16px">
+                                <div style="display:flex;align-items:center;gap:10px">
+                                    <div style="font-size:24px">✅</div>
+                                    <div>
+                                        <div style="font-size:13px;font-weight:600;color:#22c55e">Device Connected</div>
+                                        <div id="setup-device-details" style="font-size:11px;color:rgba(255,255,255,0.5)">Reading device info...</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom:14px">
+                                <label style="font-size:11px;color:rgba(255,255,255,0.4);display:block;margin-bottom:4px">DEVICE NAME</label>
+                                <input type="text" id="setup-longname" placeholder="e.g., John's Radio" maxlength="36"
+                                    style="width:100%;padding:12px;font-size:14px" aria-label="Device long name">
+                                <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px">Visible to other mesh users (up to 36 characters)</div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom:20px">
+                                <label style="font-size:11px;color:rgba(255,255,255,0.4);display:block;margin-bottom:4px">SHORT ID (4 characters)</label>
+                                <input type="text" id="setup-shortname" placeholder="e.g., JOHN" maxlength="4"
+                                    style="width:100%;padding:12px;font-size:14px;text-transform:uppercase;letter-spacing:2px;font-family:monospace" aria-label="Device short name">
+                                <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px">Shown on node list and map markers</div>
+                            </div>
+                            
+                            <div style="display:flex;gap:8px">
+                                <button class="btn btn--secondary" id="setup-back-2" style="flex:1">← Back</button>
+                                <button class="btn btn--primary" id="setup-next-2" style="flex:2">Continue →</button>
+                            </div>
+                        </div>
+                        
+                        <!-- ===== STEP 3: REGION ===== -->
+                        <div id="setup-step-3" class="setup-panel" style="display:none">
+                            <div style="text-align:center;margin-bottom:16px">
+                                <span style="font-size:48px">🌍</span>
+                                <h4 style="margin:12px 0 4px">Select Region</h4>
+                                <p style="font-size:12px;color:rgba(255,255,255,0.5)">
+                                    This sets the radio frequency for legal operation in your area
+                                </p>
+                            </div>
+                            
+                            <div style="padding:10px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.15);border-radius:8px;margin-bottom:16px;font-size:11px;color:#fca5a5">
+                                <strong>⚠️ Important:</strong> Operating on the wrong frequency may violate local radio regulations.
+                                Select the region that matches your physical location.
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom:20px">
+                                <select id="setup-region" style="width:100%;padding:14px;font-size:14px" aria-label="Radio frequency region">
+                                    ${regionOptions.map(r => `
+                                        <option value="${r.value}" ${r.value === 1 ? 'selected' : ''}>${r.label}</option>
+                                    `).join('')}
+                                </select>
+                            </div>
+                            
+                            <div id="setup-region-info" style="padding:12px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:20px">
+                                <div style="font-size:11px;color:rgba(255,255,255,0.4)">
+                                    <div style="margin-bottom:4px"><strong>Common regions:</strong></div>
+                                    <div>🇺🇸 US — 915 MHz ISM band</div>
+                                    <div>🇪🇺 EU 868 — 868 MHz SRD band</div>
+                                    <div>🇦🇺 ANZ — 915 MHz (Australia/NZ)</div>
+                                    <div>🌐 LoRa 2.4 GHz — Worldwide, shorter range</div>
+                                </div>
+                            </div>
+                            
+                            <div style="display:flex;gap:8px">
+                                <button class="btn btn--secondary" id="setup-back-3" style="flex:1">← Back</button>
+                                <button class="btn btn--primary" id="setup-next-3" style="flex:2">Continue →</button>
+                            </div>
+                        </div>
+                        
+                        <!-- ===== STEP 4: RADIO SETTINGS ===== -->
+                        <div id="setup-step-4" class="setup-panel" style="display:none">
+                            <div style="text-align:center;margin-bottom:16px">
+                                <span style="font-size:48px">📻</span>
+                                <h4 style="margin:12px 0 4px">Radio Settings</h4>
+                                <p style="font-size:12px;color:rgba(255,255,255,0.5)">
+                                    Configure range vs speed tradeoff and power output
+                                </p>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom:16px">
+                                <label style="font-size:11px;color:rgba(255,255,255,0.4);display:block;margin-bottom:4px">MODEM PRESET</label>
+                                <select id="setup-modem" style="width:100%;padding:12px;font-size:13px" aria-label="Modem preset">
+                                    ${modemOptions.map(m => `
+                                        <option value="${m.value}" ${m.value === 0 ? 'selected' : ''}>
+                                            ${m.label}
+                                        </option>
+                                    `).join('')}
+                                </select>
+                                <div id="setup-modem-desc" style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:4px">
+                                    Default — Good balance of range and speed
+                                </div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom:16px">
+                                <label style="font-size:11px;color:rgba(255,255,255,0.4);display:block;margin-bottom:4px">
+                                    TX POWER — <span id="setup-txpower-label">Device Default</span>
+                                </label>
+                                <input type="range" id="setup-txpower" min="0" max="30" value="0" style="width:100%" aria-label="Transmit power">
+                                <div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,0.3)">
+                                    <span>Default</span>
+                                    <span>Max (30 dBm)</span>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom:16px">
+                                <label style="font-size:11px;color:rgba(255,255,255,0.4);display:block;margin-bottom:4px">
+                                    HOP LIMIT — <span id="setup-hoplimit-label">3 hops</span>
+                                </label>
+                                <input type="range" id="setup-hoplimit" min="1" max="7" value="3" style="width:100%" aria-label="Hop limit">
+                                <div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,0.3)">
+                                    <span>1 (direct)</span>
+                                    <span>7 (max relay)</span>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-bottom:20px">
+                                <label style="font-size:11px;color:rgba(255,255,255,0.4);display:block;margin-bottom:4px">POSITION BROADCAST</label>
+                                <select id="setup-pos-interval" style="width:100%;padding:10px;font-size:12px" aria-label="Position broadcast interval">
+                                    <option value="60">Every 1 minute (active tracking)</option>
+                                    <option value="120" selected>Every 2 minutes (recommended)</option>
+                                    <option value="300">Every 5 minutes (battery saver)</option>
+                                    <option value="900">Every 15 minutes (minimal)</option>
+                                </select>
+                            </div>
+                            
+                            <div style="display:flex;gap:8px">
+                                <button class="btn btn--secondary" id="setup-back-4" style="flex:1">← Back</button>
+                                <button class="btn btn--primary" id="setup-next-4" style="flex:2">Review & Apply →</button>
+                            </div>
+                        </div>
+                        
+                        <!-- ===== STEP 5: REVIEW & APPLY ===== -->
+                        <div id="setup-step-5" class="setup-panel" style="display:none">
+                            <div style="text-align:center;margin-bottom:16px">
+                                <span style="font-size:48px">✅</span>
+                                <h4 style="margin:12px 0 4px">Review Configuration</h4>
+                                <p style="font-size:12px;color:rgba(255,255,255,0.5)">
+                                    Confirm settings before writing to device
+                                </p>
+                            </div>
+                            
+                            <div id="setup-review-card" style="padding:16px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:10px;margin-bottom:16px">
+                                <!-- Filled dynamically -->
+                            </div>
+                            
+                            <div id="setup-apply-status" style="display:none;text-align:center;padding:16px;margin-bottom:16px">
+                            </div>
+                            
+                            <div id="setup-apply-actions" style="display:flex;gap:8px">
+                                <button class="btn btn--secondary" id="setup-back-5" style="flex:1">← Back</button>
+                                <button class="btn btn--primary" id="setup-apply-btn" style="flex:2">
+                                    ⚡ Write to Device
+                                </button>
+                            </div>
+                            
+                            <div id="setup-done-actions" style="display:none;gap:8px">
+                                <button class="btn btn--primary" id="setup-done-btn" style="width:100%">
+                                    ✓ Done — Start Using GridDown
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Add styles
+        const style = document.createElement('style');
+        style.id = 'device-setup-styles';
+        style.textContent = `
+            .setup-step { width:30px; height:30px; border-radius:50%; background:rgba(255,255,255,0.08);
+                display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600;
+                color:rgba(255,255,255,0.3); transition:all 0.2s; }
+            .setup-step.active { background:#f97316; color:white; }
+            .setup-step.complete { background:#22c55e; color:white; }
+            .setup-step-line.complete { background:#22c55e !important; }
+        `;
+        if (!document.getElementById('device-setup-styles')) {
+            document.head.appendChild(style);
+        }
+        
+        const closeModal = () => {
+            modalContainer.innerHTML = '';
+            renderTeam();
+        };
+        
+        let currentStep = 1;
+        
+        function showStep(step) {
+            document.querySelectorAll('.setup-panel').forEach(p => p.style.display = 'none');
+            const panel = document.getElementById(`setup-step-${step}`);
+            if (panel) panel.style.display = 'block';
+            
+            document.querySelectorAll('.setup-step').forEach(s => {
+                const sNum = parseInt(s.dataset.setupStep);
+                s.classList.remove('active', 'complete');
+                if (sNum < step) s.classList.add('complete');
+                if (sNum === step) s.classList.add('active');
+            });
+            document.querySelectorAll('.setup-step-line').forEach(l => {
+                const lNum = parseInt(l.dataset.line);
+                l.classList.toggle('complete', lNum < step);
+            });
+            currentStep = step;
+        }
+        
+        function updateReviewCard() {
+            const modemNames = {
+                0: 'Long Fast (default)', 1: 'Long Slow', 2: 'Very Long Slow',
+                3: 'Medium Slow', 4: 'Medium Fast', 5: 'Short Slow',
+                6: 'Short Fast', 7: 'Long Moderate'
+            };
+            const regionName = regionOptions.find(r => r.value === setupState.region)?.label || 'Unknown';
+            const modemName = modemNames[setupState.modemPreset] || 'Unknown';
+            const posLabel = { 60: '1 min', 120: '2 min', 300: '5 min', 900: '15 min' }[setupState.positionBroadcastSecs] || setupState.positionBroadcastSecs + 's';
+            
+            const card = document.getElementById('setup-review-card');
+            if (!card) return;
+            card.innerHTML = `
+                <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:12px">
+                    <span style="color:rgba(255,255,255,0.4)">Name</span>
+                    <span style="font-weight:600">${Helpers.escapeHtml(setupState.longName)} (${Helpers.escapeHtml(setupState.shortName)})</span>
+                    
+                    <span style="color:rgba(255,255,255,0.4)">Region</span>
+                    <span>${Helpers.escapeHtml(regionName)}</span>
+                    
+                    <span style="color:rgba(255,255,255,0.4)">Modem</span>
+                    <span>${modemName}</span>
+                    
+                    <span style="color:rgba(255,255,255,0.4)">TX Power</span>
+                    <span>${setupState.txPower === 0 ? 'Device Default' : setupState.txPower + ' dBm'}</span>
+                    
+                    <span style="color:rgba(255,255,255,0.4)">Hop Limit</span>
+                    <span>${setupState.hopLimit} hops</span>
+                    
+                    <span style="color:rgba(255,255,255,0.4)">Position</span>
+                    <span>Every ${posLabel}</span>
+                    
+                    ${setupState.firmwareVersion ? `
+                        <span style="color:rgba(255,255,255,0.4)">Firmware</span>
+                        <span>${setupState.firmwareVersion}${setupState.hwModel ? ' • ' + setupState.hwModel : ''}</span>
+                    ` : ''}
+                </div>
+            `;
+        }
+        
+        async function connectDevice(type) {
+            const statusEl = document.getElementById('setup-connect-status');
+            statusEl.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+                    <div style="width:16px;height:16px;border:2px solid #f97316;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+                    <span style="color:#f97316;font-size:13px">Connecting via ${type === 'ble' ? 'Bluetooth' : 'USB'}...</span>
+                </div>
+            `;
+            
+            try {
+                if (type === 'ble') {
+                    await MeshtasticModule.connectBluetooth();
+                } else {
+                    await MeshtasticModule.connectSerial();
+                }
+                
+                setupState.connected = true;
+                setupState.connectionType = type;
+                
+                // Read current device config
+                statusEl.innerHTML = `
+                    <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+                        <div style="width:16px;height:16px;border:2px solid #22c55e;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+                        <span style="color:#22c55e;font-size:13px">Connected! Reading device configuration...</span>
+                    </div>
+                `;
+                
+                // Wait for config to arrive
+                await new Promise(r => setTimeout(r, 1500));
+                
+                const config = typeof MeshtasticModule !== 'undefined'
+                    ? MeshtasticModule.getDeviceConfig() : {};
+                const connState = typeof MeshtasticModule !== 'undefined'
+                    ? MeshtasticModule.getConnectionState() : {};
+                
+                setupState.firmwareVersion = config.firmwareVersion || null;
+                setupState.hwModel = config.hwModelName || null;
+                
+                // Pre-fill from device if it has existing config
+                if (config.region && config.region !== 0) setupState.region = config.region;
+                if (config.modemPreset !== undefined) setupState.modemPreset = config.modemPreset;
+                if (config.txPower) setupState.txPower = config.txPower;
+                if (config.hopLimit) setupState.hopLimit = config.hopLimit;
+                if (config.positionBroadcastSecs) setupState.positionBroadcastSecs = config.positionBroadcastSecs;
+                
+                // Pre-fill name from existing device or GridDown state
+                if (connState.nodeName && connState.nodeName !== 'GridDown User') {
+                    setupState.longName = connState.nodeName;
+                    setupState.shortName = connState.shortName || '';
+                }
+                
+                // Update device info card on step 2
+                const detailsEl = document.getElementById('setup-device-details');
+                if (detailsEl) {
+                    detailsEl.textContent = [
+                        config.firmwareVersion ? `Firmware ${config.firmwareVersion}` : null,
+                        config.hwModelName || null,
+                        `via ${type === 'ble' ? 'Bluetooth' : 'USB'}`
+                    ].filter(Boolean).join(' • ');
+                }
+                
+                // Pre-fill form fields
+                const longNameInput = document.getElementById('setup-longname');
+                const shortNameInput = document.getElementById('setup-shortname');
+                if (longNameInput && setupState.longName) longNameInput.value = setupState.longName;
+                if (shortNameInput && setupState.shortName) shortNameInput.value = setupState.shortName;
+                
+                const regionSelect = document.getElementById('setup-region');
+                if (regionSelect && setupState.region) regionSelect.value = setupState.region;
+                
+                const modemSelect = document.getElementById('setup-modem');
+                if (modemSelect) modemSelect.value = setupState.modemPreset;
+                
+                const txSlider = document.getElementById('setup-txpower');
+                if (txSlider) txSlider.value = setupState.txPower;
+                
+                const hopSlider = document.getElementById('setup-hoplimit');
+                if (hopSlider) hopSlider.value = setupState.hopLimit;
+                
+                const posSelect = document.getElementById('setup-pos-interval');
+                if (posSelect) posSelect.value = setupState.positionBroadcastSecs;
+                
+                showStep(2);
+                
+            } catch (err) {
+                statusEl.innerHTML = `
+                    <div style="padding:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:8px">
+                        <div style="font-size:13px;font-weight:600;color:#ef4444;margin-bottom:4px">Connection Failed</div>
+                        <div style="font-size:11px;color:rgba(255,255,255,0.5)">${Helpers.escapeHtml(err.message)}</div>
+                        <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:8px">
+                            Make sure the device is powered on, not connected to another app, and in range.
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        async function applyConfig() {
+            const statusEl = document.getElementById('setup-apply-status');
+            const actionsEl = document.getElementById('setup-apply-actions');
+            const doneEl = document.getElementById('setup-done-actions');
+            
+            statusEl.style.display = 'block';
+            actionsEl.style.display = 'none';
+            
+            // Show single "writing" status — the device WILL reboot mid-write
+            // when LoRa config changes are committed. This is normal firmware behavior.
+            // We treat BLE disconnect during write as success (= device is rebooting to apply).
+            statusEl.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+                    <div style="width:16px;height:16px;border:2px solid #f97316;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite"></div>
+                    <span style="color:#f97316;font-size:12px">Writing configuration to device...</span>
+                </div>
+                <div style="margin-top:8px;height:4px;background:rgba(255,255,255,0.1);border-radius:2px;overflow:hidden">
+                    <div style="height:100%;width:10%;background:#f97316;border-radius:2px;transition:width 0.3s"></div>
+                </div>
+                <div style="font-size:10px;color:rgba(255,255,255,0.3);text-align:center;margin-top:8px">
+                    Device will reboot automatically to apply radio changes
+                </div>
+            `;
+            
+            // Set local GridDown name (always succeeds, no device write)
+            await MeshtasticModule.setUserName(setupState.longName, setupState.shortName);
+            
+            let configWritten = false;
+            
+            // Build config payloads
+            const posConfig = {};
+            if (setupState.positionBroadcastSecs) posConfig.positionBroadcastSecs = setupState.positionBroadcastSecs;
+            posConfig.gpsUpdateInterval = Math.max(30, Math.floor(setupState.positionBroadcastSecs / 2));
+            if (setupState.gpsEnabled !== undefined) posConfig.gpsEnabled = setupState.gpsEnabled;
+            
+            const loraValue = {};
+            if (setupState.region !== undefined) loraValue.region = setupState.region;
+            if (setupState.modemPreset !== undefined) {
+                loraValue.modemPreset = setupState.modemPreset;
+                loraValue.usePreset = true;
+            }
+            if (setupState.txPower !== undefined) loraValue.txPower = setupState.txPower;
+            if (setupState.hopLimit !== undefined) loraValue.hopLimit = setupState.hopLimit;
+            
+            try {
+                if (typeof MeshtasticClient !== 'undefined' && MeshtasticClient.batchWriteConfigs) {
+                    // === Single call through public API ===
+                    // batchWriteConfigs handles internally:
+                    //   beginEditSettings → setOwner → setConfig(position)
+                    //   → setConfig(lora) → commitEditSettings
+                    // All in ONE edit session via the internal device reference.
+                    // commitEditSettings will trigger auto-reboot on RAK and most
+                    // Meshtastic firmwares when LoRa changes are detected.
+                    // BLE disconnect = device is rebooting = success.
+                    await MeshtasticClient.batchWriteConfigs(
+                        [
+                            { payloadVariant: { case: 'position', value: posConfig } },
+                            { payloadVariant: { case: 'lora', value: loraValue } }
+                        ],
+                        500, // delay between writes
+                        {    // ownerInfo — written inside the same edit session
+                            longName: setupState.longName,
+                            shortName: setupState.shortName || setupState.longName.substring(0, 4).toUpperCase()
+                        }
+                    );
+                    
+                    // If we reach here, firmware didn't auto-reboot. Trigger manually.
+                    try {
+                        await MeshtasticClient.rebootDevice(2);
+                    } catch (rebootErr) {
+                        // BLE disconnect during reboot = expected
+                        console.log('[DeviceSetup] Reboot disconnect (expected):', rebootErr.message);
+                    }
+                    
+                    configWritten = true;
+                    
+                } else {
+                    // Fallback: no batchWriteConfigs — use individual calls with try/catch each
+                    if (typeof MeshtasticClient !== 'undefined' && MeshtasticClient.setOwner) {
+                        try { await MeshtasticClient.setOwner(setupState.longName, setupState.shortName); } catch (e) { /* non-fatal */ }
+                        await new Promise(r => setTimeout(r, 500));
+                    }
+                    if (typeof MeshtasticClient !== 'undefined' && MeshtasticClient.setPositionConfig) {
+                        try {
+                            await MeshtasticClient.setPositionConfig(
+                                setupState.positionBroadcastSecs,
+                                Math.max(30, Math.floor(setupState.positionBroadcastSecs / 2)),
+                                setupState.gpsEnabled
+                            );
+                        } catch (e) { /* may disconnect */ }
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+                    try {
+                        await MeshtasticModule.setRadioConfig({
+                            region: setupState.region,
+                            modemPreset: setupState.modemPreset,
+                            txPower: setupState.txPower,
+                            hopLimit: setupState.hopLimit
+                        });
+                    } catch (e) { /* will likely disconnect on reboot */ }
+                    configWritten = true;
+                }
+                
+            } catch (err) {
+                // BLE disconnect during config write = the device rebooted to apply LoRa changes.
+                // This is EXPECTED and means the config was written successfully.
+                const msg = (err.message || '').toLowerCase();
+                if (msg.includes('disconnect') || msg.includes('gatt') || msg.includes('bluetooth') ||
+                    msg.includes('not connected') || msg.includes('network error') ||
+                    msg.includes('connection') || msg.includes('abort')) {
+                    console.log('[DeviceSetup] BLE disconnected during config write — device is rebooting (expected)');
+                    configWritten = true;
+                } else {
+                    console.error('[DeviceSetup] Unexpected config write error:', err);
+                }
+            }
+            
+            // Update GridDown local state
+            if (typeof MeshtasticModule !== 'undefined') {
+                const dc = MeshtasticModule.getDeviceConfig();
+                if (dc) {
+                    dc.region = setupState.region;
+                    dc.modemPreset = setupState.modemPreset;
+                    dc.txPower = setupState.txPower;
+                    dc.hopLimit = setupState.hopLimit;
+                    dc.positionBroadcastSecs = setupState.positionBroadcastSecs;
+                }
+            }
+            
+            if (configWritten) {
+                statusEl.innerHTML = `
+                    <div style="padding:16px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:10px">
+                        <div style="font-size:32px;text-align:center;margin-bottom:8px">🎉</div>
+                        <div style="font-size:14px;font-weight:600;color:#22c55e;text-align:center;margin-bottom:4px">
+                            Device Configured Successfully!
+                        </div>
+                        <div style="font-size:11px;color:rgba(255,255,255,0.5);text-align:center">
+                            Your device is rebooting to apply radio configuration.
+                            It will rejoin the mesh automatically in a few seconds.
+                        </div>
+                    </div>
+                `;
+                doneEl.style.display = 'flex';
+            } else {
+                statusEl.innerHTML = `
+                    <div style="padding:16px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:10px">
+                        <div style="font-size:14px;font-weight:600;color:#ef4444;text-align:center;margin-bottom:4px">
+                            Configuration failed
+                        </div>
+                        <div style="font-size:11px;color:rgba(255,255,255,0.5);text-align:center">
+                            Could not write settings to device. Check the console for details.
+                        </div>
+                    </div>
+                `;
+                doneEl.style.display = 'flex';
+            }
+        }
+        
+        // === EVENT HANDLERS ===
+        
+        document.getElementById('modal-close').onclick = closeModal;
+        document.getElementById('modal-backdrop').onclick = (e) => {
+            if (e.target.id === 'modal-backdrop') closeModal();
+        };
+        
+        // Step 1: Connect
+        document.getElementById('setup-connect-ble').onclick = () => connectDevice('ble');
+        document.getElementById('setup-connect-serial').onclick = () => connectDevice('serial');
+        
+        // Step 2: Identity
+        document.getElementById('setup-back-2').onclick = () => showStep(1);
+        document.getElementById('setup-next-2').onclick = () => {
+            const longName = document.getElementById('setup-longname').value.trim();
+            const shortName = document.getElementById('setup-shortname').value.trim().toUpperCase();
+            
+            if (!longName) {
+                ModalsModule.showToast('Please enter a device name', 'error');
+                return;
+            }
+            
+            setupState.longName = longName;
+            setupState.shortName = shortName || longName.substring(0, 4).toUpperCase();
+            showStep(3);
+        };
+        
+        // Auto-fill short name from long name
+        document.getElementById('setup-longname').addEventListener('input', (e) => {
+            const shortInput = document.getElementById('setup-shortname');
+            if (!shortInput.value || shortInput.dataset.autoFilled === 'true') {
+                shortInput.value = e.target.value.substring(0, 4).toUpperCase();
+                shortInput.dataset.autoFilled = 'true';
+            }
+        });
+        document.getElementById('setup-shortname').addEventListener('input', () => {
+            document.getElementById('setup-shortname').dataset.autoFilled = 'false';
+        });
+        
+        // Step 3: Region
+        document.getElementById('setup-back-3').onclick = () => showStep(2);
+        document.getElementById('setup-next-3').onclick = () => {
+            setupState.region = parseInt(document.getElementById('setup-region').value);
+            showStep(4);
+        };
+        
+        // Step 4: Radio
+        document.getElementById('setup-back-4').onclick = () => showStep(3);
+        
+        document.getElementById('setup-modem').onchange = (e) => {
+            setupState.modemPreset = parseInt(e.target.value);
+            const descriptions = {
+                0: 'Default — Good balance of range and speed',
+                1: 'Maximum range, slower message delivery',
+                2: 'Extreme range, very slow — best for remote areas',
+                3: 'Balanced range and speed',
+                4: 'Faster messages, reduced range',
+                5: 'Dense areas with many nodes',
+                6: 'High throughput, shortest range',
+                7: 'Long range with better speed than Long Slow'
+            };
+            const descEl = document.getElementById('setup-modem-desc');
+            if (descEl) descEl.textContent = descriptions[setupState.modemPreset] || '';
+        };
+        
+        document.getElementById('setup-txpower').oninput = (e) => {
+            setupState.txPower = parseInt(e.target.value);
+            const label = document.getElementById('setup-txpower-label');
+            if (label) label.textContent = setupState.txPower === 0 ? 'Device Default' : `${setupState.txPower} dBm`;
+        };
+        
+        document.getElementById('setup-hoplimit').oninput = (e) => {
+            setupState.hopLimit = parseInt(e.target.value);
+            const label = document.getElementById('setup-hoplimit-label');
+            if (label) label.textContent = `${setupState.hopLimit} hop${setupState.hopLimit !== 1 ? 's' : ''}`;
+        };
+        
+        document.getElementById('setup-next-4').onclick = () => {
+            setupState.modemPreset = parseInt(document.getElementById('setup-modem').value);
+            setupState.txPower = parseInt(document.getElementById('setup-txpower').value);
+            setupState.hopLimit = parseInt(document.getElementById('setup-hoplimit').value);
+            setupState.positionBroadcastSecs = parseInt(document.getElementById('setup-pos-interval').value);
+            updateReviewCard();
+            showStep(5);
+        };
+        
+        // Step 5: Review & Apply
+        document.getElementById('setup-back-5').onclick = () => showStep(4);
+        document.getElementById('setup-apply-btn').onclick = () => applyConfig();
+        
+        // Done button
+        const doneEl = document.getElementById('setup-done-btn');
+        if (doneEl) {
+            doneEl.onclick = closeModal;
+        }
     }
     
     /**
      * Open First-Run Wizard Modal
      */
     function openMeshWizardModal() {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         const scenarios = typeof MeshtasticModule !== 'undefined'
             ? MeshtasticModule.getScenarioPresets()
@@ -5872,11 +7107,11 @@ const PanelsModule = (function() {
             : { bluetooth: false, serial: false };
         
         modalContainer.innerHTML = `
-            <div class="modal-overlay" id="mesh-wizard-modal">
-                <div class="modal" style="max-width:500px">
+            <div class="modal-backdrop" id="mesh-wizard-modal">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:500px">
                     <div class="modal__header">
                         <h3 class="modal__title">📡 Meshtastic Quick Setup</h3>
-                        <button class="modal__close" id="close-wizard-modal">&times;</button>
+                        <button class="modal__close" id="close-wizard-modal" aria-label="Close dialog">&times;</button>
                     </div>
                     <div class="modal__content">
                         <!-- Step indicator -->
@@ -6043,26 +7278,26 @@ const PanelsModule = (function() {
         document.getElementById('wizard-skip-3').onclick = () => showStep(4);
         
         document.getElementById('wizard-connect-ble').onclick = async () => {
-            const statusEl = document.getElementById('wizard-connection-status');
+            const statusEl = domCache.get('wizard-connection-status');
             statusEl.innerHTML = '<span style="color:#f59e0b">Connecting...</span>';
             try {
                 await MeshtasticModule.connectBluetooth();
                 statusEl.innerHTML = '<span style="color:#22c55e">✓ Connected!</span>';
                 setTimeout(() => showStep(4), 1000);
             } catch (e) {
-                statusEl.innerHTML = `<span style="color:#ef4444">Failed: ${e.message}</span>`;
+                statusEl.innerHTML = `<span style="color:#ef4444">Failed: ${Helpers.escapeHtml(e.message)}</span>`;
             }
         };
         
         document.getElementById('wizard-connect-serial').onclick = async () => {
-            const statusEl = document.getElementById('wizard-connection-status');
+            const statusEl = domCache.get('wizard-connection-status');
             statusEl.innerHTML = '<span style="color:#f59e0b">Connecting...</span>';
             try {
                 await MeshtasticModule.connectSerial();
                 statusEl.innerHTML = '<span style="color:#22c55e">✓ Connected!</span>';
                 setTimeout(() => showStep(4), 1000);
             } catch (e) {
-                statusEl.innerHTML = `<span style="color:#ef4444">Failed: ${e.message}</span>`;
+                statusEl.innerHTML = `<span style="color:#ef4444">Failed: ${Helpers.escapeHtml(e.message)}</span>`;
             }
         };
         
@@ -6096,7 +7331,7 @@ const PanelsModule = (function() {
      * Open Meshtastic Device Configuration Modal
      */
     function openMeshConfigModal() {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         // Get current config
         const config = typeof MeshtasticModule !== 'undefined' 
@@ -6123,13 +7358,13 @@ const PanelsModule = (function() {
             : [];
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:500px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:500px;display:flex;flex-direction:column;max-height:85vh">
                     <div class="modal__header">
                         <h3 class="modal__title">⚙️ Meshtastic Configuration</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
-                    <div class="modal__body" style="max-height:70vh;overflow-y:auto">
+                    <div class="modal__body" style="flex:1;min-height:0;overflow-y:auto;padding:16px">
                         
                         <!-- Firmware Status -->
                         <div style="padding:12px;background:${firmwareStatus.status === 'current' ? 'rgba(34,197,94,0.1)' : firmwareStatus.status === 'outdated' ? 'rgba(239,68,68,0.1)' : 'rgba(249,115,22,0.1)'};border:1px solid ${firmwareStatus.color || 'rgba(255,255,255,0.1)'}44;border-radius:10px;margin-bottom:16px">
@@ -6250,6 +7485,29 @@ const PanelsModule = (function() {
                             </div>
                         ` : ''}
                         
+                        <!-- Reset / Danger Zone -->
+                        <div class="section-label" style="margin-top:24px;color:#ef4444">⚠️ Reset</div>
+                        <div style="padding:12px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);border-radius:10px">
+                            <div style="display:flex;gap:8px;align-items:stretch">
+                                <div style="flex:1">
+                                    <button class="btn btn--secondary" id="mesh-reset-app-btn" style="width:100%;font-size:12px;border-color:rgba(239,68,68,0.3);color:#f87171">
+                                        🗑️ Reset App Data
+                                    </button>
+                                    <div style="font-size:9px;color:rgba(255,255,255,0.35);margin-top:4px;text-align:center">
+                                        Clears messages, keys, channels
+                                    </div>
+                                </div>
+                                <div style="flex:1">
+                                    <button class="btn btn--secondary" id="mesh-factory-reset-btn" style="width:100%;font-size:12px;border-color:rgba(239,68,68,0.3);color:#f87171" ${!(typeof MeshtasticModule !== 'undefined' && MeshtasticModule.isConnected()) ? 'disabled title="Connect to a device first"' : ''}>
+                                        🔄 Factory Reset Device
+                                    </button>
+                                    <div style="font-size:9px;color:rgba(255,255,255,0.35);margin-top:4px;text-align:center">
+                                        Erases all device settings
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
                     </div>
                     <div class="modal__footer">
                         <button class="btn btn--secondary" id="modal-cancel">Cancel</button>
@@ -6261,14 +7519,18 @@ const PanelsModule = (function() {
         
         const closeModal = () => { modalContainer.innerHTML = ''; };
         
-        // Close handlers
-        document.getElementById('modal-close').onclick = closeModal;
-        document.getElementById('modal-cancel').onclick = closeModal;
-        document.getElementById('modal-backdrop').onclick = (e) => {
+        // Close handlers — use getElementById directly for reliability
+        const closeBtn = document.getElementById('modal-close');
+        const cancelBtn = document.getElementById('modal-cancel');
+        const backdropEl = document.getElementById('modal-backdrop');
+        
+        if (closeBtn) closeBtn.onclick = closeModal;
+        if (cancelBtn) cancelBtn.onclick = closeModal;
+        if (backdropEl) backdropEl.onclick = (e) => {
             if (e.target.id === 'modal-backdrop') closeModal();
         };
         
-        // Save config
+        // Save config — always close modal afterward
         document.getElementById('modal-save-config').onclick = async () => {
             try {
                 const region = parseInt(document.getElementById('mesh-config-region').value);
@@ -6276,18 +7538,15 @@ const PanelsModule = (function() {
                 const txPower = parseInt(document.getElementById('mesh-config-txpower').value);
                 const hopLimit = parseInt(document.getElementById('mesh-config-hoplimit').value);
                 
-                // Apply config
-                await MeshtasticModule.setRegion(region);
-                await MeshtasticModule.setModemPreset(modemPreset);
-                await MeshtasticModule.setTxPower(txPower);
-                await MeshtasticModule.setHopLimit(hopLimit);
+                // Single batch write + reboot (instead of 4 individual writes)
+                await MeshtasticModule.setRadioConfig({ region, modemPreset, txPower, hopLimit });
                 
-                ModalsModule.showToast('Configuration saved', 'success');
-                closeModal();
-                renderTeam();
+                ModalsModule.showToast('Configuration saved — device rebooting to apply radio changes', 'success');
             } catch (err) {
                 ModalsModule.showToast('Failed to save: ' + err.message, 'error');
             }
+            closeModal();
+            renderTeam();
         };
         
         // Export channel URL
@@ -6298,17 +7557,29 @@ const PanelsModule = (function() {
                 return;
             }
             const urls = MeshtasticModule.exportChannelAsUrl(activeChannel.id);
-            if (urls) {
-                navigator.clipboard.writeText(urls.web).then(() => {
-                    ModalsModule.showToast('Channel URL copied to clipboard', 'success');
-                }).catch(() => {
-                    // Fallback: show in prompt
+            if (!urls || !urls.web) {
+                ModalsModule.showToast('Could not generate channel URL', 'error');
+                return;
+            }
+            
+            // Copy to clipboard with safe fallback
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(urls.web).then(() => {
+                        ModalsModule.showToast('Channel URL copied to clipboard', 'success');
+                    }).catch(() => {
+                        prompt('Channel URL:', urls.web);
+                    });
+                } else {
+                    // Clipboard API not available (non-HTTPS, older browser, etc.)
                     prompt('Channel URL:', urls.web);
-                });
+                }
+            } catch (e) {
+                prompt('Channel URL:', urls.web);
             }
         };
         
-        // Show QR code (placeholder - would need QR library)
+        // Show QR code using QRGenerator
         document.getElementById('mesh-show-qr-btn').onclick = () => {
             const activeChannel = MeshtasticModule.getActiveChannel();
             if (!activeChannel) {
@@ -6316,13 +7587,152 @@ const PanelsModule = (function() {
                 return;
             }
             const urls = MeshtasticModule.exportChannelAsUrl(activeChannel.id);
-            if (urls) {
-                // For now, just copy the QR data
-                navigator.clipboard.writeText(urls.qrData).then(() => {
-                    ModalsModule.showToast('QR data copied. Use a QR generator to create code.', 'info');
-                });
+            if (!urls) {
+                ModalsModule.showToast('Could not generate channel URL', 'error');
+                return;
+            }
+            
+            // Use QRGenerator if available, otherwise fall back to clipboard copy
+            if (typeof QRGenerator !== 'undefined' && QRGenerator.toDataURL) {
+                try {
+                    const qrDataUrl = QRGenerator.toDataURL(urls.web, 5);
+                    
+                    // Show QR code in a sub-modal overlay
+                    const qrOverlay = document.createElement('div');
+                    qrOverlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:10001;cursor:pointer';
+                    qrOverlay.innerHTML = `
+                        <div style="background:#1a1a2e;border-radius:16px;padding:24px;text-align:center;max-width:320px;width:90%" onclick="event.stopPropagation()">
+                            <div style="font-size:14px;font-weight:600;margin-bottom:12px;color:#e2e8f0">📱 Scan to Join Channel</div>
+                            <div style="background:white;border-radius:12px;padding:16px;display:inline-block;margin-bottom:12px">
+                                <img src="${qrDataUrl}" alt="Channel QR Code" style="display:block;image-rendering:pixelated;width:200px;height:200px">
+                            </div>
+                            <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-bottom:12px;word-break:break-all;padding:0 8px">${Helpers.escapeHtml(urls.web)}</div>
+                            <button style="padding:8px 20px;background:#3b82f6;color:white;border:none;border-radius:8px;font-size:12px;cursor:pointer" id="qr-copy-url-btn">📋 Copy URL</button>
+                        </div>
+                    `;
+                    qrOverlay.onclick = () => qrOverlay.remove();
+                    document.body.appendChild(qrOverlay);
+                    
+                    qrOverlay.querySelector('#qr-copy-url-btn').onclick = (e) => {
+                        e.stopPropagation();
+                        try {
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                                navigator.clipboard.writeText(urls.web).then(() => {
+                                    ModalsModule.showToast('Channel URL copied', 'success');
+                                }).catch(() => {
+                                    prompt('Channel URL:', urls.web);
+                                });
+                            } else {
+                                prompt('Channel URL:', urls.web);
+                            }
+                        } catch (clipErr) {
+                            prompt('Channel URL:', urls.web);
+                        }
+                    };
+                } catch (qrErr) {
+                    console.warn('[MeshConfig] QR generation failed:', qrErr);
+                    ModalsModule.showToast('QR generation failed — URL copied to clipboard', 'info');
+                    try {
+                        if (navigator.clipboard && navigator.clipboard.writeText) {
+                            navigator.clipboard.writeText(urls.web).catch(() => prompt('Channel URL:', urls.web));
+                        } else {
+                            prompt('Channel URL:', urls.web);
+                        }
+                    } catch (clipErr) {
+                        prompt('Channel URL:', urls.web);
+                    }
+                }
+            } else {
+                // No QR generator available — copy to clipboard
+                try {
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(urls.web).then(() => {
+                            ModalsModule.showToast('Channel URL copied to clipboard (QR library not available)', 'info');
+                        }).catch(() => {
+                            prompt('Channel URL:', urls.web);
+                        });
+                    } else {
+                        prompt('Channel URL:', urls.web);
+                    }
+                } catch (clipErr) {
+                    prompt('Channel URL:', urls.web);
+                }
             }
         };
+        
+        // Reset App Data handler
+        document.getElementById('mesh-reset-app-btn').onclick = () => {
+            // Show confirmation
+            const btn = document.getElementById('mesh-reset-app-btn');
+            if (btn.dataset.confirmed !== 'true') {
+                btn.innerHTML = '⚠️ Confirm Reset?';
+                btn.style.background = 'rgba(239,68,68,0.2)';
+                btn.dataset.confirmed = 'true';
+                // Auto-revert after 3 seconds
+                setTimeout(() => {
+                    if (btn.dataset.confirmed === 'true') {
+                        btn.innerHTML = '🗑️ Reset App Data';
+                        btn.style.background = '';
+                        btn.dataset.confirmed = '';
+                    }
+                }, 3000);
+                return;
+            }
+            
+            // Confirmed — execute reset
+            btn.innerHTML = '⏳ Resetting...';
+            btn.disabled = true;
+            
+            MeshtasticModule.resetAppState().then(result => {
+                if (result.success) {
+                    ModalsModule.showToast(`App data cleared: ${result.cleared.join(', ')}`, 'success');
+                    closeModal();
+                    renderTeam();
+                } else {
+                    ModalsModule.showToast('Reset failed: ' + (result.error || 'Unknown error'), 'error');
+                    btn.innerHTML = '🗑️ Reset App Data';
+                    btn.disabled = false;
+                    btn.dataset.confirmed = '';
+                }
+            });
+        };
+        
+        // Factory Reset Device handler
+        const factoryBtn = document.getElementById('mesh-factory-reset-btn');
+        if (factoryBtn && !factoryBtn.disabled) {
+            factoryBtn.onclick = () => {
+                // Two-step confirmation for destructive device operation
+                if (factoryBtn.dataset.confirmed !== 'true') {
+                    factoryBtn.innerHTML = '⚠️ Confirm? All device settings will be erased';
+                    factoryBtn.style.background = 'rgba(239,68,68,0.2)';
+                    factoryBtn.dataset.confirmed = 'true';
+                    setTimeout(() => {
+                        if (factoryBtn.dataset.confirmed === 'true') {
+                            factoryBtn.innerHTML = '🔄 Factory Reset Device';
+                            factoryBtn.style.background = '';
+                            factoryBtn.dataset.confirmed = '';
+                        }
+                    }, 4000);
+                    return;
+                }
+                
+                factoryBtn.innerHTML = '⏳ Resetting device...';
+                factoryBtn.disabled = true;
+                
+                MeshtasticModule.factoryResetDevice().then(result => {
+                    if (result.success) {
+                        ModalsModule.showToast('Device factory reset — rebooting to defaults. Reconnect when ready.', 'success');
+                        closeModal();
+                        renderTeam();
+                    } else {
+                        ModalsModule.showToast('Factory reset failed: ' + (result.error || 'Unknown error'), 'error');
+                        factoryBtn.innerHTML = '🔄 Factory Reset Device';
+                        factoryBtn.disabled = false;
+                        factoryBtn.dataset.confirmed = '';
+                    }
+                });
+            };
+        }
     }
     
     // =========================================================================
@@ -6333,14 +7743,14 @@ const PanelsModule = (function() {
      * Open Create Team modal
      */
     function openCreateTeamModal() {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:420px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:420px">
                     <div class="modal__header">
                         <h3 class="modal__title">➕ Create New Team</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <div class="form-group">
@@ -6426,14 +7836,14 @@ const PanelsModule = (function() {
      * Open Join Team modal
      */
     function openJoinTeamModal() {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:420px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:420px">
                     <div class="modal__header">
                         <h3 class="modal__title">🔗 Join a Team</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <p style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:16px">
@@ -6530,14 +7940,14 @@ const PanelsModule = (function() {
         
         const team = TeamModule.getCurrentTeam();
         const inviteCode = TeamModule.generateInviteCode();
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:420px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:420px">
                     <div class="modal__header">
                         <h3 class="modal__title">📤 Invite to Team</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <div style="text-align:center;margin-bottom:20px">
@@ -6593,7 +8003,13 @@ const PanelsModule = (function() {
         TeamModule.generateTeamQR(180).then(qrDataUrl => {
             const qrContainer = modalContainer.querySelector('#team-qr-container');
             if (qrContainer) {
-                qrContainer.innerHTML = `<img src="${qrDataUrl}" alt="Team QR Code" style="display:block">`;
+                qrContainer.innerHTML = `<img src="${Helpers.escapeHtml(qrDataUrl)}" alt="Team QR Code" style="display:block">`;
+            }
+        }).catch(err => {
+            console.warn('[Panels] Team QR generation failed:', err.message);
+            const qrContainer = modalContainer.querySelector('#team-qr-container');
+            if (qrContainer) {
+                qrContainer.innerHTML = '<p style="color:#ef4444;text-align:center">QR generation failed</p>';
             }
         });
         
@@ -6625,14 +8041,14 @@ const PanelsModule = (function() {
         const team = TeamModule.getCurrentTeam();
         const myMember = TeamModule.getMyMember();
         const isLeader = myMember?.role === 'leader';
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:420px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:420px">
                     <div class="modal__header">
                         <h3 class="modal__title">⚙️ Team Settings</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <!-- Team Info -->
@@ -6736,17 +8152,17 @@ const PanelsModule = (function() {
         if (!TeamModule.isInTeam()) return;
         
         const RALLY_TYPES = TeamModule.RALLY_TYPES;
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         // Get current map center for default coordinates
         const mapState = typeof MapModule !== 'undefined' ? MapModule.getMapState() : { lat: 37.4215, lon: -119.1892 };
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:420px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:420px">
                     <div class="modal__header">
                         <h3 class="modal__title">🏁 Add Rally Point</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <div class="form-group">
@@ -6900,18 +8316,18 @@ const PanelsModule = (function() {
         const myMember = TeamModule.getMyMember();
         const canEdit = myMember?.role === 'leader' || myMember?.role === 'coleader';
         const isMe = member.id === myMember?.id;
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         const lastSeenText = member.lastSeen 
             ? formatMeshTime(member.lastSeen)
             : 'Unknown';
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:380px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:380px">
                     <div class="modal__header">
                         <h3 class="modal__title">${role.icon} ${escapeHtml(member.name)}</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <div style="text-align:center;margin-bottom:20px">
@@ -7016,7 +8432,7 @@ const PanelsModule = (function() {
         const myMember = TeamModule.getMyMember();
         const canEdit = myMember?.role === 'leader' || myMember?.role === 'coleader';
         const isMe = member.id === myMember?.id;
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         // Get GPS position for distance/bearing
         const gpsState = typeof GPSModule !== 'undefined' ? GPSModule.getState() : null;
@@ -7033,11 +8449,11 @@ const PanelsModule = (function() {
         const statusText = member.status === 'active' ? 'Active' : member.status === 'stale' ? 'Stale' : 'Offline';
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:400px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:400px">
                     <div class="modal__header">
                         <h3 class="modal__title">${role.icon} ${escapeHtml(member.name)}</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <!-- Member Header -->
@@ -7188,14 +8604,14 @@ const PanelsModule = (function() {
         if (!currentTeam) return;
         
         const commPlan = currentTeam.commPlan || {};
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:450px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:450px">
                     <div class="modal__header">
                         <h3 class="modal__title">📡 Comm Plan</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <!-- Frequencies -->
@@ -7352,14 +8768,14 @@ const PanelsModule = (function() {
      */
     function openMeshShareWaypointModal() {
         const waypoints = State.get('waypoints') || [];
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:400px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:400px">
                     <div class="modal__header">
                         <h3 class="modal__title">📍 Share Waypoint via Mesh</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <p style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px">
@@ -7413,14 +8829,14 @@ const PanelsModule = (function() {
      */
     function openMeshShareRouteModal() {
         const routes = State.get('routes') || [];
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:400px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:400px">
                     <div class="modal__header">
                         <h3 class="modal__title">🛤️ Share Route via Mesh</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <p style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px">
@@ -7473,13 +8889,13 @@ const PanelsModule = (function() {
         const waypoints = State.get('waypoints') || [];
         const routes = State.get('routes') || [];
         
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:420px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:420px">
                     <div class="modal__header">
                         <h3 class="modal__title">📦 Export Plan Package</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <p style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:16px">
@@ -7576,13 +8992,13 @@ const PanelsModule = (function() {
      * Open Import Modal (for encrypted files)
      */
     function openImportModal(fileContent, filename) {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:400px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:400px">
                     <div class="modal__header">
                         <h3 class="modal__title">🔐 Decrypt Plan</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <p style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:16px">
@@ -7649,13 +9065,13 @@ const PanelsModule = (function() {
         const conflicts = PlanSharingModule.analyzeConflicts(planData);
         const hasConflicts = conflicts.waypoints.length > 0 || conflicts.routes.length > 0;
         
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:500px;max-height:85vh">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:500px;max-height:85vh">
                     <div class="modal__header">
                         <h3 class="modal__title">📥 Import Plan</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body" style="max-height:60vh;overflow-y:auto">
                         <!-- Plan Info -->
@@ -7916,6 +9332,7 @@ const PanelsModule = (function() {
     }
 
     function renderGPS() {
+        _saveScroll(); _restoreScroll();
         // Check GPS module availability
         if (typeof GPSModule === 'undefined') {
             container.innerHTML = `
@@ -8439,6 +9856,7 @@ const PanelsModule = (function() {
     let aqiLayerActive = false;
 
     async function renderWeather() {
+        _saveScroll(); _restoreScroll();
         // Check WeatherModule availability
         if (typeof WeatherModule === 'undefined') {
             container.innerHTML = `
@@ -8501,8 +9919,20 @@ const PanelsModule = (function() {
                             <div style="font-size:9px;color:rgba(255,255,255,0.4)">HUMIDITY</div>
                         </div>
                         <div style="text-align:center;padding:8px;background:rgba(0,0,0,0.2);border-radius:8px">
-                            <div style="font-size:14px;font-weight:600">${Math.round(weatherData.current.windSpeed)} mph</div>
+                            <div style="font-size:14px;font-weight:600">${Math.round(weatherData.current.windSpeed)} mph ${WeatherModule.windDirectionToCardinal(weatherData.current.windDirection)}</div>
                             <div style="font-size:9px;color:rgba(255,255,255,0.4)">WIND</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:rgba(0,0,0,0.2);border-radius:8px">
+                            <div style="font-size:14px;font-weight:600">${weatherData.current.dewpoint != null ? WeatherModule.formatTemp(weatherData.current.dewpoint) : '--'}</div>
+                            <div style="font-size:9px;color:rgba(255,255,255,0.4)">DEWPOINT</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:rgba(0,0,0,0.2);border-radius:8px">
+                            <div style="font-size:14px;font-weight:600">${weatherData.current.uvIndex != null ? weatherData.current.uvIndex.toFixed(1) : '--'}</div>
+                            <div style="font-size:9px;color:rgba(255,255,255,0.4)">UV INDEX</div>
+                        </div>
+                        <div style="text-align:center;padding:8px;background:rgba(0,0,0,0.2);border-radius:8px">
+                            <div style="font-size:14px;font-weight:600">${weatherData.current.cloudCover}%</div>
+                            <div style="font-size:9px;color:rgba(255,255,255,0.4)">CLOUD COVER</div>
                         </div>
                     </div>
                     
@@ -8875,6 +10305,208 @@ const PanelsModule = (function() {
                     `}
                 </div>
             ` : ''}
+            
+            <!-- Weather Alerts & Monitoring -->
+            ${typeof WeatherModule !== 'undefined' && typeof AlertModule !== 'undefined' ? (() => {
+                const wxMonitoring = WeatherModule.isWeatherMonitoringEnabled();
+                const wxSettings = WeatherModule.getWeatherMonitoringSettings();
+                const wxAlertHistory = AlertModule.getHistory({ source: 'weather' }).slice(0, 5);
+                const wxIntervalMin = Math.round((wxSettings.intervalMs || 1800000) / 60000);
+                const wxLastCheck = wxSettings.lastCheck ? new Date(wxSettings.lastCheck) : null;
+                const wxLastCond = wxSettings.lastConditions;
+                const wxNws = wxSettings.nws || {};
+                const wxWpEnabled = wxSettings.waypointMonitoring !== false;
+                const wxWpCount = wxSettings.waypointCount || 0;
+                const wxWpIntervalMin = Math.round((wxSettings.waypointIntervalMs || 3600000) / 60000);
+                const wxWpLastCheck = wxSettings.waypointLastCheck ? new Date(wxSettings.waypointLastCheck) : null;
+                const wxTh = wxSettings.thresholds || {};
+                
+                return `
+                <div class="section-label">🌩️ Weather Alerts & Monitoring</div>
+                <div style="margin-bottom:16px">
+                    <!-- Monitoring Toggle -->
+                    <div style="display:flex;gap:8px;margin-bottom:12px">
+                        <button class="btn ${wxMonitoring ? 'btn--primary' : 'btn--secondary'}" 
+                                id="toggle-weather-monitoring" style="flex:1;padding:10px">
+                            ${wxMonitoring ? '🔔 Monitoring ON' : '🔕 Monitoring OFF'}
+                        </button>
+                        <button class="btn btn--secondary" id="weather-check-now" 
+                                style="padding:10px" title="Check weather conditions now">
+                            🔄
+                        </button>
+                    </div>
+                    
+                    ${wxMonitoring ? `
+                        <!-- Monitoring Status -->
+                        <div style="padding:10px;background:rgba(34,197,94,0.1);border-radius:8px;margin-bottom:12px">
+                            <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px">
+                                <span style="color:rgba(255,255,255,0.6)">📍 Current location</span>
+                                <span style="color:#22c55e">Every ${wxIntervalMin} min</span>
+                            </div>
+                            <!-- Alert Source Indicator -->
+                            <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px">
+                                <span style="color:rgba(255,255,255,0.5)">Alert source</span>
+                                ${wxNws.source === 'fisb' ? `
+                                    <span style="color:#22c55e">📡 RF Sentinel FIS-B</span>
+                                ` : `
+                                    <span style="color:#3b82f6">🌐 NWS API${wxNws.alertCount > 0 ? ` (${wxNws.alertCount} active)` : ''}</span>
+                                `}
+                            </div>
+                            ${wxLastCheck ? `
+                                <div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,0.4)">
+                                    <span>Last check</span>
+                                    <span>${wxLastCheck.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                </div>
+                            ` : ''}
+                            ${wxLastCond ? `
+                                <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:rgba(255,255,255,0.6)">
+                                    ${wxLastCond.icon || ''} ${wxLastCond.desc || ''} · ${Math.round(wxLastCond.temperature || 0)}°F · Wind ${Math.round(wxLastCond.windSpeed || 0)} mph${wxLastCond.windGusts >= 30 ? ` (gusts ${Math.round(wxLastCond.windGusts)})` : ''}
+                                </div>
+                            ` : ''}
+                            <!-- Waypoint Status -->
+                            <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;font-size:10px">
+                                <span style="color:rgba(255,255,255,0.5)">📌 Waypoints (${wxWpCount})</span>
+                                ${wxWpEnabled ? `
+                                    <span style="color:#22c55e">Every ${wxWpIntervalMin} min${wxWpLastCheck ? ` · ${wxWpLastCheck.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}</span>
+                                ` : `
+                                    <span style="color:rgba(255,255,255,0.4)">Off</span>
+                                `}
+                            </div>
+                        </div>
+                    ` : `
+                        <div style="padding:10px;background:var(--color-bg-elevated);border-radius:8px;margin-bottom:12px">
+                            <div style="font-size:11px;color:rgba(255,255,255,0.5);text-align:center">
+                                Monitors temperature, wind, and severe weather at your current position and waypoints. Triggers audible alerts when dangerous conditions are detected.
+                                Uses NWS Weather Alerts API when RF Sentinel is disconnected.
+                            </div>
+                        </div>
+                    `}
+                    
+                    <!-- Interval Selector -->
+                    <div style="padding:12px;background:var(--color-bg-elevated);border-radius:8px;margin-bottom:12px">
+                        <div style="font-size:11px;font-weight:600;margin-bottom:8px;color:rgba(255,255,255,0.7)">Position Check Interval</div>
+                        <div style="display:flex;gap:6px">
+                            ${[15, 30, 60].map(min => `
+                                <button class="btn ${wxIntervalMin === min ? 'btn--primary' : 'btn--secondary'} weather-interval-btn" 
+                                        data-interval="${min}" style="flex:1;padding:8px;font-size:11px">
+                                    ${min} min
+                                </button>
+                            `).join('')}
+                        </div>
+                        <!-- Waypoint Monitoring Toggle -->
+                        <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.1)">
+                            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                                <input type="checkbox" id="wx-waypoint-monitoring" ${wxWpEnabled ? 'checked' : ''}>
+                                <span style="font-size:11px">Monitor waypoints (every ${wxWpIntervalMin} min)</span>
+                                <span style="font-size:10px;color:rgba(255,255,255,0.4);margin-left:auto">${wxWpCount} saved</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- Alert Thresholds Configuration -->
+                    <div style="padding:12px;background:var(--color-bg-elevated);border-radius:8px;margin-bottom:12px">
+                        <div style="font-size:11px;font-weight:600;margin-bottom:10px;color:rgba(255,255,255,0.7)">Alert Thresholds</div>
+                        
+                        <!-- Temperature -->
+                        <div style="margin-bottom:10px">
+                            <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:6px">🌡️ Temperature (°F)</div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                                <div style="display:flex;align-items:center;gap:4px">
+                                    <span style="width:8px;height:8px;border-radius:50%;background:#ef4444"></span>
+                                    <span style="font-size:10px;color:rgba(255,255,255,0.5);white-space:nowrap">Ext Heat ≥</span>
+                                    <input type="number" id="wx-th-extreme-heat" value="${wxTh.temperature?.extremeHeat ?? 100}" 
+                                           style="width:48px;padding:3px;font-size:11px;text-align:center" min="80" max="130">
+                                </div>
+                                <div style="display:flex;align-items:center;gap:4px">
+                                    <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b"></span>
+                                    <span style="font-size:10px;color:rgba(255,255,255,0.5);white-space:nowrap">Heat ≥</span>
+                                    <input type="number" id="wx-th-heat" value="${wxTh.temperature?.heat ?? 90}" 
+                                           style="width:48px;padding:3px;font-size:11px;text-align:center" min="70" max="120">
+                                </div>
+                                <div style="display:flex;align-items:center;gap:4px">
+                                    <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b"></span>
+                                    <span style="font-size:10px;color:rgba(255,255,255,0.5);white-space:nowrap">Cold ≤</span>
+                                    <input type="number" id="wx-th-cold" value="${wxTh.temperature?.cold ?? 32}" 
+                                           style="width:48px;padding:3px;font-size:11px;text-align:center" min="-20" max="50">
+                                </div>
+                                <div style="display:flex;align-items:center;gap:4px">
+                                    <span style="width:8px;height:8px;border-radius:50%;background:#ef4444"></span>
+                                    <span style="font-size:10px;color:rgba(255,255,255,0.5);white-space:nowrap">Ext Cold ≤</span>
+                                    <input type="number" id="wx-th-extreme-cold" value="${wxTh.temperature?.extremeCold ?? 10}" 
+                                           style="width:48px;padding:3px;font-size:11px;text-align:center" min="-40" max="32">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Wind & Visibility -->
+                        <div style="margin-bottom:10px">
+                            <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-bottom:6px">💨 Wind (mph) & 👁️ Visibility (mi)</div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+                                <div style="display:flex;align-items:center;gap:4px">
+                                    <span style="width:8px;height:8px;border-radius:50%;background:#ef4444"></span>
+                                    <span style="font-size:10px;color:rgba(255,255,255,0.5);white-space:nowrap">Gusts ≥</span>
+                                    <input type="number" id="wx-th-wind-extreme" value="${wxTh.wind?.extreme ?? 50}" 
+                                           style="width:48px;padding:3px;font-size:11px;text-align:center" min="30" max="100">
+                                </div>
+                                <div style="display:flex;align-items:center;gap:4px">
+                                    <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b"></span>
+                                    <span style="font-size:10px;color:rgba(255,255,255,0.5);white-space:nowrap">Wind ≥</span>
+                                    <input type="number" id="wx-th-wind-high" value="${wxTh.wind?.high ?? 30}" 
+                                           style="width:48px;padding:3px;font-size:11px;text-align:center" min="15" max="80">
+                                </div>
+                                <div style="display:flex;align-items:center;gap:4px">
+                                    <span style="width:8px;height:8px;border-radius:50%;background:#3b82f6"></span>
+                                    <span style="font-size:10px;color:rgba(255,255,255,0.5);white-space:nowrap">Vis ≤</span>
+                                    <input type="number" id="wx-th-visibility" value="${wxTh.visibility?.poor ?? 1}" step="0.5"
+                                           style="width:48px;padding:3px;font-size:11px;text-align:center" min="0.1" max="5">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn--secondary btn--full" id="save-wx-thresholds" style="padding:8px;font-size:11px">
+                            Save Thresholds
+                        </button>
+                    </div>
+                    
+                    <!-- Alert History -->
+                    ${wxAlertHistory.length > 0 ? `
+                        <div style="padding:12px;background:var(--color-bg-elevated);border-radius:8px">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                                <span style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.7)">Recent Alerts</span>
+                                <button class="btn btn--secondary" id="clear-weather-history" style="padding:4px 8px;font-size:10px">Clear</button>
+                            </div>
+                            <div style="max-height:150px;overflow-y:auto">
+                                ${wxAlertHistory.map(alert => {
+                                    const time = new Date(alert.timestamp);
+                                    const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                    const dateStr = time.toLocaleDateString([], { month: 'short', day: 'numeric' });
+                                    const severityColor = {
+                                        caution: '#3b82f6',
+                                        warning: '#f59e0b',
+                                        critical: '#ef4444',
+                                        emergency: '#7f1d1d'
+                                    }[alert.severity] || '#3b82f6';
+                                    
+                                    return `
+                                        <div style="padding:8px;border-left:3px solid ${severityColor};margin-bottom:6px;background:rgba(0,0,0,0.2);border-radius:0 6px 6px 0">
+                                            <div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,0.5)">
+                                                <span>${dateStr} ${timeStr}</span>
+                                                <span style="color:${severityColor}">${alert.severity}</span>
+                                            </div>
+                                            <div style="font-size:11px;margin-top:2px">${alert.title}: ${alert.message}</div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    ` : `
+                        <div style="padding:12px;background:var(--color-bg-elevated);border-radius:8px;text-align:center">
+                            <span style="font-size:11px;color:rgba(255,255,255,0.5)">No recent weather alerts</span>
+                        </div>
+                    `}
+                </div>
+                `;
+            })() : ''}
             
             <!-- AQI Alerts & Monitoring -->
             ${typeof AirQualityModule !== 'undefined' && typeof AlertModule !== 'undefined' ? `
@@ -9278,6 +10910,116 @@ const PanelsModule = (function() {
             };
         }
         
+        // Weather Monitoring toggle
+        const wxMonitoringBtn = container.querySelector('#toggle-weather-monitoring');
+        if (wxMonitoringBtn) {
+            wxMonitoringBtn.onclick = () => {
+                if (typeof WeatherModule === 'undefined') return;
+                
+                if (WeatherModule.isWeatherMonitoringEnabled()) {
+                    WeatherModule.stopWeatherMonitoring();
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('Weather monitoring stopped', 'info');
+                    }
+                } else {
+                    WeatherModule.startWeatherMonitoring();
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('Weather monitoring started', 'success');
+                    }
+                }
+                renderWeather();
+            };
+        }
+        
+        // Weather Check Now button
+        const wxCheckNowBtn = container.querySelector('#weather-check-now');
+        if (wxCheckNowBtn) {
+            wxCheckNowBtn.onclick = async () => {
+                if (typeof WeatherModule === 'undefined') return;
+                wxCheckNowBtn.disabled = true;
+                wxCheckNowBtn.textContent = '⏳';
+                await WeatherModule.checkWeatherNow();
+                wxCheckNowBtn.disabled = false;
+                wxCheckNowBtn.textContent = '🔄';
+                renderWeather();
+            };
+        }
+        
+        // Weather Interval buttons
+        container.querySelectorAll('.weather-interval-btn').forEach(btn => {
+            btn.onclick = () => {
+                if (typeof WeatherModule === 'undefined') return;
+                const minutes = parseInt(btn.dataset.interval);
+                if (!minutes) return;
+                
+                WeatherModule.setWeatherMonitoringInterval(minutes * 60 * 1000);
+                if (typeof ModalsModule !== 'undefined') {
+                    ModalsModule.showToast(`Weather check interval: ${minutes} min`, 'info');
+                }
+                renderWeather();
+            };
+        });
+        
+        // Clear Weather Alert History
+        const clearWxHistoryBtn = container.querySelector('#clear-weather-history');
+        if (clearWxHistoryBtn) {
+            clearWxHistoryBtn.onclick = () => {
+                if (typeof AlertModule !== 'undefined') {
+                    AlertModule.clearHistory('weather');
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('Weather alert history cleared', 'info');
+                    }
+                    renderWeather();
+                }
+            };
+        }
+        
+        // Save Weather Alert Thresholds
+        const saveWxThresholdsBtn = container.querySelector('#save-wx-thresholds');
+        if (saveWxThresholdsBtn) {
+            saveWxThresholdsBtn.onclick = () => {
+                if (typeof WeatherModule === 'undefined') return;
+                
+                const thresholds = {
+                    temperature: {
+                        extremeHeat: parseFloat(container.querySelector('#wx-th-extreme-heat')?.value) || 100,
+                        heat: parseFloat(container.querySelector('#wx-th-heat')?.value) || 90,
+                        cold: parseFloat(container.querySelector('#wx-th-cold')?.value) || 32,
+                        extremeCold: parseFloat(container.querySelector('#wx-th-extreme-cold')?.value) || 10
+                    },
+                    wind: {
+                        extreme: parseFloat(container.querySelector('#wx-th-wind-extreme')?.value) || 50,
+                        high: parseFloat(container.querySelector('#wx-th-wind-high')?.value) || 30
+                    },
+                    visibility: {
+                        poor: parseFloat(container.querySelector('#wx-th-visibility')?.value) || 1
+                    }
+                };
+                
+                WeatherModule.setAlertThresholds(thresholds);
+                if (typeof ModalsModule !== 'undefined') {
+                    ModalsModule.showToast('Weather alert thresholds saved', 'success');
+                }
+            };
+        }
+        
+        // Waypoint Monitoring checkbox
+        const wxWaypointChk = container.querySelector('#wx-waypoint-monitoring');
+        if (wxWaypointChk) {
+            wxWaypointChk.onchange = () => {
+                if (typeof WeatherModule !== 'undefined') {
+                    WeatherModule.setWaypointMonitoring(wxWaypointChk.checked);
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast(
+                            wxWaypointChk.checked ? 'Waypoint monitoring enabled' : 'Waypoint monitoring disabled',
+                            'info'
+                        );
+                    }
+                    renderWeather();
+                }
+            };
+        }
+        
         // AQI Monitoring toggle
         const aqiMonitoringBtn = container.querySelector('#toggle-aqi-monitoring');
         if (aqiMonitoringBtn) {
@@ -9452,6 +11194,7 @@ const PanelsModule = (function() {
     }
 
     async function renderSettings() {
+        _saveScroll(); _restoreScroll();
         // Load current settings
         const units = await Storage.Settings.get('units', 'imperial');
         const coordFormat = await Storage.Settings.get('coordinateFormat', 'dd');
@@ -9498,7 +11241,7 @@ const PanelsModule = (function() {
                 <div class="settings-row">
                     <span class="settings-row__label">Distance Units</span>
                     <div class="settings-row__control">
-                        <select id="setting-units" class="settings-select">
+                        <select id="setting-units" class="settings-select" aria-label="Distance units">
                             <option value="imperial" ${units === 'imperial' ? 'selected' : ''}>Miles / Feet</option>
                             <option value="metric" ${units === 'metric' ? 'selected' : ''}>Kilometers / Meters</option>
                         </select>
@@ -9508,7 +11251,7 @@ const PanelsModule = (function() {
                 <div class="settings-row" style="flex-direction:column;align-items:stretch">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                         <span class="settings-row__label">Coordinate Format</span>
-                        <select id="setting-coord-format" class="settings-select" style="width:auto">
+                        <select id="setting-coord-format" class="settings-select" style="width:auto" aria-label="Coordinate format">
                             <option value="dd" ${coordFormat === 'dd' ? 'selected' : ''}>Decimal (DD)</option>
                             <option value="dms" ${coordFormat === 'dms' ? 'selected' : ''}>Deg Min Sec (DMS)</option>
                             <option value="ddm" ${coordFormat === 'ddm' ? 'selected' : ''}>Deg Dec Min (DDM)</option>
@@ -9652,7 +11395,7 @@ const PanelsModule = (function() {
                 <div class="settings-row">
                     <span class="settings-row__label">Default Zoom</span>
                     <div class="settings-row__control">
-                        <select id="setting-default-zoom" class="settings-select">
+                        <select id="setting-default-zoom" class="settings-select" aria-label="Default zoom level">
                             ${[8,9,10,11,12,13,14,15,16].map(z => 
                                 `<option value="${z}" ${defaultZoom === z ? 'selected' : ''}>${z} ${z <= 10 ? '(Region)' : z <= 13 ? '(Area)' : '(Detail)'}</option>`
                             ).join('')}
@@ -9849,6 +11592,36 @@ const PanelsModule = (function() {
                 <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:8px">
                     <a href="https://github.com/BlackDotTechnology/GridDown" target="_blank" rel="noopener" style="color:rgba(255,255,255,0.4);text-decoration:none">MIT License</a> • BlackDot Technology • 2025
                 </div>
+            </div>
+            
+            <div class="divider" style="margin-top:16px"></div>
+            
+            <!-- Diagnostics -->
+            <div class="section-label">Diagnostics</div>
+            
+            <div class="settings-group">
+                <div class="settings-row">
+                    <span class="settings-row__label">Log Level</span>
+                    <select id="diag-log-level" aria-label="Console log level" style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:4px 8px;font-size:13px">
+                        ${['error','warn','info','log','debug'].map(lvl => 
+                            `<option value="${lvl}" ${typeof Log !== 'undefined' && Log.getLevel() === lvl ? 'selected' : ''}>${lvl.charAt(0).toUpperCase() + lvl.slice(1)}${lvl === 'warn' ? ' (default)' : ''}${lvl === 'debug' ? ' (verbose)' : ''}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-row__label">Logs Suppressed</span>
+                    <span id="diag-suppressed" style="font-size:13px;color:rgba(255,255,255,0.6)">${typeof Log !== 'undefined' ? Log.getStats().suppressed : 'N/A'}</span>
+                </div>
+                <div class="settings-row">
+                    <span class="settings-row__label">Errors Captured</span>
+                    <span id="diag-error-count" style="font-size:13px;color:rgba(255,255,255,0.6)">${typeof ErrorBoundary !== 'undefined' ? ErrorBoundary.getErrors().length : 'N/A'}</span>
+                </div>
+                <button class="btn btn--secondary btn--full" id="diag-view-errors" style="margin-top:8px">
+                    View Error Log
+                </button>
+                <button class="btn btn--secondary btn--full" id="diag-copy-errors" style="margin-top:4px">
+                    Copy Error Report
+                </button>
             </div>
         `;
         
@@ -10309,21 +12082,80 @@ const PanelsModule = (function() {
                 }
             };
         }
+        
+        // Diagnostics: Log level control
+        const logLevelSelect = container.querySelector('#diag-log-level');
+        if (logLevelSelect) {
+            logLevelSelect.onchange = (e) => {
+                if (typeof Log !== 'undefined') {
+                    Log.setLevel(e.target.value);
+                    ModalsModule.showToast(`Log level: ${e.target.value}`, 'success');
+                }
+            };
+        }
+
+        // Diagnostics: View error log
+        const diagViewBtn = container.querySelector('#diag-view-errors');
+        if (diagViewBtn) {
+            diagViewBtn.onclick = () => {
+                if (typeof ErrorBoundary === 'undefined') {
+                    ModalsModule.showToast('Error boundary not available', 'info');
+                    return;
+                }
+                const errs = ErrorBoundary.getErrors(20);
+                const stats = ErrorBoundary.getStats();
+                const statsLine = `Total: ${stats.total} • Captured: ${stats.captured} • Suppressed: ${stats.suppressed}`;
+                
+                const errHtml = errs.length === 0 
+                    ? '<p style="color:rgba(255,255,255,0.5);text-align:center;padding:16px">No errors captured this session.</p>'
+                    : errs.map(e => {
+                        const time = new Date(e.timestamp).toLocaleTimeString();
+                        const typeColor = e.type === 'error' ? '#ef4444' : '#f59e0b';
+                        return `<div style="margin-bottom:8px;padding:8px;background:rgba(0,0,0,0.3);border-radius:6px;font-size:11px;font-family:monospace">
+                            <div><span style="color:${typeColor}">[${Helpers.escapeHtml(e.type)}]</span> <span style="color:#60a5fa">[${Helpers.escapeHtml(e.module)}]</span> <span style="color:rgba(255,255,255,0.4)">${time}</span></div>
+                            <div style="color:rgba(255,255,255,0.8);margin-top:4px">${Helpers.escapeHtml(e.message)}</div>
+                            ${e.source && e.line ? `<div style="color:rgba(255,255,255,0.3);margin-top:2px">at ${Helpers.escapeHtml(e.source)}:${e.line}</div>` : ''}
+                        </div>`;
+                    }).join('');
+
+                ModalsModule.showModal('Error Log', `
+                    <div style="font-size:12px;color:rgba(255,255,255,0.5);margin-bottom:12px">${Helpers.escapeHtml(statsLine)}</div>
+                    <div style="max-height:400px;overflow-y:auto">${errHtml}</div>
+                `);
+            };
+        }
+
+        // Diagnostics: Copy error report
+        const diagCopyBtn = container.querySelector('#diag-copy-errors');
+        if (diagCopyBtn) {
+            diagCopyBtn.onclick = () => {
+                if (typeof ErrorBoundary === 'undefined') {
+                    ModalsModule.showToast('Error boundary not available', 'info');
+                    return;
+                }
+                const report = ErrorBoundary.formatReport();
+                navigator.clipboard.writeText(report).then(() => {
+                    ModalsModule.showToast('Error report copied to clipboard', 'success');
+                }).catch(() => {
+                    ModalsModule.showToast('Could not copy report', 'error');
+                });
+            };
+        }
     }
     
     /**
      * Show confirmation dialog for clearing data
      */
     function showClearConfirmation(type, count) {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         const typeLabel = type === 'all' ? 'all data' : type;
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
-                <div class="modal" style="max-width:360px">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" role="dialog" aria-modal="true" style="max-width:360px">
                     <div class="modal__header">
                         <h3 class="modal__title">Clear ${type === 'all' ? 'All Data' : type.charAt(0).toUpperCase() + type.slice(1)}?</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body" style="text-align:center;padding:24px">
                         <div style="width:56px;height:56px;margin:0 auto 16px;background:rgba(239,68,68,0.15);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:28px">
@@ -10724,7 +12556,7 @@ const PanelsModule = (function() {
         if (result.error) {
             resultsDiv.innerHTML = `
                 <div style="padding:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:8px;color:#ef4444">
-                    ${result.error}${result.recommendation ? `<br><small>${result.recommendation}</small>` : ''}
+                    ${Helpers.escapeHtml(result.error)}${result.recommendation ? `<br><small>${Helpers.escapeHtml(result.recommendation)}</small>` : ''}
                 </div>
             `;
             return;
@@ -10777,7 +12609,7 @@ const PanelsModule = (function() {
         if (result.error) {
             resultsDiv.innerHTML = `
                 <div style="padding:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);border-radius:8px;color:#ef4444">
-                    ${result.error}${result.recommendation ? `<br><small>${result.recommendation}</small>` : ''}
+                    ${Helpers.escapeHtml(result.error)}${result.recommendation ? `<br><small>${Helpers.escapeHtml(result.recommendation)}</small>` : ''}
                 </div>
             `;
             return;
@@ -10837,7 +12669,7 @@ const PanelsModule = (function() {
         if (!resultsDiv) return;
         
         if (result.error) {
-            resultsDiv.innerHTML = `<div style="color:#ef4444">${result.error}</div>`;
+            resultsDiv.innerHTML = `<div style="color:#ef4444">${Helpers.escapeHtml(result.error)}</div>`;
             return;
         }
         
@@ -10900,7 +12732,7 @@ const PanelsModule = (function() {
         if (!resultsDiv) return;
         
         if (result.error) {
-            resultsDiv.innerHTML = `<div style="color:#ef4444">${result.error}</div>`;
+            resultsDiv.innerHTML = `<div style="color:#ef4444">${Helpers.escapeHtml(result.error)}</div>`;
             return;
         }
         
@@ -10951,7 +12783,7 @@ const PanelsModule = (function() {
         if (!previewDiv) return;
         
         if (itinerary.error) {
-            previewDiv.innerHTML = `<div style="color:#ef4444">${itinerary.error}</div>`;
+            previewDiv.innerHTML = `<div style="color:#ef4444">${Helpers.escapeHtml(itinerary.error)}</div>`;
             return;
         }
         
@@ -11015,6 +12847,7 @@ ${text}
      * Render Sun/Moon Calculator Panel
      */
     function renderSunMoon() {
+        _saveScroll(); _restoreScroll();
         // Initialize module if needed
         if (typeof SunMoonModule !== 'undefined') {
             SunMoonModule.init();
@@ -11070,6 +12903,7 @@ ${text}
      * Render Celestial Navigation Panel
      */
     function renderCelestial() {
+        _saveScroll(); _restoreScroll();
         // Check if module is available
         if (typeof CelestialModule === 'undefined') {
             container.innerHTML = `
@@ -12621,7 +14455,8 @@ ${text}
                 
                 // Visual feedback
                 calibrateBtn.innerHTML = '✓ Calibrated';
-                setTimeout(() => {
+                clearTimeout(feedbackTimeouts.calibrate);
+                feedbackTimeouts.calibrate = setTimeout(() => {
                     calibrateBtn.innerHTML = '🎯 Calibrate Horizon';
                 }, 2000);
             };
@@ -12651,7 +14486,8 @@ ${text}
                 
                 // Visual feedback on capture button
                 captureBtn.innerHTML = '✓ Captured!';
-                setTimeout(() => {
+                clearTimeout(feedbackTimeouts.capture);
+                feedbackTimeouts.capture = setTimeout(() => {
                     captureBtn.innerHTML = '📸 Capture Altitude';
                 }, 1000);
             };
@@ -12679,7 +14515,8 @@ ${text}
                     
                     // Visual feedback
                     useBtn.innerHTML = '✓ Applied!';
-                    setTimeout(() => {
+                    clearTimeout(feedbackTimeouts.useMeasurement);
+                    feedbackTimeouts.useMeasurement = setTimeout(() => {
                         useBtn.innerHTML = 'Use This Measurement';
                     }, 1500);
                     
@@ -12724,6 +14561,7 @@ ${text}
      * Render Navigation Panel
      */
     function renderNavigation() {
+        _saveScroll(); _restoreScroll();
         const routes = State.get('routes').filter(r => !r.isBuilding);
         const waypoints = State.get('waypoints');
         
@@ -13078,7 +14916,7 @@ ${text}
                 
                 // Focus first input
                 setTimeout(() => {
-                    const distInput = document.getElementById('hike-target-distance');
+                    const distInput = domCache.get('hike-target-distance');
                     if (distInput) distInput.focus();
                 }, 100);
                 
@@ -13096,7 +14934,7 @@ ${text}
                 
                 // Start button
                 document.getElementById('hike-start-btn').onclick = () => {
-                    const distance = parseFloat(document.getElementById('hike-target-distance').value) || 2;
+                    const distance = parseFloat(domCache.get('hike-target-distance').value) || 2;
                     const gain = parseFloat(document.getElementById('hike-elev-gain').value) || 0;
                     const loss = parseFloat(document.getElementById('hike-elev-loss').value) || 0;
                     const outAndBack = document.getElementById('hike-out-and-back').checked;
@@ -13485,35 +15323,35 @@ ${text}
                         <div class="coord-result-label">Decimal Degrees (DD)</div>
                         <div class="coord-result-row">
                             <div class="coord-result-value" id="result-dd">--</div>
-                            <button class="coord-copy-btn" data-copy="dd" title="Copy">${Icons.get('copy')}</button>
+                            <button class="coord-copy-btn" data-copy="dd" title="Copy DD coordinates" aria-label="Copy decimal degrees">${Icons.get('copy')}</button>
                         </div>
                     </div>
                     <div class="coord-result-item" data-format="dms">
                         <div class="coord-result-label">Degrees Minutes Seconds (DMS)</div>
                         <div class="coord-result-row">
                             <div class="coord-result-value" id="result-dms">--</div>
-                            <button class="coord-copy-btn" data-copy="dms" title="Copy">${Icons.get('copy')}</button>
+                            <button class="coord-copy-btn" data-copy="dms" title="Copy DMS coordinates" aria-label="Copy degrees minutes seconds">${Icons.get('copy')}</button>
                         </div>
                     </div>
                     <div class="coord-result-item" data-format="ddm">
                         <div class="coord-result-label">Degrees Decimal Minutes (DDM)</div>
                         <div class="coord-result-row">
                             <div class="coord-result-value" id="result-ddm">--</div>
-                            <button class="coord-copy-btn" data-copy="ddm" title="Copy">${Icons.get('copy')}</button>
+                            <button class="coord-copy-btn" data-copy="ddm" title="Copy DDM coordinates" aria-label="Copy degrees decimal minutes">${Icons.get('copy')}</button>
                         </div>
                     </div>
                     <div class="coord-result-item" data-format="utm">
                         <div class="coord-result-label">UTM</div>
                         <div class="coord-result-row">
                             <div class="coord-result-value" id="result-utm">--</div>
-                            <button class="coord-copy-btn" data-copy="utm" title="Copy">${Icons.get('copy')}</button>
+                            <button class="coord-copy-btn" data-copy="utm" title="Copy UTM coordinates" aria-label="Copy UTM">${Icons.get('copy')}</button>
                         </div>
                     </div>
                     <div class="coord-result-item" data-format="mgrs">
                         <div class="coord-result-label">MGRS</div>
                         <div class="coord-result-row">
                             <div class="coord-result-value" id="result-mgrs">--</div>
-                            <button class="coord-copy-btn" data-copy="mgrs" title="Copy">${Icons.get('copy')}</button>
+                            <button class="coord-copy-btn" data-copy="mgrs" title="Copy MGRS coordinates" aria-label="Copy MGRS">${Icons.get('copy')}</button>
                         </div>
                     </div>
                 </div>
@@ -13538,8 +15376,8 @@ ${text}
                             <div class="coord-quick-meta">Accuracy: ±${gpsAccuracy ? gpsAccuracy.toFixed(0) : '?'}m</div>
                         </div>
                         <div class="coord-quick-actions">
-                            <button class="coord-quick-btn" data-action="copy-gps" title="Copy">${Icons.get('copy')}</button>
-                            <button class="coord-quick-btn" data-action="use-gps" title="Use this">${Icons.get('arrowRight')}</button>
+                            <button class="coord-quick-btn" data-action="copy-gps" title="Copy" aria-label="Copy GPS coordinates">${Icons.get('copy')}</button>
+                            <button class="coord-quick-btn" data-action="use-gps" title="Use this" aria-label="Use GPS coordinates">${Icons.get('arrowRight')}</button>
                         </div>
                     </div>
                 </div>
@@ -13564,8 +15402,8 @@ ${text}
                         <div class="coord-quick-meta">Current map viewport center</div>
                     </div>
                     <div class="coord-quick-actions">
-                        <button class="coord-quick-btn" data-action="copy-map" title="Copy">${Icons.get('copy')}</button>
-                        <button class="coord-quick-btn" data-action="use-map" title="Use this">${Icons.get('arrowRight')}</button>
+                        <button class="coord-quick-btn" data-action="copy-map" title="Copy" aria-label="Copy map coordinates">${Icons.get('copy')}</button>
+                        <button class="coord-quick-btn" data-action="use-map" title="Use this" aria-label="Use map coordinates">${Icons.get('arrowRight')}</button>
                     </div>
                 </div>
             </div>
@@ -13658,198 +15496,13 @@ ${text}
     }
     
     /**
-     * Bind all event handlers for the coordinate converter
-     * Note: Most events are now handled via event delegation in setupEventDelegation()
-     * This function is kept for backward compatibility and any remaining non-delegatable events
+     * Bind event handlers for the coordinate converter.
+     * All click, input, and change events are handled by setupEventDelegation().
+     * This function resets state when the panel renders.
      */
     function bindCoordinateConverterEvents() {
-        // Event delegation handles most interactions now
-        // This function is kept for any edge cases that need direct binding
-        // All click, input, and change events are handled by setupEventDelegation()
-        
         // Reset parsed coords state when panel renders
         coordConverterState.parsedCoords = null;
-        
-        const container = document.getElementById('panel-content');
-        if (!container) return;
-        
-        const input = container.querySelector('#coord-input');
-        const goBtn = container.querySelector('#coord-go-btn');
-        if (!input || !goBtn) return;
-        
-        // Input parsing with debounce
-        let parseTimeout = null;
-        input.addEventListener('input', function() {
-            clearTimeout(parseTimeout);
-            parseTimeout = setTimeout(() => {
-                const value = this.value.trim();
-                const resultEl = container.querySelector('#coord-parse-result');
-                const formatDetected = container.querySelector('#coord-format-detected');
-                
-                if (!value) {
-                    coordConverterState.parsedCoords = null;
-                    if (resultEl) resultEl.style.display = 'none';
-                    if (formatDetected) formatDetected.textContent = '';
-                    goBtn.disabled = true;
-                    return;
-                }
-                
-                if (typeof Coordinates !== 'undefined') {
-                    const parsed = Coordinates.parse(value);
-                    if (parsed) {
-                        coordConverterState.parsedCoords = parsed;
-                        if (resultEl) {
-                            resultEl.style.display = 'block';
-                            resultEl.querySelector('#coord-result-dd').textContent = 
-                                `${parsed.lat.toFixed(6)}°, ${parsed.lon.toFixed(6)}°`;
-                            resultEl.querySelector('#coord-result-dms').textContent = 
-                                Coordinates.format(parsed.lat, parsed.lon, { format: 'DMS' });
-                        }
-                        if (formatDetected) {
-                            formatDetected.textContent = `Detected: ${parsed.format || 'DD'}`;
-                            formatDetected.style.color = '#22c55e';
-                        }
-                        goBtn.disabled = false;
-                    } else {
-                        coordConverterState.parsedCoords = null;
-                        if (resultEl) resultEl.style.display = 'none';
-                        if (formatDetected) {
-                            formatDetected.textContent = 'Invalid format';
-                            formatDetected.style.color = '#ef4444';
-                        }
-                        goBtn.disabled = true;
-                    }
-                }
-            }, 300);
-        });
-        
-        // Go button - navigate to coordinates
-        goBtn.addEventListener('click', function() {
-            if (coordConverterState.parsedCoords && typeof MapModule !== 'undefined') {
-                MapModule.setCenter(coordConverterState.parsedCoords.lat, coordConverterState.parsedCoords.lon);
-                showCoordToast('Map centered on coordinates');
-            } else if (!coordConverterState.parsedCoords) {
-                showCoordToast('Enter valid coordinates first', 'error');
-            }
-        });
-        
-        // Example buttons
-        container.querySelectorAll('.coord-example').forEach(btn => {
-            btn.addEventListener('click', function() {
-                input.value = this.dataset.example;
-                input.dispatchEvent(new Event('input'));
-            });
-        });
-        
-        // Copy buttons
-        container.querySelectorAll('.coord-copy-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const format = this.dataset.copy;
-                const valueEl = container.querySelector(`#result-${format}`);
-                if (valueEl && valueEl.textContent !== '--') {
-                    copyToClipboard(valueEl.textContent);
-                    showCoordToast(`${format.toUpperCase()} copied to clipboard`);
-                }
-            });
-        });
-        
-        // Create waypoint button
-        const createWpBtn = container.querySelector('#coord-create-waypoint');
-        if (createWpBtn) {
-            createWpBtn.addEventListener('click', function() {
-                if (parsedCoords && typeof ModalsModule !== 'undefined') {
-                    // Open waypoint modal with these coordinates
-                    ModalsModule.openWaypointModal({
-                        lat: parsedCoords.lat,
-                        lon: parsedCoords.lon,
-                        x: lonToX(parsedCoords.lon),
-                        y: latToY(parsedCoords.lat)
-                    });
-                }
-            });
-        }
-        
-        // Quick action buttons (GPS and Map Center)
-        container.querySelectorAll('[data-action]').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const action = this.dataset.action;
-                
-                if (action === 'copy-gps' || action === 'copy-map') {
-                    const card = this.closest('.coord-quick-card');
-                    const valueEl = card.querySelector('.coord-quick-value');
-                    if (valueEl) {
-                        copyToClipboard(valueEl.textContent);
-                        showCoordToast('Coordinates copied');
-                    }
-                } else if (action === 'use-gps') {
-                    if (typeof GPSModule !== 'undefined') {
-                        const state = GPSModule.getState();
-                        if (state.position) {
-                            input.value = `${state.position.lat}, ${state.position.lon}`;
-                            input.dispatchEvent(new Event('input'));
-                        }
-                    }
-                } else if (action === 'use-map') {
-                    if (typeof MapModule !== 'undefined' && MapModule.getMapState) {
-                        const mapState = MapModule.getMapState();
-                        input.value = `${mapState.lat}, ${mapState.lon}`;
-                        input.dispatchEvent(new Event('input'));
-                    }
-                }
-            });
-        });
-        
-        // Format selector buttons
-        container.querySelectorAll('.coord-format-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const format = this.dataset.format;
-                if (typeof Coordinates !== 'undefined') {
-                    Coordinates.setFormat(format);
-                    
-                    // Update button states
-                    container.querySelectorAll('.coord-format-btn').forEach(b => {
-                        b.classList.toggle('coord-format-btn--active', b.dataset.format === format);
-                    });
-                    
-                    // Refresh the panel to update displayed coords
-                    renderCoordinateConverter();
-                    showCoordToast(`Display format set to ${format.toUpperCase()}`);
-                }
-            });
-        });
-        
-        // Distance calculator
-        const calcDistBtn = container.querySelector('#calc-distance-btn');
-        if (calcDistBtn) {
-            calcDistBtn.addEventListener('click', function() {
-                const fromInput = container.querySelector('#distance-from');
-                const toInput = container.querySelector('#distance-to');
-                const resultEl = container.querySelector('#distance-result');
-                
-                if (typeof Coordinates === 'undefined') return;
-                
-                const fromCoords = Coordinates.parse(fromInput.value);
-                const toCoords = Coordinates.parse(toInput.value);
-                
-                if (!fromCoords) {
-                    showCoordToast('Invalid "From" coordinates', 'error');
-                    return;
-                }
-                if (!toCoords) {
-                    showCoordToast('Invalid "To" coordinates', 'error');
-                    return;
-                }
-                
-                // Calculate distance and bearing
-                const dist = Coordinates.distance(fromCoords.lat, fromCoords.lon, toCoords.lat, toCoords.lon);
-                const bear = Coordinates.bearing(fromCoords.lat, fromCoords.lon, toCoords.lat, toCoords.lon);
-                
-                // Display results
-                container.querySelector('#distance-value').textContent = formatDistanceResult(dist);
-                container.querySelector('#bearing-value').textContent = Coordinates.formatBearing(bear);
-                resultEl.style.display = 'block';
-            });
-        }
     }
     
     /**
@@ -14023,6 +15676,7 @@ ${text}
      * Render the Communication Plan panel
      */
     async function renderComms() {
+        _saveScroll(); _restoreScroll();
         // Load comm plan if not loaded
         if (!commPlanLoaded) {
             await loadCommPlan();
@@ -14086,10 +15740,10 @@ ${text}
                                     ${ch.name}
                                 </div>
                                 <div class="comm-channel__actions">
-                                    <button class="comm-action-btn" data-edit-channel="${ch.id}" title="Edit">
+                                    <button class="comm-action-btn" data-edit-channel="${ch.id}" title="Edit" aria-label="Edit channel ${Helpers.escapeHtml(ch.name)}">
                                         ${Icons.get('edit')}
                                     </button>
-                                    <button class="comm-action-btn comm-action-btn--danger" data-delete-channel="${ch.id}" title="Delete">
+                                    <button class="comm-action-btn comm-action-btn--danger" data-delete-channel="${ch.id}" title="Delete" aria-label="Delete channel ${Helpers.escapeHtml(ch.name)}">
                                         ${Icons.get('trash')}
                                     </button>
                                 </div>
@@ -14125,10 +15779,10 @@ ${text}
                                 <div class="comm-callsign__role">${cs.role}</div>
                             </div>
                             <div class="comm-callsign__actions">
-                                <button class="comm-action-btn" data-edit-callsign="${cs.id}" title="Edit">
+                                <button class="comm-action-btn" data-edit-callsign="${cs.id}" title="Edit" aria-label="Edit call sign ${Helpers.escapeHtml(cs.callSign)}">
                                     ${Icons.get('edit')}
                                 </button>
-                                <button class="comm-action-btn comm-action-btn--danger" data-delete-callsign="${cs.id}" title="Delete">
+                                <button class="comm-action-btn comm-action-btn--danger" data-delete-callsign="${cs.id}" title="Delete" aria-label="Delete call sign ${Helpers.escapeHtml(cs.callSign)}">
                                     ${Icons.get('trash')}
                                 </button>
                             </div>
@@ -14162,10 +15816,10 @@ ${text}
                                     </div>
                                     <div class="comm-checkin__type comm-checkin__type--${ck.type}">${ck.type}</div>
                                     <div class="comm-checkin__actions">
-                                        <button class="comm-action-btn" data-edit-checkin="${ck.id}" title="Edit">
+                                        <button class="comm-action-btn" data-edit-checkin="${ck.id}" title="Edit" aria-label="Edit check-in">
                                             ${Icons.get('edit')}
                                         </button>
-                                        <button class="comm-action-btn comm-action-btn--danger" data-delete-checkin="${ck.id}" title="Delete">
+                                        <button class="comm-action-btn comm-action-btn--danger" data-delete-checkin="${ck.id}" title="Delete" aria-label="Delete check-in">
                                             ${Icons.get('trash')}
                                         </button>
                                     </div>
@@ -14226,10 +15880,10 @@ ${text}
                             <div class="comm-protocol__header">
                                 <div class="comm-protocol__situation">${ep.situation}</div>
                                 <div class="comm-protocol__actions">
-                                    <button class="comm-action-btn" data-edit-protocol="${ep.id}" title="Edit">
+                                    <button class="comm-action-btn" data-edit-protocol="${ep.id}" title="Edit" aria-label="Edit protocol ${Helpers.escapeHtml(ep.name)}">
                                         ${Icons.get('edit')}
                                     </button>
-                                    <button class="comm-action-btn comm-action-btn--danger" data-delete-protocol="${ep.id}" title="Delete">
+                                    <button class="comm-action-btn comm-action-btn--danger" data-delete-protocol="${ep.id}" title="Delete" aria-label="Delete protocol ${Helpers.escapeHtml(ep.name)}">
                                         ${Icons.get('trash')}
                                     </button>
                                 </div>
@@ -14289,144 +15943,13 @@ ${text}
     }
 
     /**
-     * Bind event handlers for communication plan
+     * Bind event handlers for communication plan.
+     * All click/change events are now handled by setupEventDelegation().
+     * This function is retained for any future non-delegatable bindings.
      */
     function bindCommsEvents() {
-        // Save button
-        const saveBtn = container.querySelector('#save-comm-plan');
-        if (saveBtn) {
-            saveBtn.addEventListener('click', async () => {
-                // Gather all data from form
-                commPlan.emergency.distressWord = container.querySelector('#distress-word')?.value || 'MAYDAY';
-                commPlan.emergency.duressWord = container.querySelector('#duress-word')?.value || '';
-                commPlan.emergency.emergencyChannel = container.querySelector('#emergency-channel')?.value || '';
-                commPlan.emergency.rallyPoint = container.querySelector('#rally-point')?.value || '';
-                commPlan.schedule.missedCheckInProtocol = container.querySelector('#missed-protocol-text')?.value || '';
-                commPlan.notes = container.querySelector('#comm-notes')?.value || '';
-                
-                await saveCommPlan();
-            });
-        }
-
-        // Schedule enabled toggle
-        const scheduleToggle = container.querySelector('#schedule-enabled');
-        if (scheduleToggle) {
-            scheduleToggle.addEventListener('change', async (e) => {
-                commPlan.schedule.enabled = e.target.checked;
-                await saveCommPlan();
-                renderComms();
-            });
-        }
-
-        // Export button
-        const exportBtn = container.querySelector('#comm-export-btn');
-        if (exportBtn) {
-            exportBtn.addEventListener('click', () => exportCommPlan());
-        }
-
-        // Add channel button
-        const addChannelBtn = container.querySelector('#add-channel-btn');
-        if (addChannelBtn) {
-            addChannelBtn.addEventListener('click', () => openChannelModal());
-        }
-
-        // Edit/delete channel buttons
-        container.querySelectorAll('[data-edit-channel]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const id = btn.dataset.editChannel;
-                const channel = commPlan.channels.find(c => c.id === id);
-                if (channel) openChannelModal(channel);
-            });
-        });
-
-        container.querySelectorAll('[data-delete-channel]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                if (confirm('Delete this channel?')) {
-                    const id = btn.dataset.deleteChannel;
-                    commPlan.channels = commPlan.channels.filter(c => c.id !== id);
-                    await saveCommPlan();
-                    renderComms();
-                }
-            });
-        });
-
-        // Add call sign button
-        const addCallsignBtn = container.querySelector('#add-callsign-btn');
-        if (addCallsignBtn) {
-            addCallsignBtn.addEventListener('click', () => openCallSignModal());
-        }
-
-        // Edit/delete call sign buttons
-        container.querySelectorAll('[data-edit-callsign]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const id = btn.dataset.editCallsign;
-                const cs = commPlan.callSigns.find(c => c.id === id);
-                if (cs) openCallSignModal(cs);
-            });
-        });
-
-        container.querySelectorAll('[data-delete-callsign]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                if (confirm('Delete this call sign?')) {
-                    const id = btn.dataset.deleteCallsign;
-                    commPlan.callSigns = commPlan.callSigns.filter(c => c.id !== id);
-                    await saveCommPlan();
-                    renderComms();
-                }
-            });
-        });
-
-        // Add check-in button
-        const addCheckinBtn = container.querySelector('#add-checkin-btn');
-        if (addCheckinBtn) {
-            addCheckinBtn.addEventListener('click', () => openCheckInModal());
-        }
-
-        // Edit/delete check-in buttons
-        container.querySelectorAll('[data-edit-checkin]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const id = btn.dataset.editCheckin;
-                const ck = commPlan.schedule.checkIns.find(c => c.id === id);
-                if (ck) openCheckInModal(ck);
-            });
-        });
-
-        container.querySelectorAll('[data-delete-checkin]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                if (confirm('Delete this check-in?')) {
-                    const id = btn.dataset.deleteCheckin;
-                    commPlan.schedule.checkIns = commPlan.schedule.checkIns.filter(c => c.id !== id);
-                    await saveCommPlan();
-                    renderComms();
-                }
-            });
-        });
-
-        // Add protocol button
-        const addProtocolBtn = container.querySelector('#add-protocol-btn');
-        if (addProtocolBtn) {
-            addProtocolBtn.addEventListener('click', () => openProtocolModal());
-        }
-
-        // Edit/delete protocol buttons
-        container.querySelectorAll('[data-edit-protocol]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const id = btn.dataset.editProtocol;
-                const ep = commPlan.emergency.protocols.find(p => p.id === id);
-                if (ep) openProtocolModal(ep);
-            });
-        });
-
-        container.querySelectorAll('[data-delete-protocol]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                if (confirm('Delete this protocol?')) {
-                    const id = btn.dataset.deleteProtocol;
-                    commPlan.emergency.protocols = commPlan.emergency.protocols.filter(p => p.id !== id);
-                    await saveCommPlan();
-                    renderComms();
-                }
-            });
-        });
+        // All comm plan events are now handled via event delegation in
+        // handleDelegatedClick() and handleDelegatedChange()
     }
 
     /**
@@ -14436,13 +15959,13 @@ ${text}
         const isNew = !channel;
         const ch = channel || { id: '', name: '', frequency: '', mode: 'FM', tone: '', power: 'High', isPrimary: false, notes: '' };
         
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="comm-modal-backdrop">
+            <div class="modal-backdrop" id="comm-modal-backdrop" role="presentation">
                 <div class="modal">
                     <div class="modal__header">
                         <h3 class="modal__title">${isNew ? 'Add Channel' : 'Edit Channel'}</h3>
-                        <button class="modal__close" id="comm-modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="comm-modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <div class="form-group">
@@ -14538,13 +16061,13 @@ ${text}
         const isNew = !callSign;
         const cs = callSign || { id: '', name: '', callSign: '', role: '', notes: '' };
         
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="comm-modal-backdrop">
+            <div class="modal-backdrop" id="comm-modal-backdrop" role="presentation">
                 <div class="modal">
                     <div class="modal__header">
                         <h3 class="modal__title">${isNew ? 'Add Call Sign' : 'Edit Call Sign'}</h3>
-                        <button class="modal__close" id="comm-modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="comm-modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <div class="form-group">
@@ -14607,13 +16130,13 @@ ${text}
         const isNew = !checkIn;
         const ck = checkIn || { id: '', time: '12:00', channel: commPlan.channels[0]?.id || '', type: 'routine', notes: '' };
         
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="comm-modal-backdrop">
+            <div class="modal-backdrop" id="comm-modal-backdrop" role="presentation">
                 <div class="modal">
                     <div class="modal__header">
                         <h3 class="modal__title">${isNew ? 'Add Check-in' : 'Edit Check-in'}</h3>
-                        <button class="modal__close" id="comm-modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="comm-modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <div class="form-group">
@@ -14686,13 +16209,13 @@ ${text}
         const isNew = !protocol;
         const ep = protocol || { id: '', situation: '', procedure: '' };
         
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="comm-modal-backdrop">
+            <div class="modal-backdrop" id="comm-modal-backdrop" role="presentation">
                 <div class="modal">
                     <div class="modal__header">
                         <h3 class="modal__title">${isNew ? 'Add Emergency Protocol' : 'Edit Protocol'}</h3>
-                        <button class="modal__close" id="comm-modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="comm-modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <div class="form-group">
@@ -15610,6 +17133,7 @@ ${text}
     let radioInitialized = false;
 
     async function renderRadio() {
+        _saveScroll(); _restoreScroll();
         // Initialize RadioModule if needed
         if (typeof RadioModule !== 'undefined' && !radioInitialized) {
             await RadioModule.init();
@@ -15695,7 +17219,7 @@ ${text}
             if (radioSearchQuery.length >= 2) {
                 radioActiveTab = 'search';
             }
-            document.getElementById('radio-content').innerHTML = renderRadioTabContent();
+            domCache.get('radio-content').innerHTML = renderRadioTabContent();
             attachRadioContentHandlers();
         };
 
@@ -16272,7 +17796,7 @@ ${text}
                 e.stopPropagation();
                 if (confirm('Delete this frequency?')) {
                     RadioModule.deleteCustomFrequency(btn.dataset.deleteCustom);
-                    document.getElementById('radio-content').innerHTML = renderRadioTabContent();
+                    domCache.get('radio-content').innerHTML = renderRadioTabContent();
                     attachRadioContentHandlers();
                 }
             };
@@ -16283,7 +17807,7 @@ ${text}
                 e.stopPropagation();
                 if (confirm('Delete this rally point?')) {
                     RadioModule.deleteRallyPoint(btn.dataset.deleteRally);
-                    document.getElementById('radio-content').innerHTML = renderRadioTabContent();
+                    domCache.get('radio-content').innerHTML = renderRadioTabContent();
                     attachRadioContentHandlers();
                 }
             };
@@ -16297,7 +17821,7 @@ ${text}
                     const rpt = repeaters.find(r => r.id === btn.dataset.deleteRepeater);
                     if (rpt) {
                         // Remove from array (would need proper delete method)
-                        document.getElementById('radio-content').innerHTML = renderRadioTabContent();
+                        domCache.get('radio-content').innerHTML = renderRadioTabContent();
                         attachRadioContentHandlers();
                     }
                 }
@@ -16327,13 +17851,13 @@ ${text}
     }
 
     function showAddFrequencyModal() {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
                 <div class="modal">
                     <div class="modal__header">
                         <h3 class="modal__title">Add Custom Frequency</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <div class="form-group">
@@ -16402,21 +17926,21 @@ ${text}
 
             modalContainer.innerHTML = '';
             ModalsModule.showToast('Frequency added', 'success');
-            document.getElementById('radio-content').innerHTML = renderRadioTabContent();
+            domCache.get('radio-content').innerHTML = renderRadioTabContent();
             attachRadioContentHandlers();
         };
     }
 
     function showAddRallyPointModal() {
         const waypoints = State.get('waypoints');
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
                 <div class="modal">
                     <div class="modal__header">
                         <h3 class="modal__title">Add Rally Point</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <div class="form-group">
@@ -16488,20 +18012,20 @@ ${text}
 
             modalContainer.innerHTML = '';
             ModalsModule.showToast('Rally point added', 'success');
-            document.getElementById('radio-content').innerHTML = renderRadioTabContent();
+            domCache.get('radio-content').innerHTML = renderRadioTabContent();
             attachRadioContentHandlers();
         };
     }
 
     function showAddRepeaterModal() {
-        const modalContainer = document.getElementById('modal-container');
+        // Uses cached modalContainer ref
         
         modalContainer.innerHTML = `
-            <div class="modal-backdrop" id="modal-backdrop">
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
                 <div class="modal">
                     <div class="modal__header">
                         <h3 class="modal__title">Add Repeater</h3>
-                        <button class="modal__close" id="modal-close">${Icons.get('close')}</button>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
                     </div>
                     <div class="modal__body">
                         <div class="form-group">
@@ -16569,7 +18093,7 @@ ${text}
 
             modalContainer.innerHTML = '';
             ModalsModule.showToast('Repeater added', 'success');
-            document.getElementById('radio-content').innerHTML = renderRadioTabContent();
+            domCache.get('radio-content').innerHTML = renderRadioTabContent();
             attachRadioContentHandlers();
         };
     }
@@ -16639,6 +18163,7 @@ ${text}
     let sstvLastPoint = { x: 0, y: 0 };
 
     async function renderSSTV() {
+        _saveScroll(); _restoreScroll();
         // Initialize SSTVModule if needed
         if (typeof SSTVModule !== 'undefined' && !sstvInitialized) {
             await SSTVModule.init();
@@ -16730,7 +18255,7 @@ ${text}
                     b.classList.toggle('chip--active', b.dataset.sstvTab === sstvActiveTab);
                 });
                 
-                document.getElementById('sstv-content').innerHTML = renderSSTVTabContent();
+                getSstvContent().innerHTML = renderSSTVTabContent();
                 attachSSTVHandlers();
             };
         });
@@ -17151,6 +18676,8 @@ ${text}
                 if (typeof Events !== 'undefined') {
                     Events.on('sstvEnhance:progress', handleEnhanceProgress);
                 }
+            }).catch(err => {
+                console.warn('[Panels] SSTV Enhance init failed:', err.message);
             });
         }
 
@@ -17390,7 +18917,7 @@ ${text}
         if (!selectedImg || !selectedImg.imageData) return;
         
         sstvEnhanceProcessing = true;
-        document.getElementById('sstv-content').innerHTML = renderSSTVEnhance();
+        getSstvContent().innerHTML = renderSSTVEnhance();
         attachSSTVHandlers();
         
         try {
@@ -17402,7 +18929,7 @@ ${text}
             
             // Show result
             const resultCard = document.getElementById('enhance-result-card');
-            const canvas = document.getElementById('enhance-result-canvas');
+            const canvas = domCache.get('enhance-result-canvas');
             const ocrResults = document.getElementById('enhance-ocr-results');
             const ocrContent = document.getElementById('enhance-ocr-content');
             
@@ -17439,7 +18966,7 @@ ${text}
                     ocrContent.innerHTML = ocrHtml;
                     ocrResults.style.display = 'block';
                 } else if (result.metadata.ocr.raw) {
-                    ocrContent.innerHTML = `<em>Raw text:</em><br><pre style="white-space:pre-wrap;font-size:11px">${result.metadata.ocr.raw.substring(0, 500)}</pre>`;
+                    ocrContent.innerHTML = `<em>Raw text:</em><br><pre style="white-space:pre-wrap;font-size:11px">${Helpers.escapeHtml(result.metadata.ocr.raw.substring(0, 500))}</pre>`;
                     ocrResults.style.display = 'block';
                 } else {
                     ocrContent.innerHTML = '<em>No text detected</em>';
@@ -17459,7 +18986,7 @@ ${text}
         }
         
         sstvEnhanceProcessing = false;
-        document.getElementById('sstv-content').innerHTML = renderSSTVEnhance();
+        getSstvContent().innerHTML = renderSSTVEnhance();
         attachSSTVHandlers();
     }
 
@@ -17718,7 +19245,7 @@ ${text}
             return;
         }
 
-        const canvas = document.getElementById('sstv-waterfall-canvas');
+        const canvas = domCache.get('sstv-waterfall-canvas');
         if (!canvas) {
             console.warn('[SSTV] Waterfall canvas not found');
             return;
@@ -17763,14 +19290,14 @@ ${text}
 
             // Update dominant frequency display
             const freqInfo = SSTVDSPModule.getDominantFrequency();
-            const freqDisplay = document.getElementById('sstv-dominant-freq');
+            const freqDisplay = domCache.get('sstv-dominant-freq');
             if (freqDisplay && freqInfo) {
                 freqDisplay.textContent = `${freqInfo.frequency.toFixed(0)} Hz (${(freqInfo.amplitude * 100).toFixed(0)}%)`;
             }
 
             // Update signal quality guidance
             const signalQuality = SSTVDSPModule.analyzeSignalQuality();
-            const guidanceDisplay = document.getElementById('sstv-signal-guidance');
+            const guidanceDisplay = domCache.get('sstv-signal-guidance');
             if (guidanceDisplay && signalQuality) {
                 guidanceDisplay.textContent = signalQuality.guidance;
                 
@@ -17803,9 +19330,9 @@ ${text}
         const factor = SSTVDSPModule.getSlantFactor();
         const config = SSTVDSPModule.getConfig();
         
-        const expectedEl = document.getElementById('sstv-slant-expected');
-        const measuredEl = document.getElementById('sstv-slant-measured');
-        const correctionEl = document.getElementById('sstv-slant-correction');
+        const expectedEl = domCache.get('sstv-slant-expected');
+        const measuredEl = domCache.get('sstv-slant-measured');
+        const correctionEl = domCache.get('sstv-slant-correction');
 
         // These would be populated by slant analysis events
         // For now just show current factor
@@ -17821,9 +19348,9 @@ ${text}
      */
     if (typeof Events !== 'undefined') {
         Events.on('sstv:slantAnalysis', (data) => {
-            const expectedEl = document.getElementById('sstv-slant-expected');
-            const measuredEl = document.getElementById('sstv-slant-measured');
-            const correctionEl = document.getElementById('sstv-slant-correction');
+            const expectedEl = domCache.get('sstv-slant-expected');
+            const measuredEl = domCache.get('sstv-slant-measured');
+            const correctionEl = domCache.get('sstv-slant-correction');
 
             if (expectedEl) expectedEl.textContent = `${data.expectedLineTime.toFixed(2)} ms`;
             if (measuredEl) measuredEl.textContent = `${data.measuredLineTime.toFixed(2)} ms`;
@@ -17834,9 +19361,9 @@ ${text}
         });
 
         Events.on('sstv:driftAnalysis', (data) => {
-            const measuredEl = document.getElementById('sstv-drift-measured');
-            const driftEl = document.getElementById('sstv-drift-value');
-            const confidenceEl = document.getElementById('sstv-drift-confidence');
+            const measuredEl = domCache.get('sstv-drift-measured');
+            const driftEl = domCache.get('sstv-drift-value');
+            const confidenceEl = domCache.get('sstv-drift-confidence');
 
             if (measuredEl) measuredEl.textContent = `${data.measuredSyncFreq.toFixed(1)} Hz`;
             if (driftEl) {
@@ -17857,9 +19384,9 @@ ${text}
 
         const status = SSTVDSPModule.getDriftAnalysisStatus();
         
-        const measuredEl = document.getElementById('sstv-drift-measured');
-        const driftEl = document.getElementById('sstv-drift-value');
-        const confidenceEl = document.getElementById('sstv-drift-confidence');
+        const measuredEl = domCache.get('sstv-drift-measured');
+        const driftEl = domCache.get('sstv-drift-value');
+        const confidenceEl = domCache.get('sstv-drift-confidence');
 
         if (measuredEl) {
             measuredEl.textContent = status.measurementCount > 0 ? 
@@ -18016,7 +19543,7 @@ ${text}
             
         } else {
             // Preview canvas - copy from original
-            const originalCanvas = document.getElementById('sstv-rx-canvas');
+            const originalCanvas = domCache.get('sstv-rx-canvas');
             if (originalCanvas && originalCanvas.width > 0) {
                 sstvExpandedCanvas.width = originalCanvas.width;
                 sstvExpandedCanvas.height = originalCanvas.height;
@@ -18125,7 +19652,7 @@ ${text}
         const height = sstvExpandedCanvas.height;
         
         // Get colormap
-        const colormapSelect = document.getElementById('sstv-waterfall-colormap');
+        const colormapSelect = domCache.get('sstv-waterfall-colormap');
         const colormap = colormapSelect?.value || 'viridis';
         
         sstvExpandedUpdateInterval = setInterval(() => {
@@ -18143,8 +19670,8 @@ ${text}
             const signalQuality = SSTVDSPModule.analyzeSignalQuality();
             
             // Update info display
-            const freqEl = document.getElementById('sstv-expanded-freq');
-            const statusEl = document.getElementById('sstv-expanded-status');
+            const freqEl = domCache.get('sstv-expanded-freq');
+            const statusEl = domCache.get('sstv-expanded-status');
             
             if (freqEl && freqInfo) {
                 freqEl.textContent = `${freqInfo.frequency.toFixed(0)} Hz (${(freqInfo.amplitude * 100).toFixed(0)}%)`;
@@ -18191,7 +19718,7 @@ ${text}
                 return;
             }
             
-            const originalCanvas = document.getElementById('sstv-rx-canvas');
+            const originalCanvas = domCache.get('sstv-rx-canvas');
             if (originalCanvas && originalCanvas.width > 0) {
                 // Check if dimensions changed
                 if (sstvExpandedCanvas.width !== originalCanvas.width ||
@@ -18241,9 +19768,9 @@ ${text}
      * Initialize annotation canvas to match base canvas
      */
     function initAnnotationCanvas() {
-        const baseCanvas = document.getElementById('sstv-tx-canvas');
-        const annotationCanvas = document.getElementById('sstv-annotation-canvas');
-        const toolbar = document.getElementById('sstv-annotation-toolbar');
+        const baseCanvas = domCache.get('sstv-tx-canvas');
+        const annotationCanvas = domCache.get('sstv-annotation-canvas');
+        const toolbar = domCache.get('sstv-annotation-toolbar');
         
         if (!baseCanvas || !annotationCanvas) return;
         
@@ -18319,7 +19846,7 @@ ${text}
             
             // For text tool, place text immediately
             if (sstvAnnotationTool === 'text') {
-                const textInput = document.getElementById('sstv-annotation-text');
+                const textInput = domCache.get('sstv-annotation-text');
                 const text = textInput?.value || 'Text';
                 if (text) {
                     ctx.font = `bold ${sstvAnnotationWidth * 4}px sans-serif`;
@@ -18463,7 +19990,7 @@ ${text}
      * Undo last annotation
      */
     function undoAnnotation() {
-        const canvas = document.getElementById('sstv-annotation-canvas');
+        const canvas = domCache.get('sstv-annotation-canvas');
         if (!canvas || sstvAnnotationHistory.length === 0) return;
         
         const ctx = canvas.getContext('2d');
@@ -18482,7 +20009,7 @@ ${text}
      * Clear all annotations
      */
     function clearAnnotations() {
-        const canvas = document.getElementById('sstv-annotation-canvas');
+        const canvas = domCache.get('sstv-annotation-canvas');
         if (!canvas) return;
         
         const ctx = canvas.getContext('2d');
@@ -18495,8 +20022,8 @@ ${text}
      * Called before transmit to merge annotations
      */
     function flattenAnnotations() {
-        const baseCanvas = document.getElementById('sstv-tx-canvas');
-        const annotationCanvas = document.getElementById('sstv-annotation-canvas');
+        const baseCanvas = domCache.get('sstv-tx-canvas');
+        const annotationCanvas = domCache.get('sstv-annotation-canvas');
         
         if (!baseCanvas || !annotationCanvas) return false;
         
@@ -18518,7 +20045,7 @@ ${text}
      * Check if there are annotations to flatten
      */
     function hasAnnotations() {
-        const canvas = document.getElementById('sstv-annotation-canvas');
+        const canvas = domCache.get('sstv-annotation-canvas');
         if (!canvas) return false;
         
         const ctx = canvas.getContext('2d');
@@ -18539,12 +20066,12 @@ ${text}
         
         // Switch to transmit tab
         sstvActiveTab = 'transmit';
-        document.getElementById('sstv-content').innerHTML = renderSSTVTabContent();
+        getSstvContent().innerHTML = renderSSTVTabContent();
         attachSSTVHandlers();
         
         // Load image to TX canvas
-        const canvas = document.getElementById('sstv-tx-canvas');
-        const placeholder = document.getElementById('sstv-tx-placeholder');
+        const canvas = domCache.get('sstv-tx-canvas');
+        const placeholder = domCache.get('sstv-tx-placeholder');
         
         if (canvas) {
             canvas.width = imageData.width;
@@ -18681,7 +20208,7 @@ ${text}
         if (txModeSelect) {
             txModeSelect.onchange = () => {
                 sstvTransmitMode = txModeSelect.value;
-                document.getElementById('sstv-content').innerHTML = renderSSTVTabContent();
+                getSstvContent().innerHTML = renderSSTVTabContent();
                 attachSSTVHandlers();
             };
         }
@@ -18720,7 +20247,7 @@ ${text}
         if (clearPreviewBtn) {
             clearPreviewBtn.onclick = () => {
                 clearTXPreview();
-                document.getElementById('sstv-content').innerHTML = renderSSTVTabContent();
+                getSstvContent().innerHTML = renderSSTVTabContent();
                 attachSSTVHandlers();
             };
         }
@@ -18728,7 +20255,7 @@ ${text}
         const transmitBtn = container.querySelector('#sstv-transmit-btn');
         if (transmitBtn) {
             transmitBtn.onclick = async () => {
-                const canvas = document.getElementById('sstv-tx-canvas');
+                const canvas = domCache.get('sstv-tx-canvas');
                 if (canvas && canvas.style.display !== 'none') {
                     // Auto-flatten annotations before transmit
                     if (hasAnnotations()) {
@@ -18771,7 +20298,7 @@ ${text}
                 }
                 
                 // Update cursor
-                const annotationCanvas = document.getElementById('sstv-annotation-canvas');
+                const annotationCanvas = domCache.get('sstv-annotation-canvas');
                 if (annotationCanvas) {
                     annotationCanvas.style.cursor = tool === 'eraser' ? 'cell' : 'crosshair';
                 }
@@ -18837,7 +20364,7 @@ ${text}
                         confirmText: 'Delete All',
                         onConfirm: async () => {
                             await SSTVModule.clearHistory();
-                            document.getElementById('sstv-content').innerHTML = renderSSTVHistory();
+                            getSstvContent().innerHTML = renderSSTVHistory();
                             attachSSTVHandlers();
                         }
                     });
@@ -18851,7 +20378,7 @@ ${text}
             saveSettingsBtn.onclick = async () => {
                 const newSettings = {
                     callsign: document.getElementById('sstv-callsign')?.value?.toUpperCase() || '',
-                    gridSquare: document.getElementById('sstv-grid')?.value?.toUpperCase() || '',
+                    gridSquare: domCache.get('sstv-grid')?.value?.toUpperCase() || '',
                     defaultMode: document.getElementById('sstv-default-mode')?.value || 'Robot36',
                     autoCallsignOverlay: document.getElementById('sstv-auto-callsign')?.checked || false,
                     gainLevel: (parseInt(document.getElementById('sstv-gain')?.value) || 100) / 100,
@@ -18872,7 +20399,7 @@ ${text}
             gridGpsBtn.onclick = async () => {
                 const grid = await SSTVModule.updateGridSquareFromGPS();
                 if (grid) {
-                    const input = document.getElementById('sstv-grid');
+                    const input = domCache.get('sstv-grid');
                     if (input) input.value = grid;
                     if (typeof ModalsModule !== 'undefined') {
                         ModalsModule.showToast(`Grid: ${grid}`, 'success');
@@ -18913,7 +20440,7 @@ ${text}
         container.querySelectorAll('[data-enhance-select]').forEach(thumb => {
             thumb.onclick = () => {
                 sstvEnhanceSelectedImage = thumb.dataset.enhanceSelect;
-                document.getElementById('sstv-content').innerHTML = renderSSTVEnhance();
+                getSstvContent().innerHTML = renderSSTVEnhance();
                 attachSSTVHandlers();
             };
         });
@@ -18932,7 +20459,7 @@ ${text}
         if (enhanceCompareBtn) {
             enhanceCompareBtn.onclick = () => {
                 // Toggle between original and enhanced
-                const canvas = document.getElementById('enhance-result-canvas');
+                const canvas = domCache.get('enhance-result-canvas');
                 if (canvas && window._enhancedImageData && sstvEnhanceSelectedImage) {
                     const images = SSTVModule.getReceivedImages();
                     const original = images.find(i => i.id === sstvEnhanceSelectedImage);
@@ -19083,8 +20610,8 @@ ${text}
             sstvCapturedImageData = imageData;
         }
         
-        const canvas = document.getElementById('sstv-tx-canvas');
-        const placeholder = document.getElementById('sstv-tx-placeholder');
+        const canvas = domCache.get('sstv-tx-canvas');
+        const placeholder = domCache.get('sstv-tx-placeholder');
         
         // If canvas doesn't exist yet, retry after a delay
         if (!canvas || !placeholder) {
@@ -19163,7 +20690,7 @@ ${text}
         }
         
         // If preview is already displayed and canvas is visible, don't restore again
-        const existingCanvas = document.getElementById('sstv-tx-canvas');
+        const existingCanvas = domCache.get('sstv-tx-canvas');
         if (sstvPreviewDisplayed && existingCanvas && existingCanvas.style.display === 'block') {
             return;
         }
@@ -19172,8 +20699,8 @@ ${text}
         
         // Small delay to ensure DOM is ready
         setTimeout(() => {
-            const canvas = document.getElementById('sstv-tx-canvas');
-            const placeholder = document.getElementById('sstv-tx-placeholder');
+            const canvas = domCache.get('sstv-tx-canvas');
+            const placeholder = domCache.get('sstv-tx-placeholder');
             
             if (canvas && placeholder && sstvCapturedImageData) {
                 displayTransmitPreview(sstvCapturedImageData);
@@ -19192,10 +20719,10 @@ ${text}
         sstvPreviewDisplayed = false;
         sstvRestorePending = false;
         
-        const canvas = document.getElementById('sstv-tx-canvas');
-        const placeholder = document.getElementById('sstv-tx-placeholder');
-        const annotationCanvas = document.getElementById('sstv-annotation-canvas');
-        const toolbar = document.getElementById('sstv-annotation-toolbar');
+        const canvas = domCache.get('sstv-tx-canvas');
+        const placeholder = domCache.get('sstv-tx-placeholder');
+        const annotationCanvas = domCache.get('sstv-annotation-canvas');
+        const toolbar = domCache.get('sstv-annotation-toolbar');
         
         if (canvas) {
             canvas.style.display = 'none';
@@ -19255,7 +20782,7 @@ ${text}
                         class: 'btn--danger',
                         onClick: async () => {
                             await SSTVModule.deleteImage(id);
-                            document.getElementById('sstv-content').innerHTML = renderSSTVHistory();
+                            getSstvContent().innerHTML = renderSSTVHistory();
                             attachSSTVHandlers();
                         }
                     },
@@ -19290,7 +20817,7 @@ ${text}
         if (rxPhase) rxPhase.textContent = 'RECEIVING';
         
         // Setup canvas for receiving
-        const canvas = document.getElementById('sstv-rx-canvas');
+        const canvas = domCache.get('sstv-rx-canvas');
         if (canvas) {
             canvas.width = data.config.width;
             canvas.height = data.config.height;
@@ -19306,7 +20833,7 @@ ${text}
         }
         
         // Update preview canvas
-        const canvas = document.getElementById('sstv-rx-canvas');
+        const canvas = domCache.get('sstv-rx-canvas');
         if (canvas && data.imageData) {
             canvas.getContext('2d').putImageData(data.imageData, 0, 0);
         }
@@ -19319,7 +20846,7 @@ ${text}
         
         // Refresh if on history tab
         if (sstvActiveTab === 'history') {
-            document.getElementById('sstv-content').innerHTML = renderSSTVHistory();
+            getSstvContent().innerHTML = renderSSTVHistory();
             attachSSTVHandlers();
         }
     }
@@ -19338,6 +20865,7 @@ ${text}
     }
 
     function renderMedical() {
+        _saveScroll(); _restoreScroll();
         if (typeof MedicalModule === 'undefined') {
             container.innerHTML = `
                 <div class="panel__header">
@@ -20042,6 +21570,7 @@ ${text}
     };
 
     function renderFieldGuides() {
+        _saveScroll(); _restoreScroll();
         if (typeof FieldGuidesModule === 'undefined') {
             container.innerHTML = `
                 <div class="panel__header">
@@ -20580,6 +22109,7 @@ After spreading:
     // ==================== SARSAT Panel ====================
     
     function renderSarsat() {
+        _saveScroll(); _restoreScroll();
         const container = document.getElementById('panel-content');
         if (!container) return;
         
@@ -20912,6 +22442,7 @@ After spreading:
     // ==================== RF Sentinel Panel ====================
     
     function renderRFSentinel() {
+        _saveScroll(); _restoreScroll();
         const container = document.getElementById('panel-content');
         if (!container) return;
         
@@ -20926,8 +22457,9 @@ After spreading:
         const emergencyTracks = isConnected ? RFSentinelModule.getEmergencyTracks() : [];
         const fpvTracks = isConnected ? RFSentinelModule.getTracksByType('fpv') : [];
         const host = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getHost() : 'rfsentinel.local';
-        const port = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getPort() : 8000;
+        const port = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getPort() : 8080;
         const mqttPort = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getMqttPort() : 9001;
+        const useHttps = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getUseHttps() : 'auto';
         const stats = isConnected ? RFSentinelModule.getStats() : null;
         
         const totalTracks = Object.values(trackCounts).reduce((a, b) => a + b, 0);
@@ -20977,7 +22509,7 @@ After spreading:
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.75rem">
                             <div>
                                 <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:0.25rem">API Port</label>
-                                <input type="number" id="rfs-port" value="${port}" placeholder="8000" 
+                                <input type="number" id="rfs-port" value="${port}" placeholder="8080" 
                                        style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:0.875rem">
                             </div>
                             <div id="rfs-mqtt-port-container" style="${connectionMethod === 'mqtt' ? '' : 'opacity:0.5'}">
@@ -20985,6 +22517,19 @@ After spreading:
                                 <input type="number" id="rfs-mqtt-port" value="${mqttPort}" placeholder="9001" 
                                        style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:0.875rem"
                                        ${connectionMethod === 'mqtt' ? '' : 'disabled'}>
+                            </div>
+                        </div>
+                        <div style="margin-bottom:0.75rem">
+                            <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:0.25rem">Protocol</label>
+                            <select id="rfs-protocol" style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:0.875rem">
+                                <option value="auto" ${useHttps === 'auto' ? 'selected' : ''}>Auto (HTTP for local, match page for remote)</option>
+                                <option value="false" ${useHttps === false ? 'selected' : ''}>HTTP / WS</option>
+                                <option value="true" ${useHttps === true ? 'selected' : ''}>HTTPS / WSS</option>
+                            </select>
+                            <div style="font-size:0.65rem;color:#64748b;margin-top:0.25rem">
+                                ${useHttps === 'auto' ? 'Uses HTTP for .local and private IPs, HTTPS for remote hosts' :
+                                  useHttps === true ? 'Force HTTPS/WSS — requires RF Sentinel TLS enabled' :
+                                  'Force HTTP/WS — standard for local network connections'}
                             </div>
                         </div>
                     ` : `
@@ -21359,7 +22904,7 @@ After spreading:
                     
                     // Update MQTT port field visibility
                     const mqttPortContainer = document.getElementById('rfs-mqtt-port-container');
-                    const mqttPortInput = document.getElementById('rfs-mqtt-port');
+                    const mqttPortInput = domCache.get('rfs-mqtt-port');
                     if (mqttPortContainer && mqttPortInput) {
                         if (methodSelect.value === 'mqtt') {
                             mqttPortContainer.style.opacity = '1';
@@ -21376,15 +22921,27 @@ After spreading:
             };
         }
         
+        // Protocol selector
+        const protocolSelect = document.getElementById('rfs-protocol');
+        if (protocolSelect) {
+            protocolSelect.onchange = () => {
+                if (typeof RFSentinelModule !== 'undefined') {
+                    const val = protocolSelect.value;
+                    RFSentinelModule.setUseHttps(val === 'true' ? true : val === 'false' ? false : 'auto');
+                    renderRFSentinel();
+                }
+            };
+        }
+        
         // Connect button
         const connectBtn = document.getElementById('rfs-connect');
         if (connectBtn) {
             connectBtn.onclick = async () => {
                 const hostInput = document.getElementById('rfs-host');
                 const portInput = document.getElementById('rfs-port');
-                const mqttPortInput = document.getElementById('rfs-mqtt-port');
+                const mqttPortInput = domCache.get('rfs-mqtt-port');
                 const host = hostInput?.value || 'rfsentinel.local';
-                const port = parseInt(portInput?.value) || 8000;
+                const port = parseInt(portInput?.value) || 8080;
                 const mqttPort = parseInt(mqttPortInput?.value) || 9001;
                 
                 if (typeof RFSentinelModule !== 'undefined') {

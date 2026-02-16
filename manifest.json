@@ -1,15 +1,97 @@
 {
     "name": "GridDown - Offline Tactical Navigation",
     "short_name": "GridDown",
-    "version": "6.19.9",
-    "description": "Professional-grade offline navigation and tactical mapping for operational planning",
+    "version": "6.57.42",
+    "description": "Professional-grade offline navigation and tactical mapping for emergency preparedness, search and rescue, and GPS-denied scenarios",
     "start_url": "/",
+    "scope": "/",
+    "id": "/",
+    "lang": "en-US",
+    "dir": "ltr",
     "display": "standalone",
+    "display_override": ["standalone", "minimal-ui"],
     "orientation": "any",
     "background_color": "#0a0d14",
     "theme_color": "#0a0d14",
+    "categories": ["navigation", "utilities", "productivity"],
+    "prefer_related_applications": false,
+    "handle_links": "preferred",
     "icons": [
-        { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-        { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+        {
+            "src": "icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "icons/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "icons/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        }
+    ],
+    "screenshots": [
+        {
+            "src": "screenshots/map-wide.png",
+            "sizes": "1280x720",
+            "type": "image/png",
+            "form_factor": "wide",
+            "label": "Tactical map with offline tile caching and waypoint management"
+        },
+        {
+            "src": "screenshots/map-narrow.png",
+            "sizes": "750x1334",
+            "type": "image/png",
+            "form_factor": "narrow",
+            "label": "Mobile navigation with floating action button and GPS tracking"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Search",
+            "short_name": "Search",
+            "description": "Search waypoints, routes, and actions",
+            "url": "/?action=search",
+            "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Add Waypoint",
+            "short_name": "Waypoint",
+            "description": "Mark a new waypoint on the map",
+            "url": "/?action=waypoint",
+            "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Compass",
+            "short_name": "Compass",
+            "description": "Open compass and bearing tools",
+            "url": "/?action=compass",
+            "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Celestial Navigation",
+            "short_name": "Celestial",
+            "description": "Star chart and celestial navigation",
+            "url": "/?action=celestial",
+            "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+        }
     ]
 }

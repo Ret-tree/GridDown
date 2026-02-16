@@ -744,6 +744,8 @@ const CameraSextantModule = (function() {
     };
 })();
 
+window.CameraSextantModule = CameraSextantModule;
+
 // Export for module systems
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = CameraSextantModule;

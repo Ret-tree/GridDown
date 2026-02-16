@@ -97,6 +97,8 @@ input::placeholder { color: var(--color-text-muted); }
 .sidebar__status-label { font-size: 8px; color: var(--color-text-muted); }
 .sidebar__settings { width: 44px; height: 44px; border-radius: 10px; color: var(--color-text-muted); margin-bottom: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .sidebar__settings:hover { background: var(--color-bg-hover); }
+.sidebar__divider { width: 100%; padding: 8px 0 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.sidebar__divider-label { font-size: 7px; font-weight: 700; letter-spacing: 0.08em; color: rgba(255,255,255,0.25); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 48px; text-align: center; line-height: 1; }
 .sidebar__settings svg { width: 18px; height: 18px; }
 
 /* Search button in sidebar */
@@ -148,6 +150,13 @@ input::placeholder { color: var(--color-text-muted); }
 .offline-toggle--offline { background: rgba(239,68,68,0.2); border-color: rgba(239,68,68,0.3); color: var(--color-error); }
 .offline-toggle__icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; }
 .offline-toggle__icon svg { width: 100%; height: 100%; }
+.wind-indicator { position: absolute; top: 68px; left: 20px; background: rgba(15,20,25,0.9); border: 1px solid var(--color-border); padding: 8px 12px; border-radius: 10px; display: flex; align-items: center; gap: 8px; backdrop-filter: blur(8px); z-index: 50; }
+.wind-indicator__arrow { width: 24px; height: 24px; flex-shrink: 0; transition: transform 0.5s ease; }
+.wind-indicator__data { display: flex; flex-direction: column; gap: 1px; line-height: 1.2; }
+.wind-indicator__speed { font-size: 15px; font-weight: 700; font-family: 'IBM Plex Mono', monospace; }
+.wind-indicator__unit { font-size: 10px; font-weight: 400; opacity: 0.6; }
+.wind-indicator__gusts { font-size: 10px; color: var(--color-text-muted); }
+.wind-indicator__dir { font-size: 11px; font-weight: 600; color: var(--color-text-muted); font-family: 'IBM Plex Mono', monospace; }
 
 /* Components */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 16px; font-size: 13px; font-weight: 500; border-radius: 10px; transition: all 0.2s; }
@@ -215,8 +224,6 @@ input::placeholder { color: var(--color-text-muted); }
 .storage-bar__value { font-size: 13px; font-weight: 500; color: var(--color-primary); }
 .storage-bar__track { height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden; }
 .storage-bar__fill { height: 100%; background: linear-gradient(90deg, var(--color-primary), var(--color-primary-dark)); border-radius: 3px; transition: width 0.3s; }
-
-.layer-list { display: flex; flex-direction: column; gap: 8px; }
 .layer-btn { padding: 12px 14px; background: var(--color-bg-elevated); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; display: flex; align-items: center; gap: 12px; text-align: left; transition: all 0.2s; flex-wrap: wrap; }
 .layer-btn:hover { background: var(--color-bg-hover); }
 .layer-btn--active { background: rgba(249,115,22,0.1); border-color: rgba(249,115,22,0.3); }
@@ -256,22 +263,6 @@ input::placeholder { color: var(--color-text-muted); }
 .avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--color-bg-hover); display: flex; align-items: center; justify-content: center; position: relative; font-size: 16px; }
 .avatar__status { position: absolute; bottom: 0; right: 0; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--color-bg-secondary); }
 .avatar__status--active { background: var(--color-success); }
-.avatar__status--stale { background: var(--color-warning); }
-.team-card__info { flex: 1; }
-.team-card__name { font-size: 14px; font-weight: 500; }
-.team-card__meta { font-size: 11px; color: var(--color-text-muted); }
-
-.share-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.share-btn { padding: 14px; background: var(--color-bg-elevated); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 13px; transition: all 0.2s; }
-.share-btn:hover { background: var(--color-bg-hover); }
-.share-btn__icon { width: 20px; height: 20px; }
-.share-btn__icon svg { width: 100%; height: 100%; }
-
-.conn-status { padding: 14px; background: var(--color-bg-elevated); border-radius: 12px; margin-bottom: 20px; display: flex; align-items: center; gap: 12px; }
-.conn-status__icon { width: 20px; height: 20px; color: var(--color-success); }
-.conn-status__icon svg { width: 100%; height: 100%; }
-.conn-status__title { font-size: 13px; }
-.conn-status__sub { font-size: 11px; color: var(--color-text-muted); }
 
 .empty-state { text-align: center; padding: 40px 20px; color: var(--color-text-muted); }
 .empty-state__icon { width: 48px; height: 48px; margin: 0 auto 16px; opacity: 0.3; }
@@ -304,8 +295,6 @@ input::placeholder { color: var(--color-text-muted); }
 /* Toast */
 .toast-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 300; display: flex; flex-direction: column; gap: 8px; }
 .toast { padding: 12px 20px; background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 12px; animation: slideUp 0.2s; }
-.toast--success { border-color: rgba(34,197,94,0.3); }
-.toast--error { border-color: rgba(239,68,68,0.3); }
 .toast__icon { width: 20px; height: 20px; flex-shrink: 0; }
 .toast__icon svg { width: 100%; height: 100%; }
 .toast--success .toast__icon { color: var(--color-success); }
@@ -327,15 +316,10 @@ input::placeholder { color: var(--color-text-muted); }
 @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes fadeOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-10px); } }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* Elevation Profile */
 .elevation-profile { margin: 16px 0; }
-.elevation-profile__header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.elevation-profile__title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: var(--color-text-muted); }
-.elevation-profile__title svg { width: 16px; height: 16px; }
-.elevation-profile__toggle { padding: 4px 10px; font-size: 11px; background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-text-muted); cursor: pointer; transition: all 0.2s; }
-.elevation-profile__toggle:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.elevation-profile__toggle--active { background: rgba(249,115,22,0.15); border-color: rgba(249,115,22,0.3); color: var(--color-primary); }
 .elevation-profile__chart { background: var(--color-bg-secondary); border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
 .elevation-profile__chart canvas { display: block; width: 100%; }
 .elevation-profile__loading { padding: 40px 20px; text-align: center; color: var(--color-text-muted); font-size: 12px; }
@@ -343,44 +327,9 @@ input::placeholder { color: var(--color-text-muted); }
 
 /* Elevation Stats */
 .elevation-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
-.elevation-stats__item { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--color-bg-elevated); border-radius: 8px; }
-.elevation-stats__icon { font-size: 16px; width: 24px; text-align: center; }
-.elevation-stats__icon--gain { color: var(--color-success); }
-.elevation-stats__icon--loss { color: var(--color-error); }
-.elevation-stats__icon--max { color: var(--color-success); }
-.elevation-stats__icon--min { color: var(--color-error); }
-.elevation-stats__value { font-size: 15px; font-weight: 600; }
-.elevation-stats__label { font-size: 10px; color: var(--color-text-muted); text-transform: uppercase; }
 
 /* Grade Distribution */
 .grade-distribution { margin-top: 12px; }
-.grade-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--color-bg-elevated); margin-bottom: 10px; }
-.grade-bar__segment { transition: width 0.3s; }
-.grade-legend { display: flex; flex-wrap: wrap; gap: 8px; }
-.grade-legend__item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
-.grade-legend__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.grade-legend__label { color: var(--color-text-muted); }
-.grade-legend__value { font-weight: 500; color: var(--color-text-secondary); }
-
-/* Segment List */
-.segment-list { max-height: 200px; overflow-y: auto; }
-.segment-item { padding: 10px 12px; background: var(--color-bg-elevated); border-radius: 8px; margin-bottom: 6px; border-left: 3px solid var(--color-border); }
-.segment-item--warning { border-left-color: var(--color-error); background: rgba(239,68,68,0.05); }
-.segment-item__header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
-.segment-item__number { width: 20px; height: 20px; background: var(--color-bg-hover); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; margin-right: 8px; }
-.segment-item__label { flex: 1; font-size: 12px; font-weight: 500; }
-.segment-item__grade { font-size: 12px; font-weight: 600; }
-.segment-item__details { display: flex; gap: 12px; font-size: 11px; color: var(--color-text-muted); }
-.segment-item__terrain { display: flex; align-items: center; gap: 4px; }
-
-/* Steep Warning */
-.steep-warning { padding: 10px 12px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); border-radius: 8px; margin-top: 12px; }
-.steep-warning__header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.steep-warning__icon { color: var(--color-error); }
-.steep-warning__icon svg { width: 16px; height: 16px; }
-.steep-warning__title { font-size: 12px; font-weight: 600; color: var(--color-error); }
-.steep-warning__list { font-size: 11px; color: var(--color-text-muted); }
-.steep-warning__item { margin-top: 4px; }
 
 /* Settings Panel */
 .settings-group { padding: 12px; background: var(--color-bg-elevated); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; margin-bottom: 16px; }
@@ -398,21 +347,6 @@ input::placeholder { color: var(--color-text-muted); }
 .elevation-profile__loading svg { width: 32px; height: 32px; animation: pulse 1.5s ease-in-out infinite; }
 .elevation-profile__chart { border-radius: 8px; overflow: hidden; }
 .elevation-profile__chart canvas { width: 100%; display: block; }
-.elevation-profile__stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
-.elevation-profile__stat { padding: 10px; background: rgba(255,255,255,0.03); border-radius: 8px; text-align: center; }
-.elevation-profile__stat-value { font-size: 16px; font-weight: 600; }
-.elevation-profile__stat-value--gain { color: var(--color-success); }
-.elevation-profile__stat-value--loss { color: var(--color-info); }
-.elevation-profile__stat-label { font-size: 10px; color: var(--color-text-muted); margin-top: 2px; }
-.elevation-profile__grades { margin-top: 12px; }
-.elevation-profile__warning { padding: 8px 10px; background: rgba(239,68,68,0.1); border-radius: 6px; margin-bottom: 4px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
-.elevation-profile__warning--uphill { background: rgba(239,68,68,0.1); }
-.elevation-profile__warning--downhill { background: rgba(59,130,246,0.1); }
-.elevation-profile__warning-icon { font-size: 14px; }
-.elevation-profile__warning-text { flex: 1; color: rgba(255,255,255,0.7); }
-.elevation-profile__impact { margin-top: 10px; padding: 10px; background: rgba(249,115,22,0.1); border-radius: 8px; font-size: 12px; }
-.elevation-profile__impact-title { color: var(--color-primary); font-weight: 500; margin-bottom: 4px; }
-.elevation-profile__impact-values { color: rgba(255,255,255,0.6); }
 
 /* Responsive */
 /* Measure Results Panel */
@@ -747,11 +681,6 @@ input::placeholder { color: var(--color-text-muted); }
 .nav-route-card:hover {
     background: var(--color-bg-hover);
     border-color: rgba(249, 115, 22, 0.3);
-}
-
-.nav-route-card--active {
-    background: rgba(249, 115, 22, 0.1);
-    border-color: rgba(249, 115, 22, 0.5);
 }
 
 .nav-status-indicator {
@@ -1417,7 +1346,6 @@ input::placeholder { color: var(--color-text-muted); }
 
 .terrain-good { color: var(--color-success); }
 .terrain-warn { color: var(--color-warning); }
-.terrain-bad { color: var(--color-error); }
 
 /* Slope colors */
 .terrain-slope-flat { color: #22c55e; }
@@ -1784,18 +1712,6 @@ input::placeholder { color: var(--color-text-muted); }
     border-radius: 8px;
     margin-bottom: 6px;
     background: rgba(255,255,255,0.03);
-}
-
-.terrain-factor--high {
-    border-left: 3px solid var(--color-error);
-}
-
-.terrain-factor--medium {
-    border-left: 3px solid var(--color-warning);
-}
-
-.terrain-factor--low {
-    border-left: 3px solid var(--color-info);
 }
 
 .terrain-factor-type {
@@ -2308,21 +2224,6 @@ input::placeholder { color: var(--color-text-muted); }
     text-transform: uppercase;
 }
 
-.comm-checkin__type--routine {
-    background: rgba(34,197,94,0.15);
-    color: var(--color-success);
-}
-
-.comm-checkin__type--mandatory {
-    background: rgba(239,68,68,0.15);
-    color: var(--color-error);
-}
-
-.comm-checkin__type--optional {
-    background: rgba(59,130,246,0.15);
-    color: var(--color-info);
-}
-
 .comm-checkin__actions {
     display: flex;
     gap: 4px;
@@ -2452,11 +2353,13 @@ input::placeholder { color: var(--color-text-muted); }
     .sidebar__nav { flex-direction: row; flex: 1; justify-content: space-around; }
     .sidebar__nav-item { width: 48px; height: 48px; }
     .sidebar__nav-label { display: none; }
+    .sidebar__divider { display: none; }
     .panel { position: fixed; inset: 0; bottom: 60px; transform: translateX(-100%); transition: transform 0.3s; z-index: 150; }
     .panel--open { transform: translateX(0); }
     .main { margin-bottom: 60px; }
     .map-controls { top: calc(16px + var(--safe-top)); right: 16px; }
     .offline-toggle { top: calc(16px + var(--safe-top)); left: 16px; }
+    .wind-indicator { top: calc(64px + var(--safe-top)); left: 16px; }
     .scale-bar, .coords-display { bottom: calc(16px + 60px); }
     .modal { width: calc(100% - 32px); max-width: 400px; }
     
@@ -3096,267 +2999,9 @@ body.night-mode .situation-wizard__tips .situation-wizard__section-title {
     color: #ff6666;
 }
 
-/* Stealth Quick Toggle Button */
-.stealth-toggle {
-    position: fixed;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    background: rgba(15, 20, 25, 0.9);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(8px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    z-index: 150;
-    transition: all 0.2s;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-}
-
-.stealth-toggle:hover {
-    background: rgba(15, 20, 25, 1);
-    transform: translateX(-50%) scale(1.05);
-}
-
-.stealth-toggle:active {
-    transform: translateX(-50%) scale(0.95);
-}
-
-.stealth-toggle__icon {
-    font-size: 20px;
-    line-height: 1;
-}
-
-.stealth-toggle--dim {
-    background: rgba(5, 5, 8, 0.95);
-    border-color: rgba(100, 80, 40, 0.3);
-}
-
-.stealth-toggle--red {
-    background: rgba(30, 0, 0, 0.95);
-    border-color: rgba(170, 0, 0, 0.4);
-    box-shadow: 0 0 15px rgba(170, 0, 0, 0.3);
-}
-
-.stealth-toggle--blackout {
-    background: #000;
-    border-color: rgba(30, 0, 0, 0.3);
-    opacity: 0.3;
-}
-
-.stealth-toggle--blackout:hover {
-    opacity: 0.6;
-}
-
-/* Stealth Mode Notification */
-.stealth-notification {
-    position: fixed;
-    top: 80px;
-    left: 50%;
-    transform: translateX(-50%) translateY(-20px);
-    background: rgba(15, 20, 25, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 30px;
-    padding: 10px 20px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    z-index: 200;
-    opacity: 0;
-    transition: all 0.3s ease;
-    backdrop-filter: blur(8px);
-}
-
-.stealth-notification--visible {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-}
-
-.stealth-notification__icon {
-    font-size: 18px;
-}
-
-.stealth-notification__text {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--color-text-primary);
-}
-
-/* Stealth Mode Selector Modal */
-.stealth-selector-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.8);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 300;
-    opacity: 0;
-    transition: opacity 0.2s;
-}
-
-.stealth-selector-backdrop--visible {
-    opacity: 1;
-}
-
-.stealth-selector {
-    background: linear-gradient(180deg, var(--color-bg-secondary), var(--color-bg-primary));
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 20px;
-    width: 320px;
-    max-width: calc(100% - 40px);
-    overflow: hidden;
-    transform: scale(0.95);
-    transition: transform 0.2s;
-}
-
-.stealth-selector-backdrop--visible .stealth-selector {
-    transform: scale(1);
-}
-
-.stealth-selector__header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.stealth-selector__header h3 {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--color-text-primary);
-}
-
-.stealth-selector__close {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.05);
-    border: none;
-    color: var(--color-text-muted);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    transition: all 0.2s;
-}
-
-.stealth-selector__close:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--color-text-primary);
-}
-
-.stealth-selector__modes {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    padding: 16px;
-}
-
-.stealth-selector__mode {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    padding: 16px 12px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 12px;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.stealth-selector__mode:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.1);
-}
-
-.stealth-selector__mode--active {
-    background: rgba(249, 115, 22, 0.15);
-    border-color: rgba(249, 115, 22, 0.4);
-}
-
-.stealth-selector__mode-icon {
-    font-size: 28px;
-    line-height: 1;
-}
-
-.stealth-selector__mode-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--color-text-primary);
-}
-
-.stealth-selector__mode-desc {
-    font-size: 11px;
-    color: var(--color-text-muted);
-}
-
-.stealth-selector__options {
-    padding: 0 16px 16px;
-}
-
-.stealth-selector__option {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 10px;
-    cursor: pointer;
-    font-size: 13px;
-    color: var(--color-text-secondary);
-}
-
-.stealth-selector__option input {
-    width: auto;
-    accent-color: var(--color-primary);
-}
-
-.stealth-selector__hint {
-    padding: 12px 16px;
-    background: rgba(0, 0, 0, 0.2);
-    font-size: 11px;
-    color: var(--color-text-muted);
-    text-align: center;
-}
-
-.stealth-selector__hint kbd {
-    display: inline-block;
-    padding: 2px 6px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    font-family: inherit;
-    font-size: 10px;
-}
-
 /* ============================================
    DIM MODE - Reduced brightness
    ============================================ */
-.stealth-dim {
-    --color-primary: #664422;
-    --color-primary-dark: #553311;
-    --color-bg-base: #030305;
-    --color-bg-primary: #050508;
-    --color-bg-secondary: #08080c;
-    --color-bg-elevated: rgba(255, 255, 255, 0.02);
-    --color-bg-hover: rgba(255, 255, 255, 0.03);
-    --color-text-primary: #888888;
-    --color-text-secondary: rgba(136, 136, 136, 0.7);
-    --color-text-muted: rgba(136, 136, 136, 0.4);
-    --color-border: rgba(100, 100, 100, 0.1);
-    --color-success: #2a5a2a;
-    --color-warning: #5a4a1a;
-    --color-error: #5a2a2a;
-    --color-info: #2a3a5a;
-}
 
 .stealth-dim .sidebar__logo {
     background: linear-gradient(135deg, #553311, #442200);
@@ -3368,31 +3013,9 @@ body.night-mode .situation-wizard__tips .situation-wizard__section-title {
     box-shadow: none;
 }
 
-.stealth-dim .stealth-notification {
-    background: rgba(5, 5, 8, 0.95);
-    border-color: rgba(100, 80, 40, 0.2);
-}
-
 /* ============================================
    RED LIGHT MODE - Night vision preservation
    ============================================ */
-.stealth-red {
-    --color-primary: #aa0000;
-    --color-primary-dark: #880000;
-    --color-bg-base: #0a0000;
-    --color-bg-primary: #100000;
-    --color-bg-secondary: #1a0000;
-    --color-bg-elevated: rgba(170, 0, 0, 0.05);
-    --color-bg-hover: rgba(170, 0, 0, 0.1);
-    --color-text-primary: #cc2222;
-    --color-text-secondary: rgba(170, 34, 34, 0.8);
-    --color-text-muted: rgba(170, 34, 34, 0.5);
-    --color-border: rgba(170, 0, 0, 0.2);
-    --color-success: #550000;
-    --color-warning: #663300;
-    --color-error: #aa0000;
-    --color-info: #440000;
-}
 
 .stealth-red .sidebar__logo {
     background: linear-gradient(135deg, #880000, #660000);
@@ -3402,6 +3025,10 @@ body.night-mode .situation-wizard__tips .situation-wizard__section-title {
 .stealth-red .sidebar__nav-item--active {
     background: rgba(170, 0, 0, 0.2);
     color: #cc0000;
+}
+
+.stealth-red .sidebar__divider-label {
+    color: rgba(170, 0, 0, 0.3);
 }
 
 .stealth-red .btn--primary {
@@ -3459,7 +3086,8 @@ body.night-mode .situation-wizard__tips .situation-wizard__section-title {
 }
 
 .stealth-red .scale-bar,
-.stealth-red .coords-display {
+.stealth-red .coords-display,
+.stealth-red .wind-indicator {
     background: rgba(20, 0, 0, 0.9);
     border-color: rgba(170, 0, 0, 0.2);
 }
@@ -3474,63 +3102,14 @@ body.night-mode .situation-wizard__tips .situation-wizard__section-title {
     border-color: rgba(170, 0, 0, 0.2);
 }
 
-.stealth-red .stealth-notification {
-    background: rgba(20, 0, 0, 0.95);
-    border-color: rgba(170, 0, 0, 0.3);
-}
-
-.stealth-red .stealth-selector {
-    background: linear-gradient(180deg, #1a0000, #100000);
-    border-color: rgba(170, 0, 0, 0.2);
-}
-
-.stealth-red .stealth-selector__mode--active {
-    background: rgba(170, 0, 0, 0.2);
-    border-color: rgba(170, 0, 0, 0.4);
-}
-
 .stealth-red input,
 .stealth-red textarea,
-.stealth-red select {
-    background: rgba(170, 0, 0, 0.08);
-    border-color: rgba(170, 0, 0, 0.2);
-    color: #cc2222;
-}
 
 .stealth-red input:focus,
-.stealth-red textarea:focus {
-    border-color: rgba(170, 0, 0, 0.5);
-}
-
-.stealth-red input::placeholder {
-    color: rgba(170, 34, 34, 0.4);
-}
-
-/* Red mode filter for map canvas */
-.stealth-red #map-canvas {
-    filter: grayscale(100%) sepia(100%) hue-rotate(-50deg) saturate(400%) brightness(0.6);
-}
 
 /* ============================================
    BLACKOUT MODE - Maximum stealth
    ============================================ */
-.stealth-blackout {
-    --color-primary: #220000;
-    --color-primary-dark: #110000;
-    --color-bg-base: #000000;
-    --color-bg-primary: #000000;
-    --color-bg-secondary: #050000;
-    --color-bg-elevated: rgba(30, 0, 0, 0.1);
-    --color-bg-hover: rgba(30, 0, 0, 0.2);
-    --color-text-primary: #330000;
-    --color-text-secondary: rgba(40, 0, 0, 0.8);
-    --color-text-muted: rgba(30, 0, 0, 0.6);
-    --color-border: rgba(30, 0, 0, 0.2);
-    --color-success: #0a1a0a;
-    --color-warning: #1a1500;
-    --color-error: #1a0000;
-    --color-info: #000a1a;
-}
 
 .stealth-blackout .sidebar {
     background: #000;
@@ -3550,6 +3129,10 @@ body.night-mode .situation-wizard__tips .situation-wizard__section-title {
 .stealth-blackout .sidebar__nav-item--active {
     background: rgba(30, 0, 0, 0.3);
     color: #330000;
+}
+
+.stealth-blackout .sidebar__divider-label {
+    color: rgba(40, 0, 0, 0.25);
 }
 
 .stealth-blackout .panel {
@@ -3576,7 +3159,8 @@ body.night-mode .situation-wizard__tips .situation-wizard__section-title {
 }
 
 .stealth-blackout .scale-bar,
-.stealth-blackout .coords-display {
+.stealth-blackout .coords-display,
+.stealth-blackout .wind-indicator {
     background: rgba(0, 0, 0, 0.95);
     border-color: rgba(30, 0, 0, 0.15);
     color: #220000;
@@ -3598,29 +3182,8 @@ body.night-mode .situation-wizard__tips .situation-wizard__section-title {
     border-color: rgba(30, 0, 0, 0.2);
 }
 
-.stealth-blackout .stealth-notification {
-    background: #000;
-    border-color: rgba(30, 0, 0, 0.2);
-    color: #330000;
-}
-
-.stealth-blackout .stealth-selector {
-    background: #000;
-    border-color: rgba(30, 0, 0, 0.2);
-}
-
 .stealth-blackout input,
 .stealth-blackout textarea,
-.stealth-blackout select {
-    background: rgba(20, 0, 0, 0.3);
-    border-color: rgba(30, 0, 0, 0.2);
-    color: #330000;
-}
-
-/* Blackout filter for map canvas - extremely dark */
-.stealth-blackout #map-canvas {
-    filter: grayscale(100%) sepia(100%) hue-rotate(-50deg) saturate(200%) brightness(0.15);
-}
 
 /* Hide non-essential elements in blackout */
 .stealth-blackout .sidebar__status,
@@ -3632,33 +3195,11 @@ body.night-mode .situation-wizard__tips .situation-wizard__section-title {
    RESPONSIVE ADJUSTMENTS FOR STEALTH
    ============================================ */
 @media (max-width: 768px) {
-    .stealth-toggle {
-        top: auto;
-        bottom: calc(70px + var(--safe-bottom));
-        right: 16px;
-        left: auto;
-        transform: none;
-    }
-    
-    .stealth-toggle:hover {
-        transform: scale(1.05);
-    }
-    
-    .stealth-toggle:active {
-        transform: scale(0.95);
-    }
-    
-    .stealth-notification {
-        top: calc(70px + var(--safe-top));
-    }
 }
 
 /* Disable transitions in blackout for instant response */
 .stealth-blackout *,
 .stealth-blackout *::before,
-.stealth-blackout *::after {
-    transition-duration: 0s !important;
-}
 
 /* ============================================
    RADIO FREQUENCY REFERENCE STYLES
@@ -3743,21 +3284,6 @@ body.night-mode .situation-wizard__tips .situation-wizard__section-title {
 .comm-tag--secondary {
     background: rgba(59,130,246,0.15);
     color: #3b82f6;
-}
-
-.comm-tag--success {
-    background: rgba(34,197,94,0.15);
-    color: #22c55e;
-}
-
-.comm-tag--warning {
-    background: rgba(249,115,22,0.15);
-    color: #f97316;
-}
-
-.comm-tag--danger {
-    background: rgba(239,68,68,0.15);
-    color: #ef4444;
 }
 
 /* Night mode adjustments for radio panel */
@@ -3909,94 +3435,12 @@ body.stealth-mode .map-context-menu__item:hover {
     }
 }
 
-/* Meshtastic / Mesh Communication Styles */
-.mesh-status-connected {
-    background: rgba(34, 197, 94, 0.1);
-    border-color: rgba(34, 197, 94, 0.3);
-}
-
-.mesh-status-disconnected {
-    background: rgba(255, 255, 255, 0.03);
-    border-color: rgba(255, 255, 255, 0.1);
-}
-
 .mesh-message {
     padding: 8px 10px;
     margin-bottom: 4px;
     border-radius: 6px;
     font-size: 12px;
     word-break: break-word;
-}
-
-.mesh-message--sent {
-    background: rgba(249, 115, 22, 0.15);
-    margin-left: 20px;
-}
-
-.mesh-message--received {
-    background: rgba(255, 255, 255, 0.05);
-    margin-right: 20px;
-}
-
-.mesh-message__meta {
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.4);
-    margin-bottom: 2px;
-}
-
-.team-member-marker {
-    position: relative;
-}
-
-.team-member-marker__status {
-    position: absolute;
-    bottom: -2px;
-    right: -2px;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    border: 2px solid var(--color-bg-secondary);
-}
-
-.team-member-marker__status--active {
-    background: var(--color-success);
-}
-
-.team-member-marker__status--stale {
-    background: var(--color-warning);
-}
-
-.team-member-marker__status--offline {
-    background: #6b7280;
-}
-
-/* APRS / VHF Radio Styles */
-.aprs-status-connected {
-    background: rgba(59, 130, 246, 0.1);
-    border-color: rgba(59, 130, 246, 0.3);
-}
-
-.aprs-status-disconnected {
-    background: rgba(255, 255, 255, 0.03);
-    border-color: rgba(255, 255, 255, 0.1);
-}
-
-.aprs-station-card {
-    padding: 8px;
-    margin-bottom: 6px;
-    background: var(--color-bg-elevated);
-    border: 1px solid rgba(59, 130, 246, 0.2);
-    border-radius: 8px;
-    transition: all 0.2s;
-}
-
-.aprs-station-card:hover {
-    background: var(--color-bg-hover);
-    border-color: rgba(59, 130, 246, 0.4);
-}
-
-.aprs-station-card--stale {
-    opacity: 0.6;
 }
 
 .aprs-callsign {
@@ -4006,59 +3450,15 @@ body.stealth-mode .map-context-menu__item:hover {
     color: #3b82f6;
 }
 
-.aprs-beacon-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    background: rgba(59, 130, 246, 0.15);
-    border-radius: 12px;
-    font-size: 11px;
-    color: #3b82f6;
-}
-
-.aprs-beacon-indicator::before {
-    content: '';
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #3b82f6;
-    animation: aprs-pulse 2s ease-in-out infinite;
-}
-
 @keyframes aprs-pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.5; transform: scale(1.2); }
-}
-
-/* APRS Map Markers */
-.aprs-marker {
-    position: relative;
-}
-
-.aprs-marker__diamond {
-    width: 0;
-    height: 0;
-    border: 12px solid transparent;
-    border-bottom-color: #3b82f6;
-    transform: rotate(45deg);
-}
-
-.aprs-track-tail {
-    stroke: rgba(59, 130, 246, 0.4);
-    stroke-width: 2;
-    stroke-dasharray: 4 4;
-    fill: none;
 }
 
 /* Pulsing animation for SOS/emergency alerts */
 @keyframes sos-pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.7; transform: scale(1.05); }
-}
-
-.sos-alert {
-    animation: sos-pulse 1s ease-in-out infinite;
 }
 
 /* Night mode mesh adjustments */
@@ -5186,39 +4586,6 @@ body.night-mode .toggle-switch input:checked + .toggle-slider {
 }
 
 /* ==================== AQI MAP LAYER STYLES ==================== */
-
-/* AQI Station Tooltips */
-.aqi-station-tooltip {
-    background: white;
-    border: none;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-    padding: 8px 12px;
-}
-
-.aqi-station-tooltip::before {
-    border-top-color: white;
-}
-
-/* AQI Station Popups */
-.aqi-station-popup .leaflet-popup-content-wrapper {
-    background: white;
-    border-radius: 10px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-}
-
-.aqi-station-popup .leaflet-popup-content {
-    margin: 12px;
-}
-
-.aqi-station-popup .leaflet-popup-tip {
-    background: white;
-}
-
-/* AQI marker labels (ensure they don't block clicks) */
-.aqi-label {
-    pointer-events: none !important;
-}
 
 /* Night mode adjustments for AQI elements */
 body.night-mode .aqi-station-tooltip {

@@ -1765,6 +1765,38 @@ const APRSModule = (function() {
         getStation: (callsign) => state.stations.get(callsign),
         clearStations: () => { state.stations.clear(); saveStations(); },
         
+        // Demo/Training API - allows external tools to inject simulated stations
+        injectDemoStations: (demoStations) => {
+            // Only allow in demo mode for security
+            if (!window.__GRIDDOWN_DEMO_MODE__ && !window.__SCENEFORGE_DEMO_MODE__) {
+                console.warn('[APRS] injectDemoStations requires demo mode to be enabled');
+                return false;
+            }
+            if (!Array.isArray(demoStations)) return false;
+            for (const s of demoStations) {
+                if (s.callsign) {
+                    s._injected = true; // Mark as demo station
+                    s._injectedAt = Date.now();
+                    state.stations.set(s.callsign, s);
+                }
+            }
+            console.log(`[APRS] Injected ${demoStations.length} demo stations`);
+            return true;
+        },
+        
+        // Clear only injected demo stations
+        clearDemoStations: () => {
+            let cleared = 0;
+            for (const [callsign, station] of state.stations) {
+                if (station._injected) {
+                    state.stations.delete(callsign);
+                    cleared++;
+                }
+            }
+            console.log(`[APRS] Cleared ${cleared} demo stations`);
+            return cleared;
+        },
+        
         // Distance & Bearing
         calculateDistance,
         calculateBearing,

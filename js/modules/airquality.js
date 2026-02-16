@@ -109,7 +109,13 @@ const AirQualityModule = (function() {
         }
         
         // Allow API key to be set via options or localStorage
-        apiKey = options.apiKey || localStorage.getItem('airnow_api_key') || null;
+        // Migrate from old key name if present
+        const oldKey = localStorage.getItem('airnow_api_key');
+        if (oldKey) {
+            localStorage.setItem('griddown_airnow_api_key', oldKey);
+            localStorage.removeItem('airnow_api_key');
+        }
+        apiKey = options.apiKey || localStorage.getItem('griddown_airnow_api_key') || null;
         
         if (!apiKey) {
             console.warn('AirQualityModule: No API key configured. AQI features will be limited.');
@@ -126,9 +132,9 @@ const AirQualityModule = (function() {
     function setApiKey(key) {
         apiKey = key;
         if (key) {
-            localStorage.setItem('airnow_api_key', key);
+            localStorage.setItem('griddown_airnow_api_key', key);
         } else {
-            localStorage.removeItem('airnow_api_key');
+            localStorage.removeItem('griddown_airnow_api_key');
         }
     }
 

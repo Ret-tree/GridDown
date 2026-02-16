@@ -139,10 +139,20 @@ const PlanSharingModule = (function() {
             logisticsConfig = LogisticsModule.getConfig();
         }
 
-        // Get contingency plans if available
-        let contingencyPlans = null;
-        if (typeof ContingencyModule !== 'undefined' && ContingencyModule.getPlans) {
-            contingencyPlans = ContingencyModule.getPlans();
+        // Get contingency config and current plan if available
+        let contingencyData = null;
+        if (typeof ContingencyModule !== 'undefined') {
+            contingencyData = {};
+            if (ContingencyModule.getConfig) {
+                contingencyData.config = ContingencyModule.getConfig();
+            }
+            if (ContingencyModule.getCurrentPlan) {
+                contingencyData.currentPlan = ContingencyModule.getCurrentPlan();
+            }
+            // Only include if we got actual data
+            if (!contingencyData.config && !contingencyData.currentPlan) {
+                contingencyData = null;
+            }
         }
 
         return {
@@ -158,7 +168,7 @@ const PlanSharingModule = (function() {
             
             // Optional modules
             logistics: logisticsConfig,
-            contingency: contingencyPlans,
+            contingency: contingencyData,
             
             // Metadata for conflict resolution
             checksum: generateChecksum(selectedWaypoints, selectedRoutes)
@@ -486,6 +496,13 @@ const PlanSharingModule = (function() {
         if (importedPlan.logistics && resolutions.importLogistics) {
             if (typeof LogisticsModule !== 'undefined') {
                 LogisticsModule.setConfig(importedPlan.logistics);
+            }
+        }
+
+        // Import contingency config if present and user wants it
+        if (importedPlan.contingency?.config && resolutions.importContingency) {
+            if (typeof ContingencyModule !== 'undefined' && ContingencyModule.setConfig) {
+                ContingencyModule.setConfig(importedPlan.contingency.config);
             }
         }
 

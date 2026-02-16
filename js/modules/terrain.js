@@ -142,8 +142,8 @@ const TerrainModule = (function() {
 
             const slope = Math.atan(Math.sqrt(dzdx*dzdx + dzdy*dzdy)) * (180 / Math.PI);
             
-            // Calculate aspect (direction slope faces)
-            let aspect = Math.atan2(-dzdy, -dzdx) * (180 / Math.PI);
+            // Calculate aspect (compass bearing of downhill direction)
+            let aspect = Math.atan2(-dzdx, -dzdy) * (180 / Math.PI);
             if (aspect < 0) aspect += 360;
 
             const result = {
@@ -229,7 +229,7 @@ const TerrainModule = (function() {
                 totalClimb: Math.round(totalClimb),
                 totalDescent: Math.round(totalDescent),
                 maxSlope: Math.round(maxSlope * 10) / 10,
-                avgSlope: Math.round((totalClimb + totalDescent) / totalDistance * 100 * 10) / 10,
+                avgSlope: segments.length > 1 ? Math.round(segments.slice(1).reduce((sum, s) => sum + Math.abs(s.slope), 0) / (segments.length - 1) * 10) / 10 : 0,
                 steepSegments,
                 steepPercentage: Math.round(steepSegments / (segments.length - 1) * 100)
             },
@@ -405,7 +405,6 @@ const TerrainModule = (function() {
         let maxVisibleDistance = 0;
         let maxAngleToHorizon = -90;
 
-        const bearingRad = bearing * Math.PI / 180;
         const steps = Math.ceil(maxRange / resolution);
 
         for (let i = 1; i <= steps; i++) {
@@ -785,7 +784,9 @@ const TerrainModule = (function() {
                 centerElev - minElev;
 
             // Calculate terrain position (ridge, slope, valley)
-            const elevPercentile = (centerElev - minElev) / (maxElev - minElev) * 100;
+            const localRelief = maxElev - minElev;
+            const elevPercentile = localRelief > 0 ? 
+                (centerElev - minElev) / localRelief * 100 : 50; // Flat terrain = neutral
             let terrainPosition;
             if (elevPercentile >= 80) terrainPosition = 'ridge';
             else if (elevPercentile >= 50) terrainPosition = 'upper_slope';
@@ -821,7 +822,7 @@ const TerrainModule = (function() {
                 },
                 terrain: {
                     position: terrainPosition,
-                    localRelief: Math.round(maxElev - minElev),
+                    localRelief: Math.round(localRelief),
                     elevationPercentile: Math.round(elevPercentile)
                 },
                 risk: {

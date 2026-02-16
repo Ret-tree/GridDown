@@ -15,23 +15,42 @@ const SidebarModule = (function() {
     function render() {
         const active = State.get('activePanel');
         const offline = State.get('isOffline');
+        
+        // Preserve nav scroll position across innerHTML rebuild
+        const navEl = el ? el.querySelector('.sidebar__nav') : null;
+        const savedScroll = navEl ? navEl.scrollTop : 0;
+        
         el.innerHTML = `
             <div class="sidebar__logo" role="img" aria-label="GridDown logo">${Icons.get('compass')}</div>
             <button class="sidebar__search" id="sidebar-search" title="Search (Ctrl+K)" aria-label="Search. Keyboard shortcut: Control plus K" aria-keyshortcuts="Control+K">
                 ${Icons.get('search')}
             </button>
             <nav class="sidebar__nav" role="menubar" aria-label="Main navigation">
-                ${Constants.NAV_ITEMS.map((item, index) => `
+                ${(() => {
+                    let lastCategory = '';
+                    let menuIndex = 0;
+                    return Constants.NAV_ITEMS.map((item) => {
+                        let divider = '';
+                        if (item.category && item.category !== lastCategory) {
+                            // Skip divider before first category (EMERGENCY is visually distinct)
+                            if (lastCategory !== '') {
+                                divider = `<div class="sidebar__divider" role="separator" aria-hidden="true"><span class="sidebar__divider-label">${item.category}</span></div>`;
+                            }
+                            lastCategory = item.category;
+                        }
+                        const idx = menuIndex++;
+                        return divider + `
                     <button class="sidebar__nav-item ${active === item.id ? 'sidebar__nav-item--active' : ''}" 
                             data-panel="${item.id}"
                             role="menuitem"
                             aria-current="${active === item.id ? 'page' : 'false'}"
                             aria-label="${item.label} panel"
-                            tabindex="${index === 0 ? '0' : '-1'}">
+                            tabindex="${idx === 0 ? '0' : '-1'}">
                         <span aria-hidden="true">${Icons.get(item.icon)}</span>
                         <span class="sidebar__nav-label">${item.label}</span>
-                    </button>
-                `).join('')}
+                    </button>`;
+                    }).join('');
+                })()}
             </nav>
             <div class="sidebar__spacer"></div>
             <div class="sidebar__status" role="status" aria-live="polite" aria-label="Connection status">
@@ -84,6 +103,12 @@ const SidebarModule = (function() {
                 if (Helpers.isMobile()) State.UI.openPanel();
             };
         });
+        
+        // Restore nav scroll position
+        if (savedScroll > 0) {
+            const newNavEl = el.querySelector('.sidebar__nav');
+            if (newNavEl) newNavEl.scrollTop = savedScroll;
+        }
     }
 
     return { init, render };

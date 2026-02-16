@@ -1286,6 +1286,49 @@ const ModalsModule = (function() {
     }
 
     let toastTimeout = null;
+
+    /**
+     * Show a generic informational modal with proper ARIA
+     * @param {string} title - Modal title
+     * @param {string} bodyHtml - HTML content for the body
+     */
+    function showModal(title, bodyHtml) {
+        container.setAttribute('aria-hidden', 'false');
+        container.innerHTML = `
+            <div class="modal-backdrop" id="modal-backdrop" role="presentation">
+                <div class="modal" style="max-width:560px;max-height:90vh" role="dialog" aria-modal="true" aria-labelledby="generic-modal-title">
+                    <div class="modal__header">
+                        <h3 class="modal__title" id="generic-modal-title">${Helpers.escapeHtml(title)}</h3>
+                        <button class="modal__close" id="modal-close" aria-label="Close dialog">${Icons.get('close')}</button>
+                    </div>
+                    <div class="modal__body" style="padding:16px;overflow-y:auto;max-height:70vh">
+                        ${bodyHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const closeBtn = container.querySelector('#modal-close');
+        const backdrop = container.querySelector('#modal-backdrop');
+        const close = () => closeModal();
+        
+        if (closeBtn) closeBtn.onclick = close;
+        if (backdrop) backdrop.onclick = (e) => {
+            if (e.target === backdrop) close();
+        };
+        
+        // Focus the close button for keyboard users
+        if (closeBtn) closeBtn.focus();
+        
+        // Escape to close
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                close();
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+    }
     
     function showToast(message, type = 'info', duration = 1200) {
         const toastContainer = document.getElementById('toast-container');
@@ -1301,7 +1344,7 @@ const ModalsModule = (function() {
         
         const toast = document.createElement('div');
         toast.className = `toast toast--${type}`;
-        toast.innerHTML = `<span class="toast__icon">${Icons.get(type === 'success' ? 'check' : type === 'error' ? 'alert' : 'info')}</span><span class="toast__message">${message}</span>`;
+        toast.innerHTML = `<span class="toast__icon">${Icons.get(type === 'success' ? 'check' : type === 'error' ? 'alert' : 'info')}</span><span class="toast__message">${Helpers.escapeHtml(message)}</span>`;
         toast.style.cursor = 'pointer';
         toastContainer.appendChild(toast);
         
@@ -1323,6 +1366,6 @@ const ModalsModule = (function() {
         }, duration);
     }
 
-    return { init, openWaypointModal, confirmDeleteWaypoint, closeModal, showToast };
+    return { init, openWaypointModal, confirmDeleteWaypoint, closeModal, showModal, showToast };
 })();
 window.ModalsModule = ModalsModule;

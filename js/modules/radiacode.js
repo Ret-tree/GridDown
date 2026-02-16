@@ -189,12 +189,22 @@ const RadiaCodeModule = (function() {
         alertSoundEnabled: true,
         lastAlertTime: 0,
         
+        // Persistent dose log
+        doseLog: {
+            cumulativeDose: 0,      // μSv total across all sessions
+            sessions: [],           // { startedAt, endedAt, dose, deviceSerial }
+            currentSessionStart: null,
+            currentSessionDose: 0,
+            lastSaveTime: 0
+        },
+        
         // Settings
         settings: {
             thresholds: { ...CONFIG.thresholds },
             cpsThresholds: { ...CONFIG.cpsThresholds },
             alertDebounceMs: 5000,
-            autoRecordOnConnect: false
+            autoRecordOnConnect: false,
+            heatmapEnabled: false
         },
         
         // Receive buffer for BLE packets
@@ -233,6 +243,7 @@ const RadiaCodeModule = (function() {
         
         loadSettings();
         loadTracks();
+        loadDoseLog();
         
         initialized = true;
         console.log('RadiaCode module initialized');
@@ -303,6 +314,57 @@ const RadiaCodeModule = (function() {
         }
     }
 
+    async function loadDoseLog() {
+        try {
+            if (typeof Storage !== 'undefined' && Storage.Settings) {
+                const log = await Storage.Settings.get('radiacode_dose_log');
+                if (log) {
+                    state.doseLog.cumulativeDose = log.cumulativeDose || 0;
+                    state.doseLog.sessions = log.sessions || [];
+                }
+            }
+        } catch (e) {
+            console.warn('Could not load RadiaCode dose log:', e);
+        }
+    }
+
+    async function saveDoseLog() {
+        try {
+            if (typeof Storage !== 'undefined' && Storage.Settings) {
+                await Storage.Settings.set('radiacode_dose_log', {
+                    cumulativeDose: state.doseLog.cumulativeDose,
+                    sessions: state.doseLog.sessions.slice(-200) // keep last 200 sessions
+                });
+            }
+        } catch (e) {
+            console.warn('Could not save RadiaCode dose log:', e);
+        }
+    }
+
+    function startDoseSession() {
+        state.doseLog.currentSessionStart = Date.now();
+        state.doseLog.currentSessionDose = 0;
+    }
+
+    function endDoseSession() {
+        if (!state.doseLog.currentSessionStart) return;
+        
+        const session = {
+            startedAt: state.doseLog.currentSessionStart,
+            endedAt: Date.now(),
+            dose: state.doseLog.currentSessionDose,
+            deviceSerial: state.deviceInfo.serialNumber || 'unknown'
+        };
+        
+        if (session.dose > 0) {
+            state.doseLog.sessions.push(session);
+        }
+        
+        state.doseLog.currentSessionStart = null;
+        state.doseLog.currentSessionDose = 0;
+        saveDoseLog();
+    }
+
     // ==================== Demo Mode ====================
 
     /**
@@ -332,6 +394,7 @@ const RadiaCodeModule = (function() {
         // Start generating readings
         demoInterval = setInterval(generateDemoReading, CONFIG.demo.updateIntervalMs);
         
+        startDoseSession();
         emitConnectionState();
         
         if (typeof ModalsModule !== 'undefined') {
@@ -349,6 +412,7 @@ const RadiaCodeModule = (function() {
             clearInterval(demoInterval);
             demoInterval = null;
         }
+        endDoseSession();
         state.demoMode = false;
     }
 
@@ -394,19 +458,26 @@ const RadiaCodeModule = (function() {
     function generateDemoSpectrum() {
         const counts = new Array(1024).fill(0);
         
-        // Background continuum (decreasing exponential)
+        // Background continuum (decreasing exponential + flat floor)
         for (let i = 0; i < 1024; i++) {
-            counts[i] = Math.max(0, Math.floor(1000 * Math.exp(-i / 200) + Math.random() * 10));
+            counts[i] = Math.max(0, Math.floor(800 * Math.exp(-i / 150) + 5 + Math.random() * 3));
         }
         
-        // Add K-40 peak at 1461 keV (channel ~487 with typical calibration)
-        addPeakToSpectrum(counts, 487, 500, 15);
+        // Add realistic gamma peaks (narrower, taller for detection)
+        // K-40 at 1461 keV (channel ~487) - natural background potassium
+        addPeakToSpectrum(counts, 487, 1200, 8);
         
-        // Add Bi-214 peak at 609 keV (channel ~203)
-        addPeakToSpectrum(counts, 203, 200, 12);
+        // Cs-137 at 662 keV (channel ~221) - most commonly detected
+        addPeakToSpectrum(counts, 221, 800, 8);
         
-        // Add Pb-214 peak at 352 keV (channel ~117)
-        addPeakToSpectrum(counts, 117, 150, 10);
+        // Bi-214 at 609 keV (channel ~203) - radon chain
+        addPeakToSpectrum(counts, 203, 600, 8);
+        
+        // Pb-214 at 352 keV (channel ~117) - radon chain
+        addPeakToSpectrum(counts, 117, 400, 8);
+        
+        // Tl-208 at 2615 keV (channel ~872) - thorium chain
+        addPeakToSpectrum(counts, 872, 300, 10);
         
         state.spectrum = {
             counts: counts,
@@ -494,6 +565,9 @@ const RadiaCodeModule = (function() {
             // Query device info
             await queryDeviceInfo();
             
+            // Start dose tracking session
+            startDoseSession();
+            
             // Start polling for data
             startPolling();
 
@@ -525,6 +599,7 @@ const RadiaCodeModule = (function() {
         }
         
         stopPolling();
+        endDoseSession();
         stopDemo();
         
         if (state.bleDevice && state.bleDevice.gatt && state.bleDevice.gatt.connected) {
@@ -548,6 +623,7 @@ const RadiaCodeModule = (function() {
         console.log('RadiaCode: Device disconnected');
         
         stopPolling();
+        endDoseSession();
         
         state.connected = false;
         state.bleDevice = null;
@@ -919,6 +995,24 @@ const RadiaCodeModule = (function() {
      * Process a new radiation reading
      */
     function processReading(reading) {
+        // Accumulate dose from time between readings
+        const prevReading = state.currentReading;
+        if (prevReading.timestamp && reading.timestamp && reading.doseRate > 0) {
+            const hours = (reading.timestamp - prevReading.timestamp) / 3600000;
+            if (hours > 0 && hours < 1) { // sanity: ignore gaps > 1 hour
+                const doseIncrement = reading.doseRate * hours;
+                state.doseLog.currentSessionDose += doseIncrement;
+                state.doseLog.cumulativeDose += doseIncrement;
+                
+                // Persist every 30 seconds
+                const now = Date.now();
+                if (now - state.doseLog.lastSaveTime > 30000) {
+                    state.doseLog.lastSaveTime = now;
+                    saveDoseLog();
+                }
+            }
+        }
+        
         state.currentReading = reading;
         state.stats.lastUpdate = Date.now();
         
@@ -1249,18 +1343,39 @@ const RadiaCodeModule = (function() {
     function findPeaks(minSignificance = 3.0) {
         const counts = state.spectrum.counts;
         const peaks = [];
-        const window = 10;
+        const halfWin = 15;    // look ±15 channels from candidate
+        const edgeBand = 5;    // use 5 channels at each edge for background estimate
+        const peakHalf = 4;    // peak region ±4 channels from center
         
-        for (let i = window; i < counts.length - window; i++) {
-            const localRegion = counts.slice(i - window, i + window + 1);
-            const localMax = Math.max(...localRegion);
-            const localMean = localRegion.reduce((a, b) => a + b, 0) / localRegion.length;
-            const localStd = Math.sqrt(localRegion.reduce((acc, val) => acc + (val - localMean) ** 2, 0) / localRegion.length);
+        // Scan for local maxima first
+        for (let i = halfWin; i < counts.length - halfWin; i++) {
+            // Must be local maximum within ±peakHalf
+            let isMax = true;
+            for (let d = 1; d <= peakHalf; d++) {
+                if (counts[i] < counts[i - d] || counts[i] < counts[i + d]) {
+                    isMax = false;
+                    break;
+                }
+            }
+            if (!isMax || counts[i] < 10) continue;
             
-            if (counts[i] === localMax && localStd > 0) {
-                const significance = (counts[i] - localMean) / localStd;
-                
-                if (significance >= minSignificance) {
+            // Estimate background from window edges (outside peak region)
+            let bgSum = 0;
+            let bgCount = 0;
+            for (let d = halfWin - edgeBand; d <= halfWin; d++) {
+                bgSum += counts[i - d] + counts[i + d];
+                bgCount += 2;
+            }
+            const bgEstimate = bgSum / bgCount;
+            
+            // Poisson significance: (signal - background) / sqrt(background)
+            if (bgEstimate <= 0) continue;
+            const significance = (counts[i] - bgEstimate) / Math.sqrt(bgEstimate);
+            
+            if (significance >= minSignificance) {
+                // Avoid duplicates within ±peakHalf of an already-found peak
+                const tooClose = peaks.some(p => Math.abs(p.channel - i) < peakHalf * 2);
+                if (!tooClose) {
                     peaks.push({
                         channel: i,
                         energy: channelToEnergy(i),
@@ -1298,6 +1413,155 @@ const RadiaCodeModule = (function() {
         
         matches.sort((a, b) => b.confidence - a.confidence);
         return matches;
+    }
+
+    // ==================== CSV/GPX Export ====================
+
+    function exportTrackCSV(trackId) {
+        const track = state.tracks.find(t => t.id === trackId);
+        if (!track) return null;
+        
+        const header = 'timestamp,datetime_utc,latitude,longitude,altitude_m,dose_rate_uSv_h,count_rate_cps,level';
+        const rows = track.points
+            .filter(p => p.latitude && p.longitude)
+            .map(p => [
+                p.timestamp,
+                new Date(p.timestamp).toISOString(),
+                p.latitude.toFixed(7),
+                p.longitude.toFixed(7),
+                (p.altitude || 0).toFixed(1),
+                p.doseRate.toFixed(4),
+                p.countRate.toFixed(1),
+                getDoseLevel(p.doseRate)
+            ].join(','));
+        
+        return header + '\n' + rows.join('\n') + '\n';
+    }
+
+    function exportTrackGPX(trackId) {
+        const track = state.tracks.find(t => t.id === trackId);
+        if (!track) return null;
+        
+        const points = track.points.filter(p => p.latitude && p.longitude);
+        if (points.length === 0) return null;
+        
+        const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        
+        let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="GridDown RadiaCode"
+     xmlns="http://www.topografix.com/GPX/1/1"
+     xmlns:griddown="http://griddown.app/gpx/radiation/1"
+     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <metadata>
+    <name>${esc(track.name)}</name>
+    <desc>Radiation survey track. Avg: ${track.stats.avgDoseRate?.toFixed(3) || 0} μSv/h, Max: ${track.stats.maxDoseRate?.toFixed(3) || 0} μSv/h</desc>
+    <time>${new Date(track.startedAt).toISOString()}</time>
+  </metadata>
+  <trk>
+    <name>${esc(track.name)}</name>
+    <type>Radiation Survey</type>
+    <trkseg>
+`;
+        
+        points.forEach(p => {
+            gpx += `      <trkpt lat="${p.latitude.toFixed(7)}" lon="${p.longitude.toFixed(7)}">
+        <ele>${(p.altitude || 0).toFixed(1)}</ele>
+        <time>${new Date(p.timestamp).toISOString()}</time>
+        <extensions>
+          <griddown:doseRate>${p.doseRate.toFixed(4)}</griddown:doseRate>
+          <griddown:countRate>${p.countRate.toFixed(1)}</griddown:countRate>
+          <griddown:level>${getDoseLevel(p.doseRate)}</griddown:level>
+        </extensions>
+      </trkpt>
+`;
+        });
+        
+        gpx += `    </trkseg>
+  </trk>
+</gpx>`;
+        
+        return gpx;
+    }
+
+    // ==================== Heatmap Rendering ====================
+
+    function renderHeatmap(ctx, width, height, latLonToPixel) {
+        // Gather all geo-tagged points from all tracks + current track
+        const allPoints = [];
+        state.tracks.forEach(track => {
+            track.points.forEach(p => {
+                if (p.latitude && p.longitude) allPoints.push(p);
+            });
+        });
+        if (state.isRecording && state.currentTrack) {
+            state.currentTrack.points.forEach(p => {
+                if (p.latitude && p.longitude) allPoints.push(p);
+            });
+        }
+        
+        if (allPoints.length < 3) return; // need minimum points for interpolation
+        
+        // Determine visible bounds by testing corners
+        // Use a cell grid for IDW interpolation
+        const cellSize = 12; // pixels per cell
+        const cols = Math.ceil(width / cellSize);
+        const rows = Math.ceil(height / cellSize);
+        
+        // Convert all points to pixel coords once
+        const pixelPoints = allPoints.map(p => {
+            const px = latLonToPixel(p.latitude, p.longitude);
+            return { x: px.x, y: px.y, dose: p.doseRate };
+        }).filter(p => p.x > -200 && p.x < width + 200 && p.y > -200 && p.y < height + 200);
+        
+        if (pixelPoints.length < 2) return;
+        
+        // Influence radius in pixels (adaptive based on point density)
+        const avgSpacing = Math.sqrt((width * height) / pixelPoints.length);
+        const radius = Math.max(cellSize * 3, Math.min(avgSpacing * 2.5, 150));
+        const radiusSq = radius * radius;
+        
+        // IDW interpolation per cell
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                const cx = col * cellSize + cellSize / 2;
+                const cy = row * cellSize + cellSize / 2;
+                
+                let weightedSum = 0;
+                let weightTotal = 0;
+                let nearbyCount = 0;
+                
+                for (let i = 0; i < pixelPoints.length; i++) {
+                    const dx = cx - pixelPoints[i].x;
+                    const dy = cy - pixelPoints[i].y;
+                    const distSq = dx * dx + dy * dy;
+                    
+                    if (distSq > radiusSq) continue;
+                    
+                    nearbyCount++;
+                    // IDW with power=2
+                    const w = 1 / (distSq + 1);
+                    weightedSum += w * pixelPoints[i].dose;
+                    weightTotal += w;
+                }
+                
+                if (nearbyCount < 1 || weightTotal === 0) continue;
+                
+                const interpolatedDose = weightedSum / weightTotal;
+                const color = getDoseColor(interpolatedDose);
+                
+                // Opacity based on confidence (more nearby points = higher)
+                const confidence = Math.min(1.0, nearbyCount / 4);
+                const alpha = 0.15 + confidence * 0.2;
+                
+                // Parse hex color
+                const r = parseInt(color.slice(1, 3), 16);
+                const g = parseInt(color.slice(3, 5), 16);
+                const b = parseInt(color.slice(5, 7), 16);
+                
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha.toFixed(2)})`;
+                ctx.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+            }
+        }
     }
 
     // ==================== Utilities ====================
@@ -1358,6 +1622,11 @@ const RadiaCodeModule = (function() {
     // ==================== Map Rendering ====================
 
     function renderOnMap(ctx, width, height, latLonToPixel) {
+        // Heatmap layer (renders under tracks and dots)
+        if (state.settings.heatmapEnabled) {
+            renderHeatmap(ctx, width, height, latLonToPixel);
+        }
+        
         state.tracks.forEach(track => {
             renderTrack(ctx, track, latLonToPixel, width, height, false);
         });
@@ -1505,6 +1774,8 @@ const RadiaCodeModule = (function() {
         getTrack: (id) => state.tracks.find(t => t.id === id),
         deleteTrack,
         exportTrackGeoJSON,
+        exportTrackCSV,
+        exportTrackGPX,
         
         // Alerts
         getAlertLevel: () => state.currentAlertLevel,
@@ -1540,6 +1811,26 @@ const RadiaCodeModule = (function() {
         
         // Map rendering
         renderOnMap,
+        
+        // Dose log
+        getDoseLog: () => ({
+            cumulativeDose: state.doseLog.cumulativeDose,
+            currentSessionDose: state.doseLog.currentSessionDose,
+            sessions: [...state.doseLog.sessions]
+        }),
+        resetDoseLog: () => {
+            state.doseLog.cumulativeDose = 0;
+            state.doseLog.sessions = [];
+            state.doseLog.currentSessionDose = 0;
+            saveDoseLog();
+        },
+        
+        // Heatmap
+        isHeatmapEnabled: () => state.settings.heatmapEnabled,
+        setHeatmapEnabled: (enabled) => {
+            state.settings.heatmapEnabled = enabled;
+            saveSettings();
+        },
         
         // Stats
         getStats: () => ({ ...state.stats }),

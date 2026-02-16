@@ -65,6 +65,12 @@ const UndoModule = (function() {
      * Handle keyboard shortcuts
      */
     function handleKeyboard(e) {
+        // Don't intercept when user is typing in an input field
+        const tag = e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) {
+            return;
+        }
+        
         // Ctrl+Z or Cmd+Z for undo
         if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
             e.preventDefault();

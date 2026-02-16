@@ -242,7 +242,11 @@ const TeamModule = (function() {
         if (updates.commPlan) state.currentTeam.commPlan = { ...state.currentTeam.commPlan, ...updates.commPlan };
         
         saveTeamState();
-        broadcastTeamSync('team_info');
+        broadcastTeamSync('team_info', { 
+            name: state.currentTeam.name, 
+            description: state.currentTeam.description,
+            settings: state.currentTeam.settings 
+        });
         Events.emit('team:updated', { team: state.currentTeam });
         
         return state.currentTeam;
@@ -428,17 +432,18 @@ const TeamModule = (function() {
         };
     }
     
-    function exportTeamPackageEncrypted(passphrase = null) {
+    async function exportTeamPackageEncrypted(passphrase = null) {
         const pkg = generateTeamPackage();
         const key = passphrase || state.currentTeam.passphrase;
         
         return {
             type: 'griddown_team_encrypted',
             version: TEAM_VERSION,
+            encryption: 'aes-gcm',
             teamId: pkg.teamId,
             teamName: pkg.teamName,
             memberCount: pkg.memberCount,
-            data: simpleEncrypt(JSON.stringify(pkg), key)
+            data: await encryptData(JSON.stringify(pkg), key)
         };
     }
     
@@ -459,7 +464,22 @@ const TeamModule = (function() {
     
     async function generateTeamQR(size = 200) {
         const code = generateInviteCode();
-        return generateQRCodeCanvas(code, size);
+        
+        if (typeof QRGenerator !== 'undefined') {
+            // Use real QR encoder
+            const canvas = QRGenerator.toCanvas(code, size);
+            // Add team ID label below
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#000000';
+            ctx.font = `bold ${Math.floor(size / 16)}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.fillText(state.currentTeam?.id || 'TEAM', canvas.width / 2, canvas.height - 4);
+            return canvas.toDataURL('image/png');
+        }
+        
+        // Fallback: return the invite code as text (no QR available)
+        console.warn('QRGenerator not loaded, QR code unavailable');
+        return null;
     }
     
     async function importTeamPackage(packageData, passphrase = null) {
@@ -494,7 +514,13 @@ const TeamModule = (function() {
         if (!pkg) {
             if (packageData.type === 'griddown_team_encrypted') {
                 if (!passphrase) throw new Error('Passphrase required');
-                const decrypted = simpleDecrypt(packageData.data, passphrase);
+                let decrypted;
+                if (packageData.encryption === 'aes-gcm') {
+                    decrypted = await decryptData(packageData.data, passphrase);
+                } else {
+                    // Legacy XOR-encoded packages (pre-AES upgrade)
+                    decrypted = legacyDecrypt(packageData.data, passphrase);
+                }
                 pkg = JSON.parse(decrypted);
             } else if (packageData.type === 'griddown_team_package') {
                 pkg = packageData;
@@ -556,8 +582,8 @@ const TeamModule = (function() {
         return state.currentTeam;
     }
     
-    function downloadTeamPackage(filename = null) {
-        const encrypted = exportTeamPackageEncrypted();
+    async function downloadTeamPackage(filename = null) {
+        const encrypted = await exportTeamPackageEncrypted();
         const json = JSON.stringify(encrypted, null, 2);
         const blob = new Blob([json], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -618,7 +644,7 @@ const TeamModule = (function() {
         addRallyToWaypoints(rp);
         
         saveTeamState();
-        broadcastTeamSync('rally_update');
+        broadcastTeamSync('rally_update', { rallyPoints: state.currentTeam.rallyPoints });
         Events.emit('team:rally_added', { rallyPoint: rp });
         
         return rp;
@@ -635,7 +661,7 @@ const TeamModule = (function() {
         rp.updatedAt = Date.now();
         
         saveTeamState();
-        broadcastTeamSync('rally_update');
+        broadcastTeamSync('rally_update', { rallyPoints: state.currentTeam.rallyPoints });
         Events.emit('team:rally_updated', { rallyPoint: rp });
         
         return rp;
@@ -654,7 +680,7 @@ const TeamModule = (function() {
         removeRallyFromWaypoints(rallyId);
         
         saveTeamState();
-        broadcastTeamSync('rally_update');
+        broadcastTeamSync('rally_update', { rallyPoints: state.currentTeam.rallyPoints });
         Events.emit('team:rally_removed', { rallyId });
         
         return true;
@@ -676,8 +702,6 @@ const TeamModule = (function() {
             type: 'bailout',
             lat: rp.lat,
             lon: rp.lon,
-            x: 50 + (rp.lon + 119.1892) / 0.004,
-            y: 50 + (rp.lat - 37.4215) / 0.002,
             notes: `[Team Rally - ${typeInfo.name}]\n${rp.notes || ''}\n${rp.schedule ? `Schedule: ${rp.schedule}` : ''}`,
             teamRallyId: rp.id,
             isTeamWaypoint: true
@@ -801,6 +825,13 @@ const TeamModule = (function() {
                     importRallyPointsToWaypoints();
                 }
                 break;
+            
+            case 'comm_plan':
+                if (msg.d.commPlan) {
+                    state.currentTeam.commPlan = { ...state.currentTeam.commPlan, ...msg.d.commPlan };
+                    Events.emit('team:comm_plan_updated', { commPlan: state.currentTeam.commPlan });
+                }
+                break;
                 
             case 'team_dissolved':
                 const teamName = state.currentTeam.name;
@@ -884,16 +915,78 @@ const TeamModule = (function() {
         return words[Math.floor(Math.random() * words.length)];
     }
     
-    function simpleEncrypt(text, key) {
-        const keyHash = hashString(key);
-        let result = '';
-        for (let i = 0; i < text.length; i++) {
-            result += String.fromCharCode(text.charCodeAt(i) ^ ((keyHash >> (i % 32)) & 0xFF));
-        }
-        return btoa(result);
+    // =========================================================================
+    // ENCRYPTION (AES-GCM via Web Crypto API)
+    // =========================================================================
+    
+    /**
+     * Derive an AES-256 key from a passphrase using PBKDF2
+     */
+    async function deriveKey(passphrase, salt) {
+        const encoder = new TextEncoder();
+        const keyMaterial = await crypto.subtle.importKey(
+            'raw', encoder.encode(passphrase), 'PBKDF2', false, ['deriveKey']
+        );
+        return crypto.subtle.deriveKey(
+            { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+            keyMaterial,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt', 'decrypt']
+        );
     }
     
-    function simpleDecrypt(encoded, key) {
+    /**
+     * Encrypt text with AES-GCM
+     * Output: base64(salt[16] + iv[12] + ciphertext)
+     */
+    async function encryptData(text, passphrase) {
+        const encoder = new TextEncoder();
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const key = await deriveKey(passphrase, salt);
+        
+        const ciphertext = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv },
+            key,
+            encoder.encode(text)
+        );
+        
+        // Concatenate salt + iv + ciphertext
+        const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+        combined.set(salt, 0);
+        combined.set(iv, salt.length);
+        combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
+        
+        return btoa(String.fromCharCode(...combined));
+    }
+    
+    /**
+     * Decrypt AES-GCM encrypted data
+     */
+    async function decryptData(encoded, passphrase) {
+        const decoder = new TextDecoder();
+        const combined = Uint8Array.from(atob(encoded), c => c.charCodeAt(0));
+        
+        const salt = combined.slice(0, 16);
+        const iv = combined.slice(16, 28);
+        const ciphertext = combined.slice(28);
+        
+        const key = await deriveKey(passphrase, salt);
+        
+        const plaintext = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv },
+            key,
+            ciphertext
+        );
+        
+        return decoder.decode(plaintext);
+    }
+    
+    /**
+     * Legacy XOR decrypt for backward compatibility with v1.0 packages
+     */
+    function legacyDecrypt(encoded, key) {
         const text = atob(encoded);
         const keyHash = hashString(key);
         let result = '';
@@ -912,63 +1005,6 @@ const TeamModule = (function() {
         return Math.abs(hash);
     }
     
-    function generateQRCodeCanvas(data, size) {
-        const canvas = document.createElement('canvas');
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-        
-        // White background
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, size, size);
-        
-        // Generate pattern
-        const moduleSize = Math.floor(size / 29);
-        const margin = Math.floor((size - moduleSize * 25) / 2);
-        const hash = hashString(data);
-        
-        ctx.fillStyle = '#000000';
-        
-        // Finder patterns
-        drawFinderPattern(ctx, margin, margin, moduleSize);
-        drawFinderPattern(ctx, margin + moduleSize * 18, margin, moduleSize);
-        drawFinderPattern(ctx, margin, margin + moduleSize * 18, moduleSize);
-        
-        // Data modules
-        for (let row = 0; row < 25; row++) {
-            for (let col = 0; col < 25; col++) {
-                // Skip finder areas
-                if ((row < 9 && col < 9) || (row < 9 && col > 15) || (row > 15 && col < 9)) continue;
-                
-                const idx = row * 25 + col;
-                const charCode = data.charCodeAt(idx % data.length);
-                
-                if ((charCode + hash + idx) % 3 === 0) {
-                    ctx.fillRect(
-                        margin + col * moduleSize,
-                        margin + row * moduleSize,
-                        moduleSize - 1,
-                        moduleSize - 1
-                    );
-                }
-            }
-        }
-        
-        // Team ID label
-        ctx.font = `bold ${Math.floor(size / 16)}px monospace`;
-        ctx.textAlign = 'center';
-        ctx.fillText(state.currentTeam?.id || 'TEAM', size / 2, size - 8);
-        
-        return canvas.toDataURL('image/png');
-    }
-    
-    function drawFinderPattern(ctx, x, y, moduleSize) {
-        ctx.fillRect(x, y, moduleSize * 7, moduleSize * 7);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(x + moduleSize, y + moduleSize, moduleSize * 5, moduleSize * 5);
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(x + moduleSize * 2, y + moduleSize * 2, moduleSize * 3, moduleSize * 3);
-    }
 
     // =========================================================================
     // DISTANCE & BEARING CALCULATIONS
@@ -1199,23 +1235,42 @@ const TeamModule = (function() {
         const now = new Date();
         const today = now.toISOString().split('T')[0];
         const currentTime = now.toTimeString().substring(0, 5);
+        const currentMinutes = now.getHours() * 60 + now.getMinutes();
         
-        // Find next check-in
+        let best = null;
+        let bestMinutesAway = Infinity;
+        
         for (const checkIn of state.currentTeam.commPlan.checkInTimes) {
-            if (checkIn.frequency === 'daily' || 
-                (checkIn.frequency === 'once' && checkIn.date === today)) {
+            const [h, m] = checkIn.time.split(':').map(Number);
+            const checkInMinutes = h * 60 + m;
+            
+            if (checkIn.frequency === 'hourly') {
+                // Next occurrence is the next full hour aligned to the base minute
+                let nextMinutes = currentMinutes - (currentMinutes % 60) + m;
+                if (nextMinutes <= currentMinutes) nextMinutes += 60;
+                const minutesAway = nextMinutes - currentMinutes;
+                if (minutesAway < bestMinutesAway) {
+                    bestMinutesAway = minutesAway;
+                    const nextH = Math.floor(nextMinutes / 60) % 24;
+                    const nextTime = `${String(nextH).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+                    best = { ...checkIn, nextTime: `${today}T${nextTime}:00`, formatted: `Today at ${nextTime}` };
+                }
+            } else if (checkIn.frequency === 'daily' || 
+                       (checkIn.frequency === 'once' && checkIn.date === today)) {
                 if (checkIn.time > currentTime) {
-                    return {
-                        ...checkIn,
-                        nextTime: `${today}T${checkIn.time}:00`,
-                        formatted: `Today at ${checkIn.time}`
-                    };
+                    const minutesAway = checkInMinutes - currentMinutes;
+                    if (minutesAway < bestMinutesAway) {
+                        bestMinutesAway = minutesAway;
+                        best = { ...checkIn, nextTime: `${today}T${checkIn.time}:00`, formatted: `Today at ${checkIn.time}` };
+                    }
                 }
             }
         }
         
+        if (best) return best;
+        
         // Return first one for tomorrow
-        const firstDaily = state.currentTeam.commPlan.checkInTimes.find(c => c.frequency === 'daily');
+        const firstDaily = state.currentTeam.commPlan.checkInTimes.find(c => c.frequency === 'daily' || c.frequency === 'hourly');
         if (firstDaily) {
             const tomorrow = new Date(now);
             tomorrow.setDate(tomorrow.getDate() + 1);

@@ -1406,6 +1406,8 @@ const SOSModule = (function() {
                     const text = `Position: ${report.formats.dd}\nMGRS: ${report.formats.mgrs || 'N/A'}`;
                     navigator.clipboard.writeText(text).then(() => {
                         ModalsModule.showToast('Coordinates copied', 'success');
+                    }).catch(() => {
+                        ModalsModule.showToast('Could not copy coordinates', 'error');
                     });
                 }
             };

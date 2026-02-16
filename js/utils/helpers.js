@@ -33,6 +33,16 @@ const Helpers = (function() {
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     };
     
-    return { generateId, formatDistance, formatDuration, formatDate, debounce, throttle, clamp, isMobile, isTouch, createElement, calcDistance };
+    const escapeHtml = (str) => {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    };
+    
+    return { generateId, formatDistance, formatDuration, formatDate, debounce, throttle, clamp, isMobile, isTouch, createElement, calcDistance, escapeHtml };
 })();
 window.Helpers = Helpers;

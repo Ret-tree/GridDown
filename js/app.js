@@ -8,6 +8,16 @@ const App = (function() {
     let appEvents = null;
 
     async function init() {
+        // Install log-level controller first (silences debug output in production)
+        if (typeof Log !== 'undefined') {
+            Log.init();
+        }
+        
+        // Install global error boundary before anything else
+        if (typeof ErrorBoundary !== 'undefined') {
+            ErrorBoundary.init();
+        }
+        
         console.log('GridDown initializing...');
         updateLoadingStatus('Loading storage...');
 
@@ -100,12 +110,6 @@ const App = (function() {
             SunMoonModule.init();
             CelestialModule.init();
             
-            // Initialize history/undo system
-            if (typeof HistoryModule !== 'undefined') {
-                HistoryModule.initKeyboardShortcuts();
-                console.log('History module initialized');
-            }
-            
             // Initialize undo/redo module
             if (typeof UndoModule !== 'undefined') {
                 UndoModule.init();
@@ -187,6 +191,18 @@ const App = (function() {
                     }
                 });
                 
+                // Traceroute events — refresh team panel to update widget
+                Events.on('meshtastic:traceroute_complete', () => {
+                    if (State.get('activePanel') === 'team') {
+                        PanelsModule.render();
+                    }
+                });
+                Events.on('meshtastic:traceroute_timeout', () => {
+                    if (State.get('activePanel') === 'team') {
+                        PanelsModule.render();
+                    }
+                });
+                
                 Events.on('meshtastic:waypoint', () => {
                     // Refresh waypoints panel if visible
                     if (State.get('activePanel') === 'waypoints') {
@@ -208,6 +224,16 @@ const App = (function() {
                     alert(`🆘 EMERGENCY SOS FROM ${data.message?.fromName || 'Unknown'}!\n\nCheck the map for their location.`);
                     MapModule.render();
                 });
+            }
+            
+            // Initialize Team module (after Meshtastic so mesh event handlers work)
+            if (typeof TeamModule !== 'undefined') {
+                try {
+                    await TeamModule.init();
+                    console.log('Team module initialized');
+                } catch (e) {
+                    console.warn('Team module init failed:', e);
+                }
             }
             
             // Initialize CoT Bridge module (TAKModule)
@@ -270,6 +296,12 @@ const App = (function() {
                 console.log('RF Sentinel module initialized');
                 
                 // Setup event listeners for RF Sentinel events
+                Events.on('rfsentinel:connecting', () => {
+                    if (State.get('activePanel') === 'rfsentinel') {
+                        PanelsModule.render();
+                    }
+                });
+                
                 Events.on('rfsentinel:connected', () => {
                     if (State.get('activePanel') === 'rfsentinel') {
                         PanelsModule.render();
@@ -284,19 +316,123 @@ const App = (function() {
                     MapModule.render();
                 });
                 
+                Events.on('rfsentinel:error', () => {
+                    if (State.get('activePanel') === 'rfsentinel') {
+                        PanelsModule.render();
+                    }
+                });
+                
                 Events.on('rfsentinel:track:new', () => {
                     MapModule.render();
                 });
                 
+                // Throttled panel re-render for track updates.
+                // Track batches arrive every ~500ms from rfsentinel.js EventBus,
+                // but renderRFSentinel() rebuilds entire panel HTML via template
+                // literals. 2-second throttle keeps counts feeling live without
+                // DOM thrashing on constrained hardware (Pi, tablets).
+                let rfPanelRenderTimer = null;
+                const throttledRFPanelRender = () => {
+                    if (rfPanelRenderTimer) return;
+                    rfPanelRenderTimer = setTimeout(() => {
+                        rfPanelRenderTimer = null;
+                        if (State.get('activePanel') === 'rfsentinel') {
+                            PanelsModule.render();
+                        }
+                    }, 2000);
+                };
+                
+                Events.on('rfsentinel:track:new', throttledRFPanelRender);
+                Events.on('rfsentinel:track:update', throttledRFPanelRender);
+                Events.on('rfsentinel:track:batch', throttledRFPanelRender);
+                Events.on('rfsentinel:track:lost', throttledRFPanelRender);
+                
                 Events.on('rfsentinel:emergency:squawk', (data) => {
                     if (State.get('activePanel') === 'rfsentinel') {
                         PanelsModule.render();
+                    }
+                    // Route emergency squawk to GridDown alert system
+                    if (typeof AlertModule !== 'undefined') {
+                        const info = data.info || {};
+                        AlertModule.trigger({
+                            source: 'rfsentinel',
+                            severity: info.severity === 'critical' ? 'emergency' : 'critical',
+                            title: `Squawk ${data.squawk || '????'} (${info.name || 'EMERGENCY'})`,
+                            message: `Aircraft: ${data.track?.callsign || data.track?.id?.slice(0, 10) || 'Unknown'}`,
+                            persistent: true,
+                            sound: true,
+                            data: data
+                        });
                     }
                 });
                 
                 Events.on('rfsentinel:emergency:ais', (data) => {
                     if (State.get('activePanel') === 'rfsentinel') {
                         PanelsModule.render();
+                    }
+                    // Route AIS emergency to GridDown alert system
+                    if (typeof AlertModule !== 'undefined') {
+                        AlertModule.trigger({
+                            source: 'rfsentinel',
+                            severity: 'emergency',
+                            title: `AIS ${data.deviceType || 'Emergency'} Device`,
+                            message: `MMSI: ${data.track?.mmsi || 'Unknown'}`,
+                            persistent: true,
+                            sound: true,
+                            data: data
+                        });
+                    }
+                });
+                
+                // Route RF Sentinel general alerts to GridDown alert system
+                Events.on('rfsentinel:alert', (data) => {
+                    if (typeof AlertModule !== 'undefined') {
+                        const severityMap = { critical: 'critical', high: 'warning', medium: 'caution', low: 'info' };
+                        AlertModule.trigger({
+                            source: 'rfsentinel',
+                            severity: severityMap[data.severity] || 'info',
+                            title: data.title || data.type || 'RF Sentinel Alert',
+                            message: data.message || data.description || '',
+                            persistent: data.severity === 'critical',
+                            sound: data.severity === 'critical' || data.severity === 'high',
+                            data: data
+                        });
+                    }
+                });
+                
+                // Route RF Sentinel correlation events to alert system (non-compliant drones)
+                Events.on('rfsentinel:correlation:new', (data) => {
+                    if (data.non_compliant && typeof AlertModule !== 'undefined') {
+                        AlertModule.trigger({
+                            source: 'rfsentinel',
+                            severity: 'warning',
+                            title: 'Non-Compliant Drone Detected',
+                            message: data.description || `Drone without Remote ID at ${data.distance_nm || '?'} nm`,
+                            persistent: false,
+                            sound: true,
+                            data: data
+                        });
+                    }
+                });
+                
+                // Bridge FIS-B weather updates to GridDown weather module
+                Events.on('rfsentinel:weather:updated', (fisBData) => {
+                    if (typeof WeatherModule !== 'undefined' && WeatherModule.handleRFSentinelWeather) {
+                        WeatherModule.handleRFSentinelWeather(fisBData);
+                    }
+                });
+                
+                // Bridge FIS-B specific pushes  
+                Events.on('rfsentinel:weather:fisb', (fisBData) => {
+                    if (typeof WeatherModule !== 'undefined' && WeatherModule.handleRFSentinelWeather) {
+                        WeatherModule.handleRFSentinelWeather(fisBData);
+                    }
+                });
+                
+                // Bridge current weather conditions
+                Events.on('rfsentinel:weather:conditions', (conditions) => {
+                    if (typeof WeatherModule !== 'undefined' && WeatherModule.handleRFSentinelConditions) {
+                        WeatherModule.handleRFSentinelConditions(conditions);
                     }
                 });
             }
@@ -394,6 +530,8 @@ const App = (function() {
                         });
                     }
                 });
+            }).catch(err => {
+                console.warn('[App] Service worker ready failed:', err.message);
             });
         }
     }

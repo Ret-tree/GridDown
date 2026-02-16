@@ -9,6 +9,12 @@ const MapModule = (function() {
     let tileCache = new Map();
     let pendingTiles = new Set();
     
+    // Cached DOM references
+    let zoomLevelEl = null;
+    let coordsFormatEl = null;
+    let coordsTextEl = null;
+    let declinationValueEl = null;
+    
     // Map state
     let mapState = {
         lat: 37.4215,
@@ -167,6 +173,12 @@ const MapModule = (function() {
         if (!canvas) return console.error('Map canvas not found');
         ctx = canvas.getContext('2d');
         
+        // Cache hot DOM references (static elements only)
+        zoomLevelEl = document.getElementById('zoom-level');
+        coordsFormatEl = document.getElementById('coords-format');
+        coordsTextEl = document.getElementById('coords-text');
+        declinationValueEl = document.getElementById('declination-value');
+        
         // Initialize scoped event manager
         mapEvents = EventManager.createScopedManager(EventManager.SCOPES.MAP);
         
@@ -201,7 +213,7 @@ const MapModule = (function() {
         initialized = true;
         
         // Subscribe to state changes
-        State.subscribe(render, ['waypoints', 'routes', 'mapLayers', 'selectedWaypoint', 'mousePosition']);
+        State.subscribe(render, ['waypoints', 'routes', 'mapLayers', 'selectedWaypoint', 'mousePosition', 'teamMembers']);
         
         // Subscribe to GPS position updates
         if (typeof GPSModule !== 'undefined') {
@@ -243,10 +255,9 @@ const MapModule = (function() {
             // Listen for declination updates
             if (typeof Events !== 'undefined') {
                 Events.on('declination:updated', () => {
-                    const decValue = document.getElementById('declination-value');
-                    if (decValue) {
+                    if (declinationValueEl) {
                         const current = DeclinationModule.getCurrent();
-                        decValue.textContent = DeclinationModule.formatDeclination(current.declination);
+                        declinationValueEl.textContent = DeclinationModule.formatDeclination(current.declination);
                     }
                 });
             }
@@ -259,12 +270,11 @@ const MapModule = (function() {
     function updateDeclinationDisplay() {
         if (typeof DeclinationModule === 'undefined') return;
         
-        const decValue = document.getElementById('declination-value');
-        if (!decValue) return;
+        if (!declinationValueEl) return;
         
         DeclinationModule.updatePosition(mapState.lat, mapState.lon);
         const current = DeclinationModule.getCurrent();
-        decValue.textContent = DeclinationModule.formatDeclination(current.declination);
+        declinationValueEl.textContent = DeclinationModule.formatDeclination(current.declination);
     }
     
     /**
@@ -448,7 +458,7 @@ const MapModule = (function() {
         // + or = - Zoom in
         if (e.key === '+' || e.key === '=') {
             mapState.zoom = Math.min(19, mapState.zoom + 1);
-            document.getElementById('zoom-level').textContent = mapState.zoom + 'z';
+            zoomLevelEl.textContent = mapState.zoom + 'z';
             updateScaleBar();
             render();
             saveMapPosition();
@@ -457,7 +467,7 @@ const MapModule = (function() {
         // - - Zoom out
         if (e.key === '-') {
             mapState.zoom = Math.max(3, mapState.zoom - 1);
-            document.getElementById('zoom-level').textContent = mapState.zoom + 'z';
+            zoomLevelEl.textContent = mapState.zoom + 'z';
             updateScaleBar();
             render();
             saveMapPosition();
@@ -475,14 +485,13 @@ const MapModule = (function() {
      * Setup coordinate format toggle click handler
      */
     function setupCoordFormatToggle() {
-        const formatEl = document.getElementById('coords-format');
-        if (!formatEl) return;
+        if (!coordsFormatEl) return;
         
         // Update display to current format
         updateCoordFormatDisplay();
         
         // Click to cycle through formats
-        formatEl.onclick = () => {
+        coordsFormatEl.onclick = () => {
             if (typeof Coordinates === 'undefined') return;
             
             const formats = ['dd', 'dms', 'ddm', 'utm', 'mgrs'];
@@ -520,8 +529,7 @@ const MapModule = (function() {
      * Update coordinate format display label
      */
     function updateCoordFormatDisplay() {
-        const formatEl = document.getElementById('coords-format');
-        if (!formatEl || typeof Coordinates === 'undefined') return;
+        if (!coordsFormatEl || typeof Coordinates === 'undefined') return;
         
         const format = Coordinates.getFormat();
         const labels = {
@@ -531,7 +539,7 @@ const MapModule = (function() {
             utm: 'UTM',
             mgrs: 'MGRS'
         };
-        formatEl.textContent = labels[format] || 'DD';
+        coordsFormatEl.textContent = labels[format] || 'DD';
     }
 
     function resize() {
@@ -1683,9 +1691,8 @@ const MapModule = (function() {
     function renderTeamMembers(width, height) {
         const team = State.get('teamMembers') || [];
         
-        // Filter to members with valid positions (not self, not lat/lon of 0)
+        // Filter to members with valid positions (including self when it has a real position)
         const visibleMembers = team.filter(m => 
-            !m.isMe && 
             m.lat && m.lon && 
             (Math.abs(m.lat) > 0.001 || Math.abs(m.lon) > 0.001)
         );
@@ -1697,6 +1704,56 @@ const MapModule = (function() {
             
             // Skip if offscreen
             if (pixel.x < -50 || pixel.x > width + 50 || pixel.y < -50 || pixel.y > height + 50) return;
+            
+            if (member.isMe) {
+                // === SELF MARKER: Distinct mesh device indicator ===
+                // Orange ring with pulse — shows "your mesh node" on the network
+                // Visually distinct from blue GPS dot (phone) and green team nodes (others)
+                
+                const selfColor = '#f97316'; // Orange — matches Meshtastic branding
+                
+                // Pulsing outer ring
+                ctx.shadowColor = selfColor;
+                ctx.shadowBlur = 12;
+                ctx.beginPath();
+                ctx.arc(pixel.x, pixel.y, 16, 0, Math.PI * 2);
+                ctx.strokeStyle = selfColor + '88';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                
+                // Solid circle
+                ctx.beginPath();
+                ctx.arc(pixel.x, pixel.y, 12, 0, Math.PI * 2);
+                ctx.fillStyle = selfColor + 'dd';
+                ctx.fill();
+                
+                // Inner dark circle
+                ctx.beginPath();
+                ctx.arc(pixel.x, pixel.y, 8, 0, Math.PI * 2);
+                ctx.fillStyle = '#1a1f2e';
+                ctx.fill();
+                
+                // Mesh icon
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = selfColor;
+                ctx.fillText('📡', pixel.x, pixel.y);
+                
+                // Label
+                const selfLabel = member.shortName || 'You';
+                ctx.font = 'bold 10px system-ui, sans-serif';
+                ctx.fillStyle = selfColor;
+                ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+                ctx.lineWidth = 3;
+                ctx.strokeText(selfLabel, pixel.x, pixel.y + 24);
+                ctx.fillText(selfLabel, pixel.x, pixel.y + 24);
+                
+                return;
+            }
+            
+            // === OTHER NODE MARKERS ===
             
             // Status color
             const statusColor = member.status === 'active' ? '#22c55e' : 
@@ -1988,143 +2045,14 @@ const MapModule = (function() {
     }
 
     /**
-     * Render RadiaCode radiation tracks and current position
+     * Render RadiaCode radiation overlay (heatmap, tracks, current position)
      */
     function renderRadiaCodeOverlay(width, height) {
         if (typeof RadiaCodeModule === 'undefined') return;
+        if (!RadiaCodeModule.isConnected() && !RadiaCodeModule.isDemoMode() && RadiaCodeModule.getTracks().length === 0) return;
         
-        // Get all completed tracks
-        const tracks = RadiaCodeModule.getTracks();
-        const currentTrack = RadiaCodeModule.getCurrentTrack();
-        const isConnected = RadiaCodeModule.isConnected();
-        const currentReading = RadiaCodeModule.getCurrentReading();
-        
-        // Render completed tracks
-        tracks.forEach(track => {
-            renderRadiationTrack(track, width, height, false);
-        });
-        
-        // Render current recording track
-        if (currentTrack) {
-            renderRadiationTrack(currentTrack, width, height, true);
-        }
-        
-        // Render current position indicator if connected and has GPS
-        if (isConnected && currentReading.doseRate > 0) {
-            let pos = null;
-            if (typeof GPSModule !== 'undefined') {
-                pos = GPSModule.getPosition();
-            }
-            
-            if (pos && pos.lat && pos.lon) {
-                const pixel = latLonToPixel(pos.lat, pos.lon);
-                
-                // Skip if offscreen
-                if (pixel.x >= -50 && pixel.x <= width + 50 && pixel.y >= -50 && pixel.y <= height + 50) {
-                    const doseRate = currentReading.doseRate;
-                    const color = RadiaCodeModule.getDoseColor(doseRate);
-                    
-                    // Pulsing radiation indicator
-                    const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
-                    const baseRadius = 18;
-                    const pulseRadius = baseRadius + pulse * 8;
-                    
-                    // Outer pulse ring
-                    ctx.beginPath();
-                    ctx.arc(pixel.x, pixel.y, pulseRadius, 0, Math.PI * 2);
-                    ctx.fillStyle = color.replace(')', ', 0.15)').replace('rgb', 'rgba').replace('#', '');
-                    // Convert hex to rgba
-                    if (color.startsWith('#')) {
-                        const r = parseInt(color.slice(1, 3), 16);
-                        const g = parseInt(color.slice(3, 5), 16);
-                        const b = parseInt(color.slice(5, 7), 16);
-                        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.15)`;
-                    }
-                    ctx.fill();
-                    
-                    // Main circle
-                    ctx.beginPath();
-                    ctx.arc(pixel.x, pixel.y, baseRadius, 0, Math.PI * 2);
-                    ctx.fillStyle = color;
-                    ctx.fill();
-                    ctx.strokeStyle = '#fff';
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-                    
-                    // Radiation symbol
-                    ctx.font = '12px sans-serif';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillStyle = '#fff';
-                    ctx.fillText('☢', pixel.x, pixel.y);
-                    
-                    // Dose rate label
-                    ctx.font = '10px system-ui, sans-serif';
-                    ctx.fillStyle = '#fff';
-                    ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-                    ctx.lineWidth = 3;
-                    const label = RadiaCodeModule.formatDoseRate(doseRate);
-                    ctx.strokeText(label, pixel.x, pixel.y + baseRadius + 12);
-                    ctx.fillText(label, pixel.x, pixel.y + baseRadius + 12);
-                }
-            }
-        }
-    }
-    
-    /**
-     * Render a single radiation track
-     */
-    function renderRadiationTrack(track, width, height, isActive) {
-        const points = track.points.filter(p => p.latitude && p.longitude);
-        if (points.length === 0) return;
-        
-        // Draw track line
-        ctx.beginPath();
-        ctx.strokeStyle = isActive ? 'rgba(34, 197, 94, 0.8)' : 'rgba(34, 197, 94, 0.4)';
-        ctx.lineWidth = isActive ? 3 : 2;
-        
-        let firstVisible = true;
-        points.forEach((point, i) => {
-            const pixel = latLonToPixel(point.latitude, point.longitude);
-            
-            // Check if visible
-            if (pixel.x < -100 || pixel.x > width + 100 || pixel.y < -100 || pixel.y > height + 100) {
-                return;
-            }
-            
-            if (firstVisible) {
-                ctx.moveTo(pixel.x, pixel.y);
-                firstVisible = false;
-            } else {
-                ctx.lineTo(pixel.x, pixel.y);
-            }
-        });
-        ctx.stroke();
-        
-        // Draw radiation-colored dots at each point (sample every few points for performance)
-        const sampleRate = Math.max(1, Math.floor(points.length / 100)); // Max 100 dots
-        
-        points.forEach((point, i) => {
-            if (i % sampleRate !== 0 && i !== points.length - 1) return;
-            
-            const pixel = latLonToPixel(point.latitude, point.longitude);
-            
-            // Check if visible
-            if (pixel.x < -20 || pixel.x > width + 20 || pixel.y < -20 || pixel.y > height + 20) {
-                return;
-            }
-            
-            const color = RadiaCodeModule.getDoseColor(point.doseRate);
-            const radius = isActive ? 5 : 4;
-            
-            ctx.beginPath();
-            ctx.arc(pixel.x, pixel.y, radius, 0, Math.PI * 2);
-            ctx.fillStyle = color;
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(0,0,0,0.3)';
-            ctx.lineWidth = 1;
-            ctx.stroke();
-        });
+        // Delegate to the module's built-in render function (includes heatmap support)
+        RadiaCodeModule.renderOnMap(ctx, width, height, latLonToPixel);
     }
 
     /**
@@ -2540,16 +2468,15 @@ const MapModule = (function() {
         State.Map.setMousePosition(pos);
         
         const coords = pixelToLatLon(pos.x, pos.y);
-        const coordsEl = document.getElementById('coords-text');
-        if (coordsEl) {
+        if (coordsTextEl) {
             // Use Coordinates module for formatting
             if (typeof Coordinates !== 'undefined') {
-                coordsEl.textContent = Coordinates.formatShort(coords.lat, coords.lon);
+                coordsTextEl.textContent = Coordinates.formatShort(coords.lat, coords.lon);
             } else {
                 // Fallback to basic format
                 const latDir = coords.lat >= 0 ? 'N' : 'S';
                 const lonDir = coords.lon >= 0 ? 'E' : 'W';
-                coordsEl.textContent = `${Math.abs(coords.lat).toFixed(4)}° ${latDir}, ${Math.abs(coords.lon).toFixed(4)}° ${lonDir}`;
+                coordsTextEl.textContent = `${Math.abs(coords.lat).toFixed(4)}° ${latDir}, ${Math.abs(coords.lon).toFixed(4)}° ${lonDir}`;
             }
         }
         
@@ -2636,7 +2563,7 @@ const MapModule = (function() {
         mapState.lon += beforeZoom.lon - afterZoom.lon;
         mapState.lat = Math.max(-85, Math.min(85, mapState.lat));
         
-        document.getElementById('zoom-level').textContent = mapState.zoom + 'z';
+        zoomLevelEl.textContent = mapState.zoom + 'z';
         updateScaleBar();
         render();
         saveMapPosition();
@@ -2731,6 +2658,31 @@ const MapModule = (function() {
         // Check if clicked on a custom overlay marker (AQI stations, etc.)
         if (handleOverlayMarkerClick(x, y)) {
             return;
+        }
+        
+        // Check if clicked on an RF Sentinel track (aircraft, ship, drone, etc.)
+        if (typeof RFSentinelModule !== 'undefined' && RFSentinelModule.isConnected()) {
+            const hitTrack = RFSentinelModule.hitTest(x, y, latLonToPixel);
+            if (hitTrack) {
+                const details = RFSentinelModule.getTrackDetails(hitTrack);
+                if (details.length > 0 && typeof ModalsModule !== 'undefined') {
+                    const typeConfig = RFSentinelModule.TRACK_TYPES[hitTrack.type] || {};
+                    const title = `${typeConfig.icon || '📡'} ${hitTrack.callsign || hitTrack.name || hitTrack.id?.slice(0, 10) || 'Track'}`;
+                    const bodyHtml = `
+                        <div style="font-size:0.875rem;line-height:1.6">
+                            ${details.map(d => `
+                                <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.1)">
+                                    <span style="color:#94a3b8;min-width:100px">${d.label}</span>
+                                    <span style="color:#f8fafc;text-align:right;font-weight:500">${d.value}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                    ModalsModule.showModal(title, bodyHtml);
+                }
+                render();
+                return;
+            }
         }
         
         const waypoints = State.get('waypoints');
@@ -2832,6 +2784,8 @@ const MapModule = (function() {
         const menu = document.createElement('div');
         menu.id = 'map-context-menu';
         menu.className = 'map-context-menu';
+        menu.setAttribute('role', 'menu');
+        menu.setAttribute('aria-label', 'Map actions');
         
         // Position menu, keeping it on screen
         const menuWidth = 200;
@@ -2860,34 +2814,34 @@ const MapModule = (function() {
                 <span class="map-context-menu__coords">${coordsDisplay}</span>
             </div>
             <div class="map-context-menu__items">
-                <button class="map-context-menu__item" data-action="add-waypoint">
-                    <span class="map-context-menu__icon">📍</span>
+                <button class="map-context-menu__item" role="menuitem" data-action="add-waypoint">
+                    <span class="map-context-menu__icon" aria-hidden="true">📍</span>
                     <span>Add Waypoint Here</span>
                 </button>
-                <button class="map-context-menu__item" data-action="send-to-mesh" ${isMeshConnected() ? '' : 'disabled'}>
-                    <span class="map-context-menu__icon">📡</span>
+                <button class="map-context-menu__item" role="menuitem" data-action="send-to-mesh" ${isMeshConnected() ? '' : 'disabled'}>
+                    <span class="map-context-menu__icon" aria-hidden="true">📡</span>
                     <span>Send to Mesh</span>
                     ${!isMeshConnected() ? '<span class="map-context-menu__hint">(not connected)</span>' : ''}
                 </button>
-                <button class="map-context-menu__item" data-action="measure-from">
-                    <span class="map-context-menu__icon">📏</span>
+                <button class="map-context-menu__item" role="menuitem" data-action="measure-from">
+                    <span class="map-context-menu__icon" aria-hidden="true">📏</span>
                     <span>Measure From Here</span>
                 </button>
-                <button class="map-context-menu__item" data-action="navigate-to">
-                    <span class="map-context-menu__icon">🧭</span>
+                <button class="map-context-menu__item" role="menuitem" data-action="navigate-to">
+                    <span class="map-context-menu__icon" aria-hidden="true">🧭</span>
                     <span>Navigate To Here</span>
                 </button>
-                <button class="map-context-menu__item" data-action="center-map">
-                    <span class="map-context-menu__icon">⊕</span>
+                <button class="map-context-menu__item" role="menuitem" data-action="center-map">
+                    <span class="map-context-menu__icon" aria-hidden="true">⊕</span>
                     <span>Center Map Here</span>
                 </button>
                 <div class="map-context-menu__divider"></div>
-                <button class="map-context-menu__item" data-action="copy-coords">
-                    <span class="map-context-menu__icon">📋</span>
+                <button class="map-context-menu__item" role="menuitem" data-action="copy-coords">
+                    <span class="map-context-menu__icon" aria-hidden="true">📋</span>
                     <span>Copy Coordinates</span>
                 </button>
-                <button class="map-context-menu__item" data-action="copy-coords-decimal">
-                    <span class="map-context-menu__icon">📋</span>
+                <button class="map-context-menu__item" role="menuitem" data-action="copy-coords-decimal">
+                    <span class="map-context-menu__icon" aria-hidden="true">📋</span>
                     <span>Copy as Decimal</span>
                 </button>
             </div>
@@ -3591,7 +3545,7 @@ const MapModule = (function() {
                 updateCompassRose();
                 
                 // Update zoom display
-                const zoomEl = document.getElementById('zoom-level');
+                const zoomEl = zoomLevelEl;
                 if (zoomEl) zoomEl.textContent = Math.round(mapState.zoom) + 'z';
             }
             
@@ -3693,7 +3647,7 @@ const MapModule = (function() {
         
         container.querySelector('#zoom-in-btn').onclick = () => { 
             mapState.zoom = Math.min(19, mapState.zoom + 1); 
-            document.getElementById('zoom-level').textContent = mapState.zoom + 'z'; 
+            zoomLevelEl.textContent = mapState.zoom + 'z'; 
             updateScaleBar();
             render(); 
             saveMapPosition(); 
@@ -3701,7 +3655,7 @@ const MapModule = (function() {
         
         container.querySelector('#zoom-out-btn').onclick = () => { 
             mapState.zoom = Math.max(3, mapState.zoom - 1); 
-            document.getElementById('zoom-level').textContent = mapState.zoom + 'z'; 
+            zoomLevelEl.textContent = mapState.zoom + 'z'; 
             updateScaleBar();
             render(); 
             saveMapPosition(); 
@@ -3717,7 +3671,7 @@ const MapModule = (function() {
                     mapState.lat = existingPos.lat;
                     mapState.lon = existingPos.lon;
                     mapState.zoom = Math.max(mapState.zoom, 15);
-                    document.getElementById('zoom-level').textContent = mapState.zoom + 'z';
+                    zoomLevelEl.textContent = mapState.zoom + 'z';
                     updateScaleBar();
                     render();
                     saveMapPosition();
@@ -3744,7 +3698,7 @@ const MapModule = (function() {
                         mapState.lat = pos.latitude;
                         mapState.lon = pos.longitude;
                         mapState.zoom = 15;
-                        document.getElementById('zoom-level').textContent = mapState.zoom + 'z';
+                        zoomLevelEl.textContent = mapState.zoom + 'z';
                         updateScaleBar();
                         render();
                         saveMapPosition();
@@ -3764,7 +3718,7 @@ const MapModule = (function() {
                         mapState.lat = pos.coords.latitude; 
                         mapState.lon = pos.coords.longitude; 
                         mapState.zoom = 15; 
-                        document.getElementById('zoom-level').textContent = mapState.zoom + 'z'; 
+                        zoomLevelEl.textContent = mapState.zoom + 'z'; 
                         updateScaleBar();
                         render(); 
                         saveMapPosition(); 
@@ -3926,7 +3880,7 @@ const MapModule = (function() {
                 mapState.zoom = saved.zoom || 12; 
                 mapState.bearing = saved.bearing || 0;
             }
-            const zoomEl = document.getElementById('zoom-level');
+            const zoomEl = zoomLevelEl;
             if (zoomEl) zoomEl.textContent = Math.round(mapState.zoom) + 'z';
             // Schedule scale bar and compass update after DOM is ready
             setTimeout(() => {
@@ -3938,7 +3892,7 @@ const MapModule = (function() {
 
     function setCenter(lat, lon, zoom) {
         mapState.lat = lat; mapState.lon = lon;
-        if (zoom !== undefined) { mapState.zoom = zoom; document.getElementById('zoom-level').textContent = mapState.zoom + 'z'; }
+        if (zoom !== undefined) { mapState.zoom = zoom; zoomLevelEl.textContent = mapState.zoom + 'z'; }
         updateScaleBar();
         render(); saveMapPosition();
     }
@@ -4005,7 +3959,27 @@ const MapModule = (function() {
         hasOverlayMarkers,
         
         // Map movement callbacks
-        onMoveEnd
+        onMoveEnd,
+        
+        // Tile loading status - useful for external tools/bridges
+        hasPendingTiles: () => pendingTiles.size > 0,
+        getPendingTileCount: () => pendingTiles.size,
+        
+        // Wait for all tiles to load (returns Promise)
+        waitForTiles: (timeoutMs = 10000) => {
+            return new Promise((resolve, reject) => {
+                const startTime = Date.now();
+                const checkInterval = setInterval(() => {
+                    if (pendingTiles.size === 0) {
+                        clearInterval(checkInterval);
+                        resolve(true);
+                    } else if (Date.now() - startTime > timeoutMs) {
+                        clearInterval(checkInterval);
+                        resolve(false); // Timeout, but don't reject
+                    }
+                }, 100);
+            });
+        }
     };
 })();
 

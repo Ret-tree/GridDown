@@ -52,8 +52,9 @@
                 <span class="offline-toggle__icon" id="offline-icon" aria-hidden="true"></span>
                 <span id="offline-text">Online</span>
             </button>
+            <div id="wind-indicator" class="wind-indicator" role="status" aria-live="polite" aria-label="Wind conditions" style="display:none"></div>
         </main>
-        <div id="modal-container" role="dialog" aria-modal="true" aria-hidden="true"></div>
+        <div id="modal-container" role="dialog" aria-modal="true"></div>
         <div id="toast-container" class="toast-container" role="status" aria-live="polite" aria-label="Notifications"></div>
     </div>
     
@@ -73,10 +74,11 @@
     <script src="js/utils/coordinates.js"></script>
     <script src="js/utils/events-manager.js"></script>
     <!-- Core modules -->
+    <script src="js/core/log.js"></script>
+    <script src="js/core/error-boundary.js"></script>
     <script src="js/core/constants.js"></script>
     <script src="js/core/state.js"></script>
     <script src="js/core/events.js"></script>
-    <script src="js/core/history.js"></script>
     <!-- Feature modules - logistics, elevation, offline, and routebuilder before panels (panels depends on them) -->
     <script src="js/modules/logistics.js"></script>
     <script src="js/modules/gpx.js"></script>
@@ -110,6 +112,7 @@
     <script src="js/modules/undo.js"></script>
     <script src="js/modules/meshtastic.js"></script>
     <script src="js/modules/tak.js"></script>
+    <script src="js/modules/qr-generator.js"></script>
     <script src="js/modules/team.js"></script>
     <script src="js/modules/aprs.js"></script>
     <script src="js/modules/radiacode.js"></script>

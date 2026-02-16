@@ -276,7 +276,7 @@ const Coordinates = (function() {
         const x = easting - 500000;
         const y = isNorth ? northing : northing - 10000000;
         
-        const lon0 = (zone - 1) * 6 - 180 + 3;
+        const lon0 = ((zone - 1) * 6 - 180 + 3) * Math.PI / 180;
         
         const M = y / k0;
         const mu = M / (a * (1 - e2/4 - 3*e2*e2/64 - 5*e2*e2*e2/256));

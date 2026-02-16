@@ -472,6 +472,8 @@ const SarsatModule = (function() {
                 // Not JSON - might be raw hex data
                 if (/^[0-9A-Fa-f]{22,30}$/.test(line)) {
                     processHexMessage(line);
+                } else {
+                    console.debug('[SARSAT] Unrecognized data from device:', line.substring(0, 80));
                 }
             }
         });

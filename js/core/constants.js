@@ -392,28 +392,35 @@ const Constants = (function() {
     };
 
     const NAV_ITEMS = [
-        { id: 'sos', icon: 'sos', label: 'SOS' },
-        { id: 'map', icon: 'map', label: 'Map' },
-        { id: 'navigation', icon: 'navigation', label: 'Navigate' },
-        { id: 'waypoints', icon: 'waypoint', label: 'Waypoints' },
-        { id: 'routes', icon: 'route', label: 'Routes' },
-        { id: 'logistics', icon: 'logistics', label: 'Logistics' },
-        { id: 'contingency', icon: 'shield', label: 'Planning' },
-        { id: 'weather', icon: 'weather', label: 'Weather' },
-        { id: 'sunmoon', icon: 'sun', label: 'Sun/Moon' },
-        { id: 'celestial', icon: 'star', label: 'Celestial' },
-        { id: 'gps', icon: 'locate', label: 'GPS' },
-        { id: 'coords', icon: 'crosshair', label: 'Coords' },
-        { id: 'radio', icon: 'antenna', label: 'Radio' },
-        { id: 'comms', icon: 'radio', label: 'Comms' },
-        { id: 'medical', icon: 'medical', label: 'Medical' },
-        { id: 'fieldguides', icon: 'book', label: 'Field Guides' },
-        { id: 'terrain', icon: 'mountain', label: 'Terrain' },
-        { id: 'offline', icon: 'download', label: 'Offline' },
-        { id: 'team', icon: 'team', label: 'Team' },
-        { id: 'rfsentinel', icon: 'radar', label: 'RF Sentinel' },
-        { id: 'sstv', icon: 'camera', label: 'SSTV' },
-        { id: 'sarsat', icon: 'broadcast', label: 'SARSAT' }
+        // Emergency - always first, always visible
+        { id: 'sos', icon: 'sos', label: 'SOS', category: 'EMERGENCY' },
+        // Navigate
+        { id: 'map', icon: 'map', label: 'Map', category: 'NAVIGATE' },
+        { id: 'navigation', icon: 'navigation', label: 'Navigate', category: 'NAVIGATE' },
+        { id: 'gps', icon: 'locate', label: 'GPS', category: 'NAVIGATE' },
+        { id: 'coords', icon: 'crosshair', label: 'Coords', category: 'NAVIGATE' },
+        { id: 'celestial', icon: 'star', label: 'Celestial', category: 'NAVIGATE' },
+        { id: 'sunmoon', icon: 'sun', label: 'Sun/Moon', category: 'NAVIGATE' },
+        // Plan
+        { id: 'waypoints', icon: 'waypoint', label: 'Waypoints', category: 'PLAN' },
+        { id: 'routes', icon: 'route', label: 'Routes', category: 'PLAN' },
+        { id: 'logistics', icon: 'logistics', label: 'Logistics', category: 'PLAN' },
+        { id: 'contingency', icon: 'shield', label: 'Planning', category: 'PLAN' },
+        // Environment
+        { id: 'weather', icon: 'weather', label: 'Weather', category: 'ENVIRONMENT' },
+        { id: 'terrain', icon: 'mountain', label: 'Terrain', category: 'ENVIRONMENT' },
+        // Comms
+        { id: 'team', icon: 'team', label: 'Team', category: 'COMMS' },
+        { id: 'comms', icon: 'radio', label: 'Comms', category: 'COMMS' },
+        { id: 'radio', icon: 'antenna', label: 'Radio', category: 'COMMS' },
+        // Reference
+        { id: 'medical', icon: 'medical', label: 'Medical', category: 'REFERENCE' },
+        { id: 'fieldguides', icon: 'book', label: 'Field Guides', category: 'REFERENCE' },
+        // Hardware
+        { id: 'offline', icon: 'download', label: 'Offline', category: 'HARDWARE' },
+        { id: 'rfsentinel', icon: 'radar', label: 'RF Sentinel', category: 'HARDWARE' },
+        { id: 'sstv', icon: 'camera', label: 'SSTV', category: 'HARDWARE' },
+        { id: 'sarsat', icon: 'broadcast', label: 'SARSAT', category: 'HARDWARE' }
     ];
 
     const MAP_LAYERS = [

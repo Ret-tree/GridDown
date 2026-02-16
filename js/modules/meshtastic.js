@@ -309,6 +309,10 @@ const MeshtasticModule = (function() {
     // Message size limits (Meshtastic has ~237 byte payload limit)
     const MAX_MESSAGE_SIZE = 200;
     const MAX_CHUNK_SIZE = 180;
+    const MAX_LORA_PAYLOAD = 228; // Conservative LoRa text payload limit
+    // DM text limit: encrypted text (base64) + JSON envelope must fit in LoRa payload.
+    // Envelope ~100 bytes, leaving ~128 base64 chars = ~96 raw bytes - 28 AES-GCM overhead = ~68.
+    const MAX_DM_TEXT_SIZE = 65;
     
     // Default Meshtastic channels (US region presets)
     // These use the publicly known default PSK - NOT secure for private comms
@@ -346,6 +350,10 @@ const MeshtasticModule = (function() {
     let state = {
         connectionState: ConnectionState.DISCONNECTED,
         connectionType: null, // 'bluetooth' or 'serial'
+        usingRealClient: false, // true when connected via MeshtasticClient (real library)
+        autoReconnect: false,      // Persist: attempt reconnect on page load
+        lastConnectionType: null,  // Persist: 'bluetooth' or 'serial' (for reconnect)
+        lastBleDeviceName: null,   // Persist: BLE device name (for reconnect matching)
         device: null,
         characteristic: null,
         port: null,
@@ -391,6 +399,7 @@ const MeshtasticModule = (function() {
         messageStates: new Map(),        // messageId -> { status, sentAt, ackAt, retries }
         channelReadState: new Map(),     // channelId -> { lastReadAt, lastReadMessageId }
         pendingAcks: new Map(),          // messageId -> { timeout, message }
+        packetIdToMessageId: new Map(),  // Meshtastic packetId -> GridDown messageId (for ACK bridging)
         
         // Phase 1.5: Store-and-Forward Queue
         outboundQueue: [],               // Messages waiting to be sent
@@ -423,6 +432,8 @@ const MeshtasticModule = (function() {
         traceroutes: new Map(),          // requestId -> { targetNodeId, startedAt, status, route, hops, rtt }
         activeTraceroute: null,          // Currently displayed traceroute requestId
         tracerouteHistory: [],           // Array of completed traceroutes for history
+        _pendingTracerouteTarget: null,  // nodeNum of pending native traceroute
+        _pendingTracerouteRequestId: null, // requestId of pending native traceroute
         
         // Batch 3: Message retry tracking
         pendingRetries: new Map(),       // messageId -> { message, retryCount, nextRetryAt, timeout }
@@ -468,8 +479,12 @@ const MeshtasticModule = (function() {
         // Start status update interval with tracking
         meshEvents.setInterval(updateNodeStatuses, 30000);
         
-        // Load saved settings
-        loadSettings();
+        // Load saved settings then attempt auto-reconnect if previously connected
+        loadSettings().then(() => {
+            if (state.autoReconnect && state.lastConnectionType) {
+                attemptAutoReconnect();
+            }
+        });
         
         console.log('MeshtasticModule ready');
     }
@@ -612,6 +627,20 @@ const MeshtasticModule = (function() {
                 state.activeScenario = phase2Settings.activeScenario || 'custom';
                 state.customCannedMessages = phase2Settings.customCannedMessages || [];
             }
+            
+            // Load traceroute history
+            const savedTraceroutes = await Storage.Settings.get('meshtastic_traceroute_history');
+            if (savedTraceroutes && Array.isArray(savedTraceroutes)) {
+                state.tracerouteHistory = savedTraceroutes.slice(0, 20);
+            }
+            
+            // Load auto-reconnect state
+            const reconnectState = await Storage.Settings.get('meshtastic_reconnect');
+            if (reconnectState) {
+                state.autoReconnect = reconnectState.autoReconnect || false;
+                state.lastConnectionType = reconnectState.lastConnectionType || null;
+                state.lastBleDeviceName = reconnectState.lastBleDeviceName || null;
+            }
         } catch (e) {
             console.warn('Could not load Meshtastic settings:', e);
         }
@@ -702,6 +731,21 @@ const MeshtasticModule = (function() {
     }
     
     /**
+     * Save auto-reconnect state (separate from main settings for clarity)
+     */
+    async function saveReconnectState() {
+        try {
+            await Storage.Settings.set('meshtastic_reconnect', {
+                autoReconnect: state.autoReconnect,
+                lastConnectionType: state.lastConnectionType,
+                lastBleDeviceName: state.lastBleDeviceName
+            });
+        } catch (e) {
+            console.warn('Could not save reconnect state:', e);
+        }
+    }
+    
+    /**
      * Save DM conversations to storage (debounced)
      */
     let _saveDMsTimeout = null;
@@ -746,6 +790,128 @@ const MeshtasticModule = (function() {
     // =========================================================================
     
     /**
+     * Attempt silent auto-reconnect to previously connected device.
+     * Called from init() after loadSettings() completes.
+     * 
+     * BLE: Uses navigator.bluetooth.getDevices() (Chrome 85+) — no user gesture.
+     * Serial: Uses navigator.serial.getPorts() — no user gesture.
+     * If silent reconnect fails, shows toast prompting user to reconnect manually.
+     */
+    async function attemptAutoReconnect() {
+        if (!state.autoReconnect || !state.lastConnectionType) {
+            return;
+        }
+        
+        console.log(`[Meshtastic] Auto-reconnect: attempting ${state.lastConnectionType} (device: ${state.lastBleDeviceName || 'unknown'})`);
+        
+        if (state.lastConnectionType === 'bluetooth') {
+            await attemptBleReconnect();
+        } else if (state.lastConnectionType === 'serial') {
+            // Serial auto-reconnect not yet implemented — getPorts() could enable
+            // this in the future, but transport library integration needs work
+            console.log('[Meshtastic] Auto-reconnect: Serial reconnect not yet supported');
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('Meshtastic serial: tap Connect to restore', 'info');
+            }
+        }
+    }
+    
+    /**
+     * Attempt BLE reconnect using getDevices() API (no user gesture required).
+     * Uses MeshtasticClient.reconnectBLE() which probes previously paired devices.
+     */
+    async function attemptBleReconnect() {
+        // Check browser API support
+        if (!navigator.bluetooth?.getDevices) {
+            console.log('[Meshtastic] Auto-reconnect: getDevices() not available');
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('Meshtastic: tap Connect to restore BLE', 'info');
+            }
+            return;
+        }
+        
+        // Need MeshtasticClient with reconnectBLE
+        if (typeof MeshtasticClient === 'undefined' || !MeshtasticClient.reconnectBLE) {
+            console.log('[Meshtastic] Auto-reconnect: MeshtasticClient.reconnectBLE not available');
+            return;
+        }
+        
+        // Wait for MeshtasticClient libraries to load (may still be loading on page init)
+        if (!MeshtasticClient.isReady || !MeshtasticClient.isReady()) {
+            console.log('[Meshtastic] Auto-reconnect: Waiting for MeshtasticClient libraries...');
+            try {
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error('Library load timeout')), 15000);
+                    window.addEventListener('meshtastic-client-ready', () => {
+                        clearTimeout(timeout);
+                        resolve();
+                    }, { once: true });
+                    // Check again in case it became ready while we were setting up listener
+                    if (MeshtasticClient.isReady && MeshtasticClient.isReady()) {
+                        clearTimeout(timeout);
+                        resolve();
+                    }
+                });
+            } catch (e) {
+                console.warn('[Meshtastic] Auto-reconnect: Libraries not available:', e.message);
+                return;
+            }
+        }
+        
+        setConnectionState(ConnectionState.CONNECTING);
+        
+        try {
+            // Setup callbacks before reconnecting
+            setupMeshtasticClientCallbacks();
+            
+            // Attempt silent reconnect
+            const result = await MeshtasticClient.reconnectBLE(state.lastBleDeviceName);
+            
+            // Success — mirror the connectBluetooth() success path
+            state.connectionType = 'bluetooth';
+            state.myNodeNum = result.nodeNum;
+            state.usingRealClient = true;
+            
+            const selfNode = result.nodeNum ? 
+                (MeshtasticClient.getNodes().find(n => n.num === result.nodeNum)) : null;
+            state.myNodeId = selfNode?.id || result.nodeInfo?.user?.id || nodeNumToId(result.nodeNum);
+            if (selfNode?.longName || result.nodeInfo?.user?.longName) {
+                state.longName = selfNode?.longName || result.nodeInfo?.user?.longName;
+            }
+            if (selfNode?.shortName || result.nodeInfo?.user?.shortName) {
+                state.shortName = selfNode?.shortName || result.nodeInfo?.user?.shortName;
+            }
+            
+            if (result.config) {
+                syncDeviceConfigFromClient(result.config);
+            }
+            
+            setConnectionState(ConnectionState.CONNECTED);
+            startPositionBroadcast();
+            
+            // Update stored device name in case it was resolved during reconnect
+            state.lastBleDeviceName = MeshtasticClient.getLastBleDeviceName?.() || state.lastBleDeviceName;
+            saveReconnectState();
+            
+            console.log('[Meshtastic] ✅ Auto-reconnect successful');
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('Meshtastic reconnected', 'success');
+            }
+            
+        } catch (error) {
+            console.warn('[Meshtastic] Auto-reconnect failed:', error.message);
+            setConnectionState(ConnectionState.DISCONNECTED);
+            
+            // Don't clear autoReconnect — next refresh should try again
+            // (device may just be temporarily out of range)
+            
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast('Meshtastic: tap Connect to restore BLE', 'info');
+            }
+        }
+    }
+    
+    /**
      * Connect to Meshtastic device via Web Bluetooth
      */
     async function connectBluetooth() {
@@ -775,6 +941,20 @@ const MeshtasticModule = (function() {
                 
                 state.connectionType = 'bluetooth';
                 state.myNodeNum = result.nodeNum;
+                state.usingRealClient = true;
+                
+                // Resolve our own identity from the device's node database
+                // The onMyNodeInfo event provides nodeNum but not user details,
+                // while onNodeInfoPacket populates the nodes map with longName/shortName
+                const selfNode = result.nodeNum ? 
+                    (MeshtasticClient.getNodes().find(n => n.num === result.nodeNum)) : null;
+                state.myNodeId = selfNode?.id || result.nodeInfo?.user?.id || nodeNumToId(result.nodeNum);
+                if (selfNode?.longName || result.nodeInfo?.user?.longName) {
+                    state.longName = selfNode?.longName || result.nodeInfo?.user?.longName;
+                }
+                if (selfNode?.shortName || result.nodeInfo?.user?.shortName) {
+                    state.shortName = selfNode?.shortName || result.nodeInfo?.user?.shortName;
+                }
                 
                 // Sync device config from real device
                 if (result.config) {
@@ -785,6 +965,12 @@ const MeshtasticModule = (function() {
                 
                 // Start position broadcasting
                 startPositionBroadcast();
+                
+                // Save auto-reconnect state for page reload recovery
+                state.autoReconnect = true;
+                state.lastConnectionType = 'bluetooth';
+                state.lastBleDeviceName = MeshtasticClient.getLastBleDeviceName?.() || null;
+                saveReconnectState();
                 
                 return true;
             }
@@ -832,6 +1018,12 @@ const MeshtasticModule = (function() {
             // Start position broadcasting
             startPositionBroadcast();
             
+            // Save auto-reconnect state (basic BLE path)
+            state.autoReconnect = true;
+            state.lastConnectionType = 'bluetooth';
+            state.lastBleDeviceName = state.device?.name || null;
+            saveReconnectState();
+            
             return true;
             
         } catch (error) {
@@ -871,6 +1063,18 @@ const MeshtasticModule = (function() {
                 
                 state.connectionType = 'serial';
                 state.myNodeNum = result.nodeNum;
+                state.usingRealClient = true;
+                
+                // Resolve our own identity (same as BLE path)
+                const selfNode = result.nodeNum ? 
+                    (MeshtasticClient.getNodes().find(n => n.num === result.nodeNum)) : null;
+                state.myNodeId = selfNode?.id || result.nodeInfo?.user?.id || nodeNumToId(result.nodeNum);
+                if (selfNode?.longName || result.nodeInfo?.user?.longName) {
+                    state.longName = selfNode?.longName || result.nodeInfo?.user?.longName;
+                }
+                if (selfNode?.shortName || result.nodeInfo?.user?.shortName) {
+                    state.shortName = selfNode?.shortName || result.nodeInfo?.user?.shortName;
+                }
                 
                 // Sync device config from real device
                 if (result.config) {
@@ -881,6 +1085,12 @@ const MeshtasticModule = (function() {
                 
                 // Start position broadcasting
                 startPositionBroadcast();
+                
+                // Save auto-reconnect state for page reload recovery
+                state.autoReconnect = true;
+                state.lastConnectionType = 'serial';
+                state.lastBleDeviceName = null;
+                saveReconnectState();
                 
                 return true;
             }
@@ -922,6 +1132,12 @@ const MeshtasticModule = (function() {
             // Start position broadcasting
             startPositionBroadcast();
             
+            // Save auto-reconnect state (basic serial path)
+            state.autoReconnect = true;
+            state.lastConnectionType = 'serial';
+            state.lastBleDeviceName = null;
+            saveReconnectState();
+            
             return true;
             
         } catch (error) {
@@ -936,6 +1152,10 @@ const MeshtasticModule = (function() {
      */
     async function disconnect() {
         stopPositionBroadcast();
+        
+        // User explicitly disconnected — don't auto-reconnect on next load
+        state.autoReconnect = false;
+        saveReconnectState();
         
         // Use MeshtasticClient if it's managing the connection
         if (typeof MeshtasticClient !== 'undefined' && MeshtasticClient.isConnected && MeshtasticClient.isConnected()) {
@@ -971,6 +1191,8 @@ const MeshtasticModule = (function() {
         state.reader = null;
         state.writer = null;
         state.characteristic = null;
+        state.usingRealClient = false;
+        state.packetIdToMessageId.clear();
         
         setConnectionState(ConnectionState.DISCONNECTED);
     }
@@ -1003,9 +1225,26 @@ const MeshtasticModule = (function() {
             handleMessageFromClient(message);
         });
         
+        // Transport-level ACK/NACK - bridge to GridDown delivery status tracking
+        MeshtasticClient.setCallback('onAck', (ack) => {
+            handleTransportAck(ack);
+        });
+        
+        // Native firmware traceroute response
+        MeshtasticClient.setCallback('onTraceroute', (data) => {
+            console.log('[Meshtastic] Native traceroute response:', data);
+            handleNativeTracerouteResponse(data);
+        });
+        
+        // Channel updates from device — sync device channels into GridDown state
+        MeshtasticClient.setCallback('onChannelUpdate', (deviceChannels) => {
+            syncChannelsFromDevice(deviceChannels);
+        });
+        
         // Disconnect event
         MeshtasticClient.setCallback('onDisconnect', () => {
             console.log('[Meshtastic] Device disconnected');
+            state.usingRealClient = false;
             setConnectionState(ConnectionState.DISCONNECTED);
             stopPositionBroadcast();
         });
@@ -1041,10 +1280,70 @@ const MeshtasticModule = (function() {
     }
     
     /**
+     * Sync channels from the real Meshtastic device into GridDown state.
+     * Replaces the hardcoded defaults with the actual device channel configuration
+     * so that channel indices in sendText() match the device.
+     *
+     * Device channels use:  index (0-7), role (0=DISABLED, 1=PRIMARY, 2=SECONDARY), name, psk
+     * GridDown channels use: id (string), index, name, psk, isDefault, isPrivate
+     */
+    function syncChannelsFromDevice(deviceChannels) {
+        if (!deviceChannels || !Array.isArray(deviceChannels)) return;
+        
+        const synced = [];
+        
+        for (let i = 0; i < deviceChannels.length; i++) {
+            const dc = deviceChannels[i];
+            if (!dc || dc.role === 0) continue; // Skip disabled/null slots
+            
+            const name = dc.name || (dc.role === 1 ? 'Primary' : `Channel ${dc.index}`);
+            const id = dc.role === 1 ? 'primary' : `device-ch${dc.index}-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+            
+            synced.push({
+                id,
+                index: dc.index,
+                name,
+                psk: dc.psk || null,
+                isDefault: dc.role === 1,
+                isPrivate: !!dc.psk,
+                fromDevice: true  // Flag so we know this came from device sync
+            });
+        }
+        
+        if (synced.length === 0) return; // No valid channels — keep existing
+        
+        // Preserve any custom channels that are local-only (not from device) and
+        // not conflicting with device channel indices
+        const deviceIndices = new Set(synced.map(c => c.index));
+        const localOnly = state.channels.filter(c => !c.fromDevice && !c.isDefault && !deviceIndices.has(c.index));
+        
+        state.channels = [...synced, ...localOnly];
+        
+        // Ensure active channel still exists
+        if (!state.channels.find(c => c.id === state.activeChannelId)) {
+            state.activeChannelId = synced[0]?.id || 'primary';
+        }
+        
+        // Initialize read state for new channels
+        state.channels.forEach(channel => {
+            if (!state.channelReadState.has(channel.id)) {
+                state.channelReadState.set(channel.id, {
+                    lastReadAt: Date.now(),
+                    lastReadMessageId: null
+                });
+            }
+        });
+        
+        saveSettings();
+        Events.emit('meshtastic:channels_synced', { channels: state.channels });
+        console.log(`[Meshtastic] Synced ${synced.length} channels from device:`, synced.map(c => `[${c.index}] ${c.name}`).join(', '));
+    }
+    
+    /**
      * Handle node info from MeshtasticClient
      */
     function handleNodeInfoFromClient(clientNode) {
-        const nodeId = clientNode.id || `!${clientNode.num?.toString(16) || 'unknown'}`;
+        const nodeId = clientNode.id || nodeNumToId(clientNode.num) || 'unknown';
         
         let node = state.nodes.get(nodeId);
         if (!node) {
@@ -1076,8 +1375,9 @@ const MeshtasticModule = (function() {
         node.batteryLevel = clientNode.batteryLevel;
         node.voltage = clientNode.voltage;
         
-        // Position if available
-        if (clientNode.latitude !== undefined) {
+        // Position if available — guard against 0,0 (no GPS fix)
+        if (clientNode.latitude !== undefined && clientNode.longitude !== undefined &&
+            (clientNode.latitude !== 0 || clientNode.longitude !== 0)) {
             node.lat = clientNode.latitude;
             node.lon = clientNode.longitude;
             node.alt = clientNode.altitude;
@@ -1095,7 +1395,7 @@ const MeshtasticModule = (function() {
      * Handle position from MeshtasticClient
      */
     function handlePositionFromClient(position) {
-        const nodeId = position.node?.id || `!${position.from?.toString(16) || 'unknown'}`;
+        const nodeId = position.node?.id || nodeNumToId(position.from) || 'unknown';
         
         let node = state.nodes.get(nodeId);
         if (!node) {
@@ -1103,9 +1403,17 @@ const MeshtasticModule = (function() {
             state.nodes.set(nodeId, node);
         }
         
-        node.lat = position.lat;
-        node.lon = position.lon;
-        node.alt = position.alt;
+        // Guard: Don't overwrite a valid position with 0,0 (GPS fix lost / not acquired).
+        // Only update lat/lon when we have a real fix.
+        const hasValidPosition = position.lat && position.lon &&
+            (Math.abs(position.lat) > 0.0001 || Math.abs(position.lon) > 0.0001);
+        
+        if (hasValidPosition) {
+            node.lat = position.lat;
+            node.lon = position.lon;
+            node.alt = position.alt;
+        }
+        
         node.lastSeen = Date.now();
         node.status = 'active';
         
@@ -1131,35 +1439,192 @@ const MeshtasticModule = (function() {
     }
     
     /**
-     * Handle message from MeshtasticClient
+     * Convert a numeric node number (from Meshtastic library) to a GridDown hex string ID.
+     * E.g., 1882261175 → "!702F3AB7"
+     */
+    function nodeNumToId(nodeNum) {
+        if (typeof nodeNum === 'string') return nodeNum; // already a string ID
+        if (typeof nodeNum === 'number') return `!${nodeNum.toString(16).padStart(8, '0')}`;
+        return nodeNum;
+    }
+    
+    /**
+     * Get a node by its ID (string hex ID or numeric nodeNum)
+     * Nodes are keyed in state.nodes by their string ID (e.g. "!abcd1234")
+     */
+    function getNodeById(nodeId) {
+        if (!nodeId) return null;
+        
+        // Direct lookup by string ID
+        let node = state.nodes.get(nodeId);
+        if (node) return node;
+        
+        // If numeric, convert to string ID and try again
+        if (typeof nodeId === 'number') {
+            node = state.nodes.get(nodeNumToId(nodeId));
+            if (node) return node;
+        }
+        
+        // If string that looks numeric (no ! prefix), try as hex nodeNum
+        if (typeof nodeId === 'string' && !nodeId.startsWith('!')) {
+            const asNum = parseInt(nodeId, 16);
+            if (!isNaN(asNum)) {
+                node = state.nodes.get(`!${asNum.toString(16).padStart(8, '0')}`);
+                if (node) return node;
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Handle message from MeshtasticClient.
+     * Text messages from the real Meshtastic library can be:
+     * - Plain text from a human user
+     * - JSON-encoded GridDown protocol messages (ACK, DM, waypoint, traceroute, etc.)
+     *   sent by other GridDown instances via sendViaRealClient()
      */
     function handleMessageFromClient(message) {
+        const fromId = nodeNumToId(message.from);
+        const toId = nodeNumToId(message.to);
+        const text = message.text || '';
+        
+        // Try to parse as a GridDown protocol message (JSON with "type" or compacted "t" field)
+        try {
+            if (text.startsWith('{') && (text.includes('"type"') || text.includes('"t"'))) {
+                let parsed = JSON.parse(text);
+                
+                // Expand compacted messages back to verbose field names
+                if (isCompactedMessage(parsed)) {
+                    parsed = expandMessage(parsed);
+                    console.log('[Meshtastic] Expanded compacted message, type:', parsed.type);
+                }
+                
+                if (parsed.type && typeof parsed.type === 'string') {
+                    // Normalize node IDs in the parsed message
+                    if (parsed.from && typeof parsed.from === 'number') {
+                        parsed.from = nodeNumToId(parsed.from);
+                    }
+                    if (parsed.to && typeof parsed.to === 'number') {
+                        parsed.to = nodeNumToId(parsed.to);
+                    }
+                    // Add metadata from the Meshtastic packet if not present
+                    if (!parsed.from) parsed.from = fromId;
+                    if (!parsed.channelIndex && message.channel !== undefined) {
+                        parsed.channelIndex = message.channel;
+                    }
+                    
+                    // Reconstruct fields that may have been stripped for payload savings
+                    if (!parsed.fromName && parsed.from) {
+                        const senderNode = state.nodes.get(parsed.from);
+                        parsed.fromName = senderNode?.shortName || senderNode?.name || parsed.from;
+                    }
+                    if (!parsed.timestamp) {
+                        parsed.timestamp = Date.now();
+                    }
+                    
+                    // Dispatch through the protocol handler
+                    console.log('[Meshtastic] Received GridDown protocol message:', parsed.type);
+                    processReceivedData_fromClient(parsed);
+                    return;
+                }
+            }
+        } catch (e) {
+            // Not valid JSON — treat as plain text below
+        }
+        
+        // Plain text message — route through handleTextMessage for ACK and notification
         const msg = {
             id: message.id || `msg_${Date.now()}`,
             type: MessageType.TEXT,
-            from: message.from,
-            to: message.to,
+            from: fromId,
+            to: toId,
+            channelId: 'primary', // Default channel for real client messages
             channelIndex: message.channel || 0,
-            text: message.text,
+            text: text,
             timestamp: message.timestamp || Date.now(),
             isSent: false,
             deliveryStatus: DeliveryStatus.DELIVERED
         };
         
-        state.messages.push(msg);
-        
-        // Keep last 100 messages
-        if (state.messages.length > 100) {
-            state.messages = state.messages.slice(-100);
+        // Resolve sender name from nodes map
+        const fromNode = state.nodes.get(fromId);
+        if (fromNode) {
+            msg.fromName = fromNode.shortName || fromNode.name;
+        } else {
+            msg.fromName = fromId;
         }
         
-        // Save messages
-        saveMessages();
+        handleTextMessage(msg);
+    }
+    
+    /**
+     * Dispatch a parsed GridDown protocol message received via the real Meshtastic client.
+     * Uses the same dispatch table as processReceivedData() from the legacy path.
+     */
+    function processReceivedData_fromClient(message) {
+        switch (message.type) {
+            case MessageType.POSITION:
+                handlePositionUpdate(message);
+                break;
+            case MessageType.NODEINFO:
+                handleNodeInfo(message);
+                break;
+            case MessageType.TEXT:
+                handleTextMessage(message);
+                break;
+            case MessageType.WAYPOINT:
+                handleWaypointShare(message);
+                break;
+            case MessageType.ROUTE:
+                handleRouteShare(message);
+                break;
+            case MessageType.SOS:
+                handleSOS(message);
+                break;
+            case MessageType.CHECKIN:
+                handleCheckin(message);
+                break;
+            case MessageType.TELEMETRY:
+                handleTelemetry(message);
+                break;
+            case MessageType.ACK:
+                handleAck(message);
+                break;
+            case MessageType.PUBLIC_KEY:
+                handlePublicKeyReceived(message);
+                break;
+            case MessageType.KEY_REQUEST:
+                handleKeyRequest(message);
+                break;
+            case MessageType.KEY_RESPONSE:
+                handleKeyResponse(message);
+                break;
+            case MessageType.DM:
+                handleDirectMessage(message);
+                break;
+            case MessageType.DM_ACK:
+                handleDMAck(message);
+                break;
+            case MessageType.DM_READ:
+                handleDMReadReceipt(message);
+                break;
+            case MessageType.TRACEROUTE_REQUEST:
+            case MessageType.TRACEROUTE_REPLY:
+                // Native firmware traceroute handles this now — ignore legacy JSON messages
+                break;
+            default:
+                console.warn('[Meshtastic] Unknown GridDown protocol type:', message.type);
+                // Treat as text message fallback
+                handleTextMessage({
+                    ...message,
+                    text: message.text || JSON.stringify(message)
+                });
+        }
         
         if (state.onMessage) {
-            state.onMessage(msg);
+            state.onMessage(message);
         }
-        Events.emit('meshtastic:message', { message: msg });
     }
     
     /**
@@ -1188,6 +1653,9 @@ const MeshtasticModule = (function() {
             
             // Update mesh connectivity status
             checkMeshConnectivity();
+            
+            // Refresh team members so self position appears on map immediately
+            updateTeamMembers();
         } else if (newState !== ConnectionState.CONNECTED && oldState === ConnectionState.CONNECTED) {
             // Disconnected - stop queue processor
             console.log('[Queue] Connection lost, stopping queue processor');
@@ -1215,12 +1683,247 @@ const MeshtasticModule = (function() {
             throw new Error('Not connected to Meshtastic device');
         }
         
+        // Route through MeshtasticClient when using the real Meshtastic library
+        if (state.usingRealClient && typeof MeshtasticClient !== 'undefined') {
+            return sendViaRealClient(data);
+        }
+        
+        // Legacy path: direct BLE characteristic / serial write
         const encoded = encodeMessage(data);
         
         if (state.connectionType === 'bluetooth') {
             await state.characteristic.toRadio.writeValue(encoded);
         } else if (state.connectionType === 'serial') {
             await state.writer.write(encoded);
+        }
+    }
+    
+    // =========================================================================
+    // MESSAGE COMPACTION — fits GridDown protocol messages within LoRa payload
+    // =========================================================================
+    
+    // Field name mappings: verbose → compact (single/double char)
+    const COMPACT_FIELDS = {
+        type: 't', from: 'f', fromName: 'fn', to: 'o', timestamp: 'ts',
+        text: 'tx', channelIndex: 'ci', encrypted: 'en', id: 'i',
+        // Waypoint/location
+        waypoint: 'w', lat: 'la', lon: 'lo', altitude: 'al', notes: 'no',
+        icon: 'ic', expire: 'ex', name: 'n',
+        // SOS/Checkin
+        emergency: 'em', details: 'd', situation: 'si', injuries: 'ij',
+        people: 'pe', supplies: 'su', message: 'mg', status: 'st',
+        // DM/PKI
+        encryptedText: 'et', publicKey: 'pk',
+        // Traceroute
+        requestId: 'ri', route: 'r', hopCount: 'hc', maxHops: 'mh',
+        isOrigin: 'io', hopNumber: 'hn', nodeName: 'nn', nodeId: 'ni',
+        // Route sharing
+        routeId: 'rd', data: 'da', chunk: 'ch', totalChunks: 'tc',
+        points: 'pt', distance: 'di', duration: 'du', terrain: 'te'
+    };
+    
+    // Reverse mapping: compact → verbose
+    const EXPAND_FIELDS = {};
+    for (const [verbose, compact] of Object.entries(COMPACT_FIELDS)) {
+        EXPAND_FIELDS[compact] = verbose;
+    }
+    
+    /**
+     * Recursively compact an object's field names for transmission.
+     * Replaces verbose keys with short aliases to reduce JSON payload size.
+     */
+    function compactMessage(obj) {
+        if (obj === null || obj === undefined) return obj;
+        if (Array.isArray(obj)) return obj.map(item => compactMessage(item));
+        if (typeof obj !== 'object') return obj;
+        
+        const result = {};
+        for (const [key, value] of Object.entries(obj)) {
+            const compactKey = COMPACT_FIELDS[key] || key;
+            result[compactKey] = compactMessage(value);
+        }
+        return result;
+    }
+    
+    /**
+     * Recursively expand compacted field names back to verbose form.
+     * Used on the receive side to restore standard GridDown message format.
+     */
+    function expandMessage(obj) {
+        if (obj === null || obj === undefined) return obj;
+        if (Array.isArray(obj)) return obj.map(item => expandMessage(item));
+        if (typeof obj !== 'object') return obj;
+        
+        const result = {};
+        for (const [key, value] of Object.entries(obj)) {
+            const expandedKey = EXPAND_FIELDS[key] || key;
+            result[expandedKey] = expandMessage(value);
+        }
+        return result;
+    }
+    
+    /**
+     * Check if a JSON payload is a compacted GridDown message.
+     * Compacted messages use 't' instead of 'type' as the discriminator.
+     */
+    function isCompactedMessage(parsed) {
+        return parsed && typeof parsed === 'object' && parsed.t && !parsed.type;
+    }
+    
+    /**
+     * Recursively remove empty string values from an object to save payload bytes.
+     * Preserves false, 0, null (which are semantically meaningful).
+     */
+    function removeEmptyStrings(obj) {
+        if (obj === null || obj === undefined) return obj;
+        if (Array.isArray(obj)) return obj.map(item => removeEmptyStrings(item));
+        if (typeof obj !== 'object') return obj;
+        
+        const result = {};
+        for (const [key, value] of Object.entries(obj)) {
+            if (value === '') continue; // Skip empty strings
+            result[key] = removeEmptyStrings(value);
+        }
+        return result;
+    }
+    
+    /**
+     * Truncate the longest string values in a nested object to reduce payload size.
+     * Targets user-provided content (SOS details, waypoint notes) rather than
+     * protocol fields (node IDs, message types).
+     * @param {object} obj - Object to mutate in place
+     * @param {number} excess - Number of bytes to shed
+     */
+    function truncateNestedStrings(obj, excess) {
+        if (!obj || typeof obj !== 'object' || excess <= 0) return;
+        
+        // Collect all string values with their paths, sorted longest first
+        const strings = [];
+        function collectStrings(o, path) {
+            for (const [key, val] of Object.entries(o)) {
+                if (typeof val === 'string' && val.length > 4) {
+                    // Skip protocol fields that must not be truncated
+                    if (['t', 'f', 'o', 'i', 'et', 'pk', 'ri', 'type', 'from', 'to', 'id',
+                         'encryptedText', 'publicKey', 'requestId'].includes(key)) continue;
+                    strings.push({ obj: o, key, len: val.length, path: path + '.' + key });
+                } else if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+                    collectStrings(val, path + '.' + key);
+                }
+            }
+        }
+        collectStrings(obj, '');
+        
+        // Sort longest first — truncate the biggest strings first
+        strings.sort((a, b) => b.len - a.len);
+        
+        let remaining = excess;
+        for (const entry of strings) {
+            if (remaining <= 0) break;
+            const current = entry.obj[entry.key];
+            // Trim proportionally but leave at least 10 chars + ellipsis
+            const trimBy = Math.min(remaining + 3, current.length - 10); // +3 for "..."
+            if (trimBy > 3) {
+                entry.obj[entry.key] = current.substring(0, current.length - trimBy) + '...';
+                remaining -= (trimBy - 3); // net savings = trimBy minus the 3 chars we added
+            }
+        }
+    }
+    
+    /**
+     * Send data through the real MeshtasticClient library
+     * Routes to the appropriate API method based on message type
+     */
+    async function sendViaRealClient(data) {
+        const type = data.type;
+        const griddownMessageId = data.id || null; // GridDown's app-level message ID
+        
+        // Resolve destination: null/undefined/broadcast → 0xFFFFFFFF, node ID string → node number
+        let destination = 0xFFFFFFFF; // broadcast
+        if (data.to) {
+            if (typeof data.to === 'number') {
+                destination = data.to;
+            } else if (typeof data.to === 'string' && data.to.startsWith('!')) {
+                destination = parseInt(data.to.slice(1), 16) || 0xFFFFFFFF;
+            }
+        }
+        
+        const channelIndex = data.channelIndex || 0;
+        let result;
+        
+        switch (type) {
+            case MessageType.POSITION:
+                // Use dedicated position API (fire-and-forget, no ACK tracking)
+                await MeshtasticClient.sendPosition(
+                    data.lat || data.latitude || 0,
+                    data.lon || data.longitude || 0,
+                    data.alt || data.altitude || 0
+                );
+                break;
+                
+            case MessageType.TEXT:
+                // Send plain text content via the mesh
+                result = await MeshtasticClient.sendMessage(
+                    data.text || '',
+                    destination,
+                    channelIndex
+                );
+                break;
+                
+            default: {
+                // All other GridDown protocol messages (ACK, waypoints, DMs, etc.)
+                // are sent as JSON-encoded text messages over the mesh
+                let payload = JSON.stringify(data);
+                
+                // Level 1: Compact field names if over limit
+                if (payload.length > MAX_LORA_PAYLOAD) {
+                    const compacted = compactMessage(data);
+                    payload = JSON.stringify(compacted);
+                    console.log(`[Meshtastic] L1 compact ${type}: ${JSON.stringify(data).length} → ${payload.length} bytes`);
+                }
+                
+                // Level 2: Strip reconstructable fields (fromName, timestamp, empty values)
+                // Receiver reconstructs fromName from node map, timestamp from arrival time
+                if (payload.length > MAX_LORA_PAYLOAD) {
+                    let obj = JSON.parse(payload);
+                    delete obj.fn; // fromName — receiver looks up from node map
+                    delete obj.ts; // timestamp — receiver uses arrival time
+                    // Remove empty string values anywhere in the object
+                    obj = removeEmptyStrings(obj);
+                    payload = JSON.stringify(obj);
+                    console.log(`[Meshtastic] L2 strip ${type}: → ${payload.length} bytes`);
+                }
+                
+                // Level 3: Truncate long string values in nested objects (SOS details, waypoint notes)
+                if (payload.length > MAX_LORA_PAYLOAD) {
+                    const obj = JSON.parse(payload);
+                    const excess = payload.length - MAX_LORA_PAYLOAD;
+                    truncateNestedStrings(obj, excess);
+                    payload = JSON.stringify(obj);
+                    console.log(`[Meshtastic] L3 truncate ${type}: → ${payload.length} bytes`);
+                }
+                
+                // Final size check — warn if still too large after all optimization
+                if (payload.length > MAX_LORA_PAYLOAD) {
+                    console.warn(`[Meshtastic] ${type} payload (${payload.length} bytes) exceeds LoRa limit (${MAX_LORA_PAYLOAD}). Message may be truncated by firmware.`);
+                }
+                
+                result = await MeshtasticClient.sendMessage(
+                    payload,
+                    destination,
+                    channelIndex
+                );
+                break;
+            }
+        }
+        
+        // Bridge Meshtastic packetId → GridDown messageId for ACK tracking
+        if (result?.packetId && griddownMessageId) {
+            state.packetIdToMessageId.set(result.packetId, griddownMessageId);
+            
+            // Auto-expire the mapping after 2 minutes to prevent memory leaks
+            setTimeout(() => {
+                state.packetIdToMessageId.delete(result.packetId);
+            }, 120000);
         }
     }
     
@@ -1306,8 +2009,13 @@ const MeshtasticModule = (function() {
      * Process received data packet
      */
     function processReceivedData(data) {
-        const message = decodeMessage(data);
+        let message = decodeMessage(data);
         if (!message) return;
+        
+        // Expand compacted messages (from GridDown devices using real client path)
+        if (isCompactedMessage(message)) {
+            message = expandMessage(message);
+        }
         
         console.log('Meshtastic message received:', message);
         
@@ -1359,12 +2067,9 @@ const MeshtasticModule = (function() {
             case MessageType.DM_READ:
                 handleDMReadReceipt(message);
                 break;
-            // Traceroute types
+            // Traceroute types — native firmware handles routing now
             case MessageType.TRACEROUTE_REQUEST:
-                handleTracerouteRequest(message);
-                break;
             case MessageType.TRACEROUTE_REPLY:
-                handleTracerouteReply(message);
                 break;
             default:
                 console.warn('Unknown message type:', message.type);
@@ -1381,9 +2086,24 @@ const MeshtasticModule = (function() {
     
     /**
      * Start broadcasting position
+     * Only broadcasts phone/tablet GPS when the Meshtastic device lacks its own GPS.
+     * Devices with GPS already broadcast their own position — sending from the phone
+     * creates duplicate mesh traffic and can overwhelm the BLE link with GATT errors.
      */
     function startPositionBroadcast() {
         if (state.positionInterval) return;
+        
+        // Check if device has its own GPS enabled — if so, let the device handle it
+        if (state.usingRealClient) {
+            const devConfig = state.deviceConfig || {};
+            if (devConfig.gpsEnabled !== false) {
+                console.log('[Meshtastic] Device GPS enabled — skipping phone position broadcast (device handles its own)');
+                return;
+            }
+        }
+        
+        // Reset failure counter
+        state._positionBroadcastFailures = 0;
         
         // Broadcast immediately
         broadcastPosition();
@@ -1400,6 +2120,7 @@ const MeshtasticModule = (function() {
             meshEvents.clearInterval(state.positionInterval);
             state.positionInterval = null;
         }
+        state._positionBroadcastFailures = 0;
     }
     
     /**
@@ -1425,10 +2146,18 @@ const MeshtasticModule = (function() {
             };
             
             await sendToDevice(message);
+            state._positionBroadcastFailures = 0; // Reset on success
             console.log('Position broadcast sent');
             
         } catch (e) {
-            console.warn('Failed to broadcast position:', e);
+            state._positionBroadcastFailures = (state._positionBroadcastFailures || 0) + 1;
+            console.warn(`Failed to broadcast position (attempt ${state._positionBroadcastFailures}):`, e);
+            
+            // Stop after 3 consecutive failures to avoid flooding BLE with failing packets
+            if (state._positionBroadcastFailures >= 3) {
+                console.warn('[Meshtastic] Position broadcast stopped after 3 consecutive failures — BLE transport may be congested');
+                stopPositionBroadcast();
+            }
         }
     }
     
@@ -1489,11 +2218,14 @@ const MeshtasticModule = (function() {
             state.nodes.set(nodeId, node);
         }
         
-        // Update position
-        node.lat = message.lat;
-        node.lon = message.lon;
-        node.alt = message.alt;
-        node.accuracy = message.accuracy;
+        // Update position — guard against 0,0 (no GPS fix)
+        if (message.lat && message.lon &&
+            (Math.abs(message.lat) > 0.0001 || Math.abs(message.lon) > 0.0001)) {
+            node.lat = message.lat;
+            node.lon = message.lon;
+            node.alt = message.alt;
+            node.accuracy = message.accuracy;
+        }
         node.lastSeen = Date.now();
         node.status = 'active';
         
@@ -2410,11 +3142,37 @@ const MeshtasticModule = (function() {
         }
         
         // PSK (field 1, bytes) - if not default
+        // Handle PSK in multiple formats: Uint8Array, hex string, base64, or ArrayBuffer
         if (channel.psk) {
-            bytes.push(0x0a); // field 1, wire type 2
-            const pskBytes = hexToBytes(channel.psk);
-            bytes.push(pskBytes.length);
-            bytes.push(...pskBytes);
+            let pskBytes;
+            if (channel.psk instanceof Uint8Array) {
+                pskBytes = channel.psk;
+            } else if (channel.psk instanceof ArrayBuffer) {
+                pskBytes = new Uint8Array(channel.psk);
+            } else if (typeof channel.psk === 'string') {
+                // Determine if hex string or base64
+                if (/^[0-9a-fA-F]+$/.test(channel.psk)) {
+                    pskBytes = hexToBytes(channel.psk);
+                } else {
+                    // Assume base64
+                    try {
+                        const decoded = atob(channel.psk);
+                        pskBytes = new Uint8Array(decoded.length);
+                        for (let i = 0; i < decoded.length; i++) {
+                            pskBytes[i] = decoded.charCodeAt(i);
+                        }
+                    } catch (e) {
+                        console.warn('[Meshtastic] Could not decode PSK:', e);
+                        pskBytes = null;
+                    }
+                }
+            }
+            
+            if (pskBytes && pskBytes.length > 0) {
+                bytes.push(0x0a); // field 1, wire type 2
+                bytes.push(pskBytes.length);
+                bytes.push(...pskBytes);
+            }
         }
         
         return new Uint8Array(bytes);
@@ -2441,12 +3199,20 @@ const MeshtasticModule = (function() {
             throw new Error('Invalid channel URL');
         }
         
+        // Find next available index
+        const maxIndex = Math.max(...state.channels.map(c => c.index), -1);
+        const newIndex = maxIndex + 1;
+        if (newIndex > 7) {
+            throw new Error('Maximum of 8 channels (device limit)');
+        }
+        
         // Create channel in GridDown
         const channel = {
             id: `imported_${Date.now()}`,
-            index: state.channels.length,
-            name: channelData.name || `Imported ${state.channels.length}`,
-            psk: channelData.psk,
+            index: newIndex,
+            name: channelData.name || `Imported ${newIndex}`,
+            psk: channelData.psk ? hashPSK(channelData.psk) : null,
+            pskRaw: channelData.psk, // Keep raw for device push
             isDefault: false,
             isPrivate: true,
             importedAt: Date.now(),
@@ -2455,6 +3221,9 @@ const MeshtasticModule = (function() {
         
         // Add to channels
         state.channels.push(channel);
+        
+        // Push to device
+        pushChannelToDevice(channel);
         
         // Save settings
         await saveSettings();
@@ -2588,6 +3357,51 @@ const MeshtasticModule = (function() {
     }
     
     /**
+     * Set all LoRa radio config in a single write + reboot.
+     * Use this instead of calling setRegion/setModemPreset/setTxPower/setHopLimit
+     * individually when changing multiple params — writes once to flash and reboots
+     * the device so changes take effect on the radio hardware.
+     * 
+     * @param {Object} config
+     * @param {number} [config.region] - Region code
+     * @param {number} [config.modemPreset] - Modem preset
+     * @param {number} [config.txPower] - TX power in dBm (0 = device default)
+     * @param {number} [config.hopLimit] - Hop limit (1-7)
+     * @returns {Object} Updated device config
+     */
+    async function setRadioConfig(config) {
+        // Validate all params before writing anything
+        if (config.region !== undefined && !Object.values(RegionCode).includes(config.region)) {
+            throw new Error(`Invalid region code: ${config.region}`);
+        }
+        if (config.modemPreset !== undefined && !Object.values(ModemPreset).includes(config.modemPreset)) {
+            throw new Error(`Invalid modem preset: ${config.modemPreset}`);
+        }
+        if (config.txPower !== undefined && config.txPower !== 0 && (config.txPower < 1 || config.txPower > 30)) {
+            throw new Error(`Invalid TX power: ${config.txPower}. Must be 0 (default) or 1-30 dBm`);
+        }
+        if (config.hopLimit !== undefined && (config.hopLimit < HOP_LIMIT_MIN || config.hopLimit > HOP_LIMIT_MAX)) {
+            throw new Error(`Invalid hop limit: ${config.hopLimit}. Must be ${HOP_LIMIT_MIN}-${HOP_LIMIT_MAX}`);
+        }
+        
+        // Update local state
+        if (config.region !== undefined) state.deviceConfig.region = config.region;
+        if (config.modemPreset !== undefined) state.deviceConfig.modemPreset = config.modemPreset;
+        if (config.txPower !== undefined) state.deviceConfig.txPower = config.txPower;
+        if (config.hopLimit !== undefined) state.deviceConfig.hopLimit = config.hopLimit;
+        
+        // Write to device with reboot
+        if (state.connectionState === ConnectionState.CONNECTED) {
+            await sendConfigToDevice({ ...config, _reboot: true });
+        }
+        
+        await saveDeviceConfig();
+        Events.emit('meshtastic:config_changed', config);
+        
+        return state.deviceConfig;
+    }
+    
+    /**
      * Send configuration to connected device
      * Uses MeshtasticClient for real device communication when available
      */
@@ -2597,22 +3411,70 @@ const MeshtasticModule = (function() {
             console.log('[Meshtastic] Sending real config to device:', config);
             
             try {
-                if (config.region !== undefined) {
-                    await MeshtasticClient.setRegion(config.region);
+                // === Non-reboot config FIRST ===
+                // Owner and position config don't trigger reboot, so write them
+                // before any LoRa changes that will disconnect the device.
+                if (config.longName !== undefined || config.shortName !== undefined) {
+                    await MeshtasticClient.setOwner(
+                        config.longName || state.longName,
+                        config.shortName || state.shortName
+                    );
                 }
-                if (config.modemPreset !== undefined) {
-                    await MeshtasticClient.setModemPreset(config.modemPreset);
+                if (config.positionBroadcastSecs !== undefined || config.gpsEnabled !== undefined) {
+                    await MeshtasticClient.setPositionConfig(
+                        config.positionBroadcastSecs,
+                        config.gpsUpdateInterval,
+                        config.gpsEnabled
+                    );
                 }
-                if (config.txPower !== undefined) {
-                    await MeshtasticClient.setTxPower(config.txPower);
+                
+                // === LoRa config LAST (triggers reboot) ===
+                // Batch LoRa config changes into a single write if multiple LoRa params present
+                const loraParams = {};
+                let hasLoRa = false;
+                for (const key of ['region', 'modemPreset', 'txPower', 'hopLimit']) {
+                    if (config[key] !== undefined) {
+                        loraParams[key] = config[key];
+                        hasLoRa = true;
+                    }
                 }
-                if (config.hopLimit !== undefined) {
-                    await MeshtasticClient.setHopLimit(config.hopLimit);
+                
+                if (hasLoRa && MeshtasticClient.setLoRaConfig) {
+                    // Single write via batch function
+                    // Only reboot if explicitly requested (e.g. from setRadioConfig batch call)
+                    const autoReboot = config._reboot === true;
+                    await MeshtasticClient.setLoRaConfig(loraParams, autoReboot);
+                    // After this, device may be rebooting — don't try any more writes
+                } else if (hasLoRa) {
+                    // Fallback: individual writes (no batch available)
+                    if (config.region !== undefined) {
+                        await MeshtasticClient.setRegion(config.region);
+                    }
+                    if (config.modemPreset !== undefined) {
+                        await MeshtasticClient.setModemPreset(config.modemPreset);
+                    }
+                    if (config.txPower !== undefined) {
+                        await MeshtasticClient.setTxPower(config.txPower);
+                    }
+                    if (config.hopLimit !== undefined) {
+                        await MeshtasticClient.setHopLimit(config.hopLimit);
+                    }
+                    // LoRa changes require reboot to take effect
+                    if (config._reboot === true && MeshtasticClient.rebootDevice) {
+                        await MeshtasticClient.rebootDevice(2);
+                    }
                 }
                 
                 console.log('[Meshtastic] Config sent successfully');
                 return true;
             } catch (error) {
+                // BLE disconnect during config write = device rebooted (expected for LoRa changes)
+                const msg = (error.message || '').toLowerCase();
+                if (msg.includes('disconnect') || msg.includes('gatt') || msg.includes('bluetooth') ||
+                    msg.includes('not connected') || msg.includes('network error')) {
+                    console.log('[Meshtastic] Config write: BLE disconnected (device rebooting — expected)');
+                    return true;
+                }
                 console.error('[Meshtastic] Failed to send config:', error);
                 throw error;
             }
@@ -2765,6 +3627,33 @@ const MeshtasticModule = (function() {
     function updateTeamMembers() {
         const members = [];
         
+        // Get self position from:
+        // 1. Self node in state.nodes (Meshtastic device's own GPS — set during connection)
+        // 2. GPSModule (phone/tablet GPS or manual position)
+        let selfLat = 0, selfLon = 0, selfAlt = undefined, selfAccuracy = undefined;
+        
+        // Check Meshtastic device's own position first (most direct after connection)
+        if (state.myNodeId) {
+            const selfNode = state.nodes.get(state.myNodeId);
+            if (selfNode && selfNode.lat && selfNode.lon &&
+                (Math.abs(selfNode.lat) > 0.0001 || Math.abs(selfNode.lon) > 0.0001)) {
+                selfLat = selfNode.lat;
+                selfLon = selfNode.lon;
+                selfAlt = selfNode.alt;
+            }
+        }
+        
+        // Fall back to GPSModule position (phone GPS or manual position)
+        if (selfLat === 0 && selfLon === 0 && typeof GPSModule !== 'undefined') {
+            const gpsPos = GPSModule.getPosition();
+            if (gpsPos && gpsPos.lat && gpsPos.lon) {
+                selfLat = gpsPos.lat;
+                selfLon = gpsPos.lon;
+                selfAlt = gpsPos.altitude;
+                selfAccuracy = gpsPos.accuracy;
+            }
+        }
+        
         // Add self first
         members.push({
             id: state.myNodeId || 'self',
@@ -2772,8 +3661,10 @@ const MeshtasticModule = (function() {
             shortName: state.shortName,
             status: 'active',
             lastUpdate: 'Now',
-            lat: 0,
-            lon: 0,
+            lat: selfLat,
+            lon: selfLon,
+            alt: selfAlt,
+            accuracy: selfAccuracy,
             isMe: true
         });
         
@@ -2818,6 +3709,18 @@ const MeshtasticModule = (function() {
      * Request node info from device
      */
     async function requestNodeInfo() {
+        // When using the real Meshtastic client, node info is synced automatically
+        // during device configuration. Requesting a config refresh will re-sync.
+        if (state.usingRealClient && typeof MeshtasticClient !== 'undefined') {
+            try {
+                await MeshtasticClient.requestConfig();
+            } catch (e) {
+                console.warn('[Meshtastic] Failed to request config refresh:', e);
+            }
+            return;
+        }
+        
+        // Legacy path
         await sendToDevice({
             type: 'request_nodeinfo'
         });
@@ -2941,6 +3844,45 @@ const MeshtasticModule = (function() {
         }, ACK_TIMEOUT);
         
         state.pendingAcks.set(messageId, { timeout, message });
+    }
+    
+    /**
+     * Handle transport-level ACK/NACK from Meshtastic radio
+     * Bridges the real radio's delivery confirmation into GridDown's
+     * app-level delivery status tracking system.
+     */
+    function handleTransportAck(ack) {
+        const messageId = state.packetIdToMessageId.get(ack.packetId);
+        if (!messageId) return; // Not a tracked GridDown message
+        
+        // Clean up the mapping
+        state.packetIdToMessageId.delete(ack.packetId);
+        
+        if (ack.success) {
+            // Radio confirmed delivery — update status and cancel timeout
+            console.log(`[Meshtastic] Transport ACK for message ${messageId} (packet ${ack.packetId})`);
+            updateMessageStatus(messageId, DeliveryStatus.DELIVERED);
+            
+            // Cancel the pending ACK timeout since we got a real confirmation
+            const pending = state.pendingAcks.get(messageId);
+            if (pending) {
+                clearTimeout(pending.timeout);
+                state.pendingAcks.delete(messageId);
+            }
+            
+            Events.emit('meshtastic:transport_ack', { messageId, packetId: ack.packetId });
+        } else {
+            // Radio reported delivery failure
+            console.warn(`[Meshtastic] Transport NACK for message ${messageId} (error: ${ack.errorReason})`);
+            
+            // Don't immediately mark as FAILED — mesh networks can be flaky
+            // Leave it in SENT state so the queue retry system can handle it
+            Events.emit('meshtastic:transport_nack', { 
+                messageId, 
+                packetId: ack.packetId, 
+                errorReason: ack.errorReason 
+            });
+        }
     }
     
     /**
@@ -3482,17 +4424,16 @@ const MeshtasticModule = (function() {
         // Apply settings if not custom and device connected
         if (scenario.settings && applyToDevice && state.connectionState === ConnectionState.CONNECTED) {
             try {
-                // Apply modem preset
-                if (scenario.settings.modemPreset !== undefined) {
-                    await setModemPreset(scenario.settings.modemPreset);
+                // Batch LoRa config changes into single write + reboot
+                const loraConfig = {};
+                if (scenario.settings.modemPreset !== undefined) loraConfig.modemPreset = scenario.settings.modemPreset;
+                if (scenario.settings.hopLimit !== undefined) loraConfig.hopLimit = scenario.settings.hopLimit;
+                
+                if (Object.keys(loraConfig).length > 0) {
+                    await setRadioConfig(loraConfig);
                 }
                 
-                // Apply hop limit
-                if (scenario.settings.hopLimit !== undefined) {
-                    await setHopLimit(scenario.settings.hopLimit);
-                }
-                
-                // Update local config for position broadcast
+                // Update local config for position broadcast (non-LoRa, no reboot needed)
                 if (scenario.settings.positionBroadcastSecs !== undefined) {
                     state.deviceConfig.positionBroadcastSecs = scenario.settings.positionBroadcastSecs;
                 }
@@ -3771,12 +4712,20 @@ const MeshtasticModule = (function() {
                 throw new Error('Invalid QR code format');
             }
             
+            // Find next available index
+            const maxIndex = Math.max(...state.channels.map(c => c.index), -1);
+            const newIndex = maxIndex + 1;
+            if (newIndex > 7) {
+                throw new Error('Maximum of 8 channels (device limit)');
+            }
+            
             // Create channel from config
             const channel = {
                 id: `imported_${Date.now()}`,
-                index: state.channels.length,
+                index: newIndex,
                 name: config.name || 'Imported',
-                psk: config.psk || null,
+                psk: config.psk ? hashPSK(config.psk) : null,
+                pskRaw: config.psk || null,
                 isDefault: false,
                 isPrivate: !!config.psk
             };
@@ -3784,6 +4733,9 @@ const MeshtasticModule = (function() {
             // Add the channel
             state.channels.push(channel);
             setActiveChannel(channel.id);
+            
+            // Push to device
+            pushChannelToDevice(channel);
             
             // Apply scenario if present
             if (config.scenario) {
@@ -3879,6 +4831,10 @@ const MeshtasticModule = (function() {
         const maxIndex = Math.max(...state.channels.map(c => c.index), -1);
         const newIndex = maxIndex + 1;
         
+        if (newIndex > 7) {
+            throw new Error('Maximum of 8 channels (device limit)');
+        }
+        
         // Hash the PSK for storage (we don't store raw PSK)
         const pskHash = psk ? hashPSK(psk) : null;
         
@@ -3900,6 +4856,9 @@ const MeshtasticModule = (function() {
             lastReadAt: Date.now(),
             lastReadMessageId: null
         });
+        
+        // Push to device if connected
+        pushChannelToDevice(channel);
         
         // Save settings
         saveSettings();
@@ -3939,6 +4898,20 @@ const MeshtasticModule = (function() {
         
         if (channel.isDefault) {
             throw new Error('Cannot delete default channels');
+        }
+        
+        // Disable on device if connected
+        if (state.usingRealClient && typeof MeshtasticClient !== 'undefined' && MeshtasticClient.isConnected && MeshtasticClient.isConnected()) {
+            try {
+                MeshtasticClient.setChannel(channel.index, {
+                    role: 0, // DISABLED
+                    name: '',
+                    psk: null
+                });
+                console.log(`[Meshtastic] Disabled channel ${channel.index} on device`);
+            } catch (e) {
+                console.warn(`[Meshtastic] Failed to disable channel on device:`, e);
+            }
         }
         
         // Remove channel
@@ -3986,6 +4959,35 @@ const MeshtasticModule = (function() {
             hash = hash & hash; // Convert to 32-bit integer
         }
         return 'psk-' + Math.abs(hash).toString(16);
+    }
+    
+    /**
+     * Push a GridDown channel to the connected Meshtastic device.
+     * Converts GridDown channel format → device setChannel() format.
+     * Non-blocking: logs warning on failure rather than throwing.
+     */
+    function pushChannelToDevice(channel) {
+        if (!state.usingRealClient || typeof MeshtasticClient === 'undefined') return;
+        if (!MeshtasticClient.isConnected || !MeshtasticClient.isConnected()) return;
+        
+        try {
+            // Encode PSK: raw string → TextEncoder, otherwise null for default/public
+            let pskBytes = null;
+            if (channel.pskRaw && typeof channel.pskRaw === 'string') {
+                pskBytes = new TextEncoder().encode(channel.pskRaw);
+            } else if (channel.psk && channel.psk instanceof Uint8Array) {
+                pskBytes = channel.psk;
+            }
+            
+            MeshtasticClient.setChannel(channel.index, {
+                role: channel.isDefault ? 1 : 2,  // 1=PRIMARY, 2=SECONDARY
+                name: channel.name,
+                psk: pskBytes
+            });
+            console.log(`[Meshtastic] Pushed channel [${channel.index}] "${channel.name}" to device`);
+        } catch (e) {
+            console.warn(`[Meshtastic] Failed to push channel to device:`, e);
+        }
     }
     
     // =========================================================================
@@ -4474,9 +5476,12 @@ const MeshtasticModule = (function() {
     async function sendDirectMessage(nodeId, text) {
         if (!text || text.length === 0) return;
         
-        // Truncate if needed
-        if (text.length > MAX_MESSAGE_SIZE) {
-            text = text.substring(0, MAX_MESSAGE_SIZE);
+        // DMs have a tighter text limit than channel messages because the plaintext
+        // is encrypted (adding AES-GCM overhead) and base64-encoded before being
+        // wrapped in a JSON envelope — all of which must fit in the LoRa payload.
+        if (text.length > MAX_DM_TEXT_SIZE) {
+            text = text.substring(0, MAX_DM_TEXT_SIZE);
+            console.log(`[Meshtastic] DM text truncated to ${MAX_DM_TEXT_SIZE} chars (LoRa payload limit)`);
         }
         
         const messageId = generateMessageId();
@@ -5402,12 +6407,12 @@ const MeshtasticModule = (function() {
             from: state.myNodeId,
             fromName: state.shortName,
             waypoint: {
-                id: waypoint.id,
-                name: waypoint.name,
+                id: waypoint.id ? waypoint.id.substring(0, 16) : `wp-${Date.now()}`,
+                name: waypoint.name ? waypoint.name.substring(0, 20) : 'Waypoint',
                 type: waypoint.type,
                 lat: waypoint.lat || (37.4215 + (waypoint.y - 50) * 0.002),
                 lon: waypoint.lon || (-119.1892 + (waypoint.x - 50) * 0.004),
-                notes: waypoint.notes ? waypoint.notes.substring(0, 100) : '',
+                notes: waypoint.notes ? waypoint.notes.substring(0, 40) : '',
                 icon: waypoint.icon
             },
             timestamp: Date.now()
@@ -5436,7 +6441,7 @@ const MeshtasticModule = (function() {
         
         // Format coordinates for text message (works on all Meshtastic devices)
         const latDir = lat >= 0 ? 'N' : 'S';
-        const lonDir = lon >= 0 ? 'W' : 'E';
+        const lonDir = lon >= 0 ? 'E' : 'W';
         const coordText = `📍 ${pinLabel}\n${Math.abs(lat).toFixed(6)}°${latDir}, ${Math.abs(lon).toFixed(6)}°${lonDir}`;
         
         // Also send as waypoint for rich display on compatible devices
@@ -5705,12 +6710,16 @@ const MeshtasticModule = (function() {
     const TRACEROUTE_MAX_HOPS = 10;    // Maximum hops to track
     
     /**
-     * Request traceroute to a destination node
-     * @param {string} targetNodeId - Node ID to trace route to
-     * @returns {Promise<Object>} - Traceroute result
+     * Request traceroute to a destination node.
+     * Uses Meshtastic's native firmware-level RouteDiscovery (portnum 70)
+     * which sends compact protobuf packets handled at the routing layer.
+     * Works with ALL Meshtastic nodes, not just GridDown ones.
+     * 
+     * @param {string} targetNodeId - Node ID to trace route to (e.g. "!702f3ab7")
+     * @returns {Promise<Object>} - Traceroute tracking object
      */
     async function requestTraceroute(targetNodeId) {
-        if (!isConnected()) {
+        if (state.connectionState !== ConnectionState.CONNECTED) {
             throw new Error('Not connected to Meshtastic');
         }
         
@@ -5722,48 +6731,54 @@ const MeshtasticModule = (function() {
         const targetNode = getNodeById(targetNodeId);
         const targetName = targetNode?.name || targetNode?.longName || `Node ${targetNodeId}`;
         
-        // Generate unique request ID
-        const requestId = `tr-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        // Convert string node ID to numeric nodeNum for the native API
+        let targetNodeNum = targetNode?.num;
+        if (!targetNodeNum && typeof targetNodeId === 'string' && targetNodeId.startsWith('!')) {
+            targetNodeNum = parseInt(targetNodeId.slice(1), 16);
+        }
+        if (!targetNodeNum) {
+            throw new Error('Cannot resolve node number for ' + targetNodeId);
+        }
+        
+        // Generate unique request ID for tracking
+        const requestId = `tr-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
         
         // Initialize traceroute tracking
         const traceroute = {
             requestId,
             targetNodeId,
+            targetNodeNum,
             targetName,
             startedAt: Date.now(),
-            status: 'pending',  // pending, in_progress, completed, timeout, error
+            status: 'pending',
             route: [
                 {
                     nodeId: state.myNodeId,
                     nodeName: state.longName || state.shortName,
                     hopNumber: 0,
-                    timestamp: Date.now(),
                     isOrigin: true
                 }
             ],
             hops: 0,
-            rtt: null,         // Round trip time in ms
+            rtt: null,
             error: null
         };
         
         state.traceroutes.set(requestId, traceroute);
         state.activeTraceroute = requestId;
         
-        // Send traceroute request
-        const message = {
-            type: MessageType.TRACEROUTE_REQUEST,
-            requestId,
-            from: state.myNodeId,
-            fromName: state.shortName,
-            to: targetNodeId,
-            route: [state.myNodeId],  // Track route as it propagates
-            hopCount: 0,
-            maxHops: TRACEROUTE_MAX_HOPS,
-            timestamp: Date.now()
-        };
+        // Also track by target nodeNum so we can match async responses
+        state._pendingTracerouteTarget = targetNodeNum;
+        state._pendingTracerouteRequestId = requestId;
         
         try {
-            await sendToDevice(message);
+            // Use native firmware traceroute (protobuf, not JSON text)
+            if (typeof MeshtasticClient !== 'undefined' && MeshtasticClient.traceRoute) {
+                console.log(`[Traceroute] Sending native traceroute to ${targetName} (${targetNodeNum})`);
+                await MeshtasticClient.traceRoute(targetNodeNum);
+            } else {
+                throw new Error('Native traceroute not available');
+            }
             
             traceroute.status = 'in_progress';
             Events.emit('meshtastic:traceroute_started', { requestId, targetNodeId, targetName });
@@ -5778,6 +6793,8 @@ const MeshtasticModule = (function() {
                 if (tr && tr.status === 'in_progress') {
                     tr.status = 'timeout';
                     tr.error = 'Traceroute timed out';
+                    state._pendingTracerouteTarget = null;
+                    state._pendingTracerouteRequestId = null;
                     Events.emit('meshtastic:traceroute_timeout', { requestId, targetNodeId });
                     
                     if (typeof ModalsModule !== 'undefined') {
@@ -5786,7 +6803,6 @@ const MeshtasticModule = (function() {
                 }
             }, TRACEROUTE_TIMEOUT);
             
-            // Store timeout ID for cleanup
             traceroute.timeoutId = timeoutId;
             
             return { requestId, traceroute };
@@ -5794,78 +6810,25 @@ const MeshtasticModule = (function() {
         } catch (e) {
             traceroute.status = 'error';
             traceroute.error = e.message;
+            state._pendingTracerouteTarget = null;
+            state._pendingTracerouteRequestId = null;
             Events.emit('meshtastic:traceroute_error', { requestId, error: e.message });
             throw e;
         }
     }
     
     /**
-     * Handle incoming traceroute request (when we're a relay node)
+     * Handle native firmware traceroute response.
+     * Called when the onTraceroute callback fires from MeshtasticClient.
+     * The firmware's RouteDiscovery contains route[] (array of node nums
+     * that relayed the packet) and optionally snrTowards[]/snrBack[].
      */
-    function handleTracerouteRequest(message) {
-        // Add ourselves to the route
-        const updatedRoute = [...(message.route || []), state.myNodeId];
-        const hopCount = (message.hopCount || 0) + 1;
+    function handleNativeTracerouteResponse(data) {
+        const requestId = state._pendingTracerouteRequestId;
+        const traceroute = requestId ? state.traceroutes.get(requestId) : null;
         
-        // Check if we're the destination
-        if (message.to === state.myNodeId || message.to === state.myNodeNum) {
-            // We're the destination - send reply back
-            sendTracerouteReply(message.requestId, message.from, updatedRoute, hopCount);
-            return;
-        }
-        
-        // Check hop limit
-        if (hopCount >= (message.maxHops || TRACEROUTE_MAX_HOPS)) {
-            console.log('[Traceroute] Max hops reached, not forwarding');
-            return;
-        }
-        
-        // Forward the request (in real Meshtastic this would be handled by the mesh routing)
-        // For simulation, we just update the route tracking
-        const forwardMessage = {
-            ...message,
-            route: updatedRoute,
-            hopCount: hopCount,
-            lastRelay: state.myNodeId,
-            relayName: state.shortName
-        };
-        
-        sendToDevice(forwardMessage);
-    }
-    
-    /**
-     * Send traceroute reply back to origin
-     */
-    async function sendTracerouteReply(requestId, originNodeId, route, hopCount) {
-        const reply = {
-            type: MessageType.TRACEROUTE_REPLY,
-            requestId,
-            from: state.myNodeId,
-            fromName: state.shortName,
-            to: originNodeId,
-            route: route,
-            hopCount: hopCount,
-            destination: {
-                nodeId: state.myNodeId,
-                nodeName: state.longName || state.shortName,
-                firmwareVersion: state.deviceConfig.firmwareVersion,
-                hwModel: state.deviceConfig.hwModelName
-            },
-            timestamp: Date.now()
-        };
-        
-        await sendToDevice(reply);
-    }
-    
-    /**
-     * Handle traceroute reply (we originated the request)
-     */
-    function handleTracerouteReply(message) {
-        const requestId = message.requestId;
-        const traceroute = state.traceroutes.get(requestId);
-        
-        if (!traceroute) {
-            console.log('[Traceroute] Received reply for unknown request:', requestId);
+        if (!traceroute || traceroute.status !== 'in_progress') {
+            console.log('[Traceroute] Received response but no pending traceroute');
             return;
         }
         
@@ -5874,20 +6837,36 @@ const MeshtasticModule = (function() {
             clearTimeout(traceroute.timeoutId);
         }
         
+        // Clear pending state
+        state._pendingTracerouteTarget = null;
+        state._pendingTracerouteRequestId = null;
+        
         // Calculate RTT
         const rtt = Date.now() - traceroute.startedAt;
         
-        // Build complete route with node info
-        const completeRoute = (message.route || []).map((nodeId, index) => {
-            const node = getNodeById(nodeId);
+        // Build complete route: origin → relay nodes → destination
+        // data.route contains intermediate relay node nums (NOT including origin or destination)
+        const routeNodeNums = data.route || [];
+        const allNodeNums = [
+            state.myNodeNum || parseInt((state.myNodeId || '').replace('!', ''), 16),
+            ...routeNodeNums,
+            traceroute.targetNodeNum
+        ];
+        
+        const completeRoute = allNodeNums.map((nodeNum, index) => {
+            // Look up node by numeric ID
+            const nodeId = `!${nodeNum.toString(16).padStart(8, '0')}`;
+            const node = getNodeById(nodeId) || getNodeById(nodeNum);
+            
             return {
                 nodeId: nodeId,
+                nodeNum: nodeNum,
                 nodeName: node?.name || node?.longName || node?.shortName || `Node ${nodeId}`,
                 hopNumber: index,
                 isOrigin: index === 0,
-                isDestination: index === message.route.length - 1,
+                isDestination: index === allNodeNums.length - 1,
                 signalQuality: node?.signalQuality,
-                snr: node?.snr,
+                snr: data.snrTowards?.[index] ?? node?.snr,
                 rssi: node?.rssi,
                 lastSeen: node?.lastSeen
             };
@@ -5896,21 +6875,23 @@ const MeshtasticModule = (function() {
         // Update traceroute
         traceroute.status = 'completed';
         traceroute.route = completeRoute;
-        traceroute.hops = message.hopCount || completeRoute.length - 1;
+        traceroute.hops = routeNodeNums.length + 1; // relay hops + final hop to destination
         traceroute.rtt = rtt;
         traceroute.completedAt = Date.now();
-        traceroute.destination = message.destination;
+        traceroute.snrTowards = data.snrTowards;
+        traceroute.snrBack = data.snrBack;
         
         // Add to history
         state.tracerouteHistory.unshift({
             ...traceroute,
-            timeoutId: undefined  // Don't store timeout reference
+            timeoutId: undefined
         });
-        
-        // Keep history limited
         if (state.tracerouteHistory.length > 20) {
             state.tracerouteHistory = state.tracerouteHistory.slice(0, 20);
         }
+        
+        // Persist traceroute history
+        Storage.Settings.set('meshtastic_traceroute_history', state.tracerouteHistory);
         
         Events.emit('meshtastic:traceroute_complete', { 
             requestId, 
@@ -5956,6 +6937,7 @@ const MeshtasticModule = (function() {
      */
     function clearTracerouteHistory() {
         state.tracerouteHistory = [];
+        Storage.Settings.set('meshtastic_traceroute_history', []);
         Events.emit('meshtastic:traceroute_history_cleared');
     }
     
@@ -6413,20 +7395,23 @@ const MeshtasticModule = (function() {
             console.warn('Could not get GPS for SOS');
         }
         
+        // Truncate detail fields to fit within LoRa payload after compaction.
+        // SOS strips fromName and alt to maximize space for details.
+        // Receiver resolves sender name from node ID via state.nodes.
+        const truncate = (s, max) => s && s.length > max ? s.substring(0, max) : s;
+        
         const message = {
             type: MessageType.SOS,
             from: state.myNodeId,
-            fromName: state.longName,
             lat: position?.latitude,
             lon: position?.longitude,
-            alt: position?.altitude,
             emergency: true,
             details: {
-                situation: details.situation || 'Emergency',
-                injuries: details.injuries || 'Unknown',
+                situation: truncate(details.situation || 'Emergency', 20),
+                injuries: truncate(details.injuries || 'Unknown', 20),
                 people: details.people || 1,
-                supplies: details.supplies || 'Unknown',
-                message: details.message || ''
+                supplies: truncate(details.supplies || 'Unknown', 20),
+                message: truncate(details.message || '', 35)
             },
             timestamp: Date.now()
         };
@@ -6452,17 +7437,21 @@ const MeshtasticModule = (function() {
     function handleSOS(message) {
         console.warn('SOS RECEIVED:', message);
         
+        // Resolve sender name: use fromName if present, otherwise look up from nodes
+        const senderNode = message.from ? state.nodes.get(message.from) : null;
+        const senderName = message.fromName || senderNode?.longName || senderNode?.name || message.from || 'Unknown';
+        
         // Create emergency waypoint
         if (message.lat && message.lon) {
             const waypoint = {
                 id: `sos-${message.from}-${Date.now()}`,
-                name: `🆘 SOS: ${message.fromName}`,
+                name: `🆘 SOS: ${senderName}`,
                 type: 'hazard',
                 lat: message.lat,
                 lon: message.lon,
                 x: lonToX(message.lon),
                 y: latToY(message.lat),
-                notes: `EMERGENCY from ${message.fromName}\n` +
+                notes: `EMERGENCY from ${senderName}\n` +
                        `Situation: ${message.details?.situation || 'Unknown'}\n` +
                        `Injuries: ${message.details?.injuries || 'Unknown'}\n` +
                        `People: ${message.details?.people || 'Unknown'}\n` +
@@ -6478,7 +7467,7 @@ const MeshtasticModule = (function() {
         
         // Alert user
         if (typeof ModalsModule !== 'undefined') {
-            ModalsModule.showToast(`🆘 SOS FROM ${message.fromName}!`, 'error');
+            ModalsModule.showToast(`🆘 SOS FROM ${senderName}!`, 'error');
         }
         
         // Play alert sound if available
@@ -6598,6 +7587,155 @@ const MeshtasticModule = (function() {
     }
 
     // =========================================================================
+    // RESET / FACTORY RESET
+    // =========================================================================
+    
+    /**
+     * Factory reset the connected Meshtastic device.
+     * Erases all device settings (region, channels, PSKs, owner, position config)
+     * and restores firmware defaults. Device will reboot automatically.
+     * Also clears GridDown's cached device config to force a clean re-sync.
+     *
+     * Requires active BLE/Serial connection.
+     * @returns {{ success: boolean, error?: string }}
+     */
+    async function factoryResetDevice() {
+        if (!state.usingRealClient || typeof MeshtasticClient === 'undefined') {
+            return { success: false, error: 'Not connected via real client' };
+        }
+        if (!MeshtasticClient.isConnected || !MeshtasticClient.isConnected()) {
+            return { success: false, error: 'Device not connected' };
+        }
+        
+        try {
+            console.log('[Meshtastic] Factory reset — sending reset command to device...');
+            
+            await MeshtasticClient.factoryResetDevice();
+            
+            // Clear GridDown's cached device config so it re-syncs cleanly on reconnect
+            state.deviceConfig = {
+                region: RegionCode.UNSET,
+                modemPreset: ModemPreset.LONG_FAST,
+                txPower: 0,
+                hopLimit: HOP_LIMIT_DEFAULT,
+                isRouter: false,
+                positionBroadcastSecs: 900,
+                gpsUpdateInterval: 30,
+                gpsEnabled: true,
+                configLoaded: false
+            };
+            state.channels = [...DEFAULT_CHANNELS];
+            await Storage.Settings.remove('meshtastic_device_config');
+            
+            // Device will disconnect as it reboots
+            state.usingRealClient = false;
+            setConnectionState(ConnectionState.DISCONNECTED);
+            stopPositionBroadcast();
+            
+            console.log('[Meshtastic] Factory reset complete — device rebooting to defaults');
+            Events.emit('meshtastic:factory_reset', { type: 'device' });
+            
+            return { success: true };
+        } catch (e) {
+            console.error('[Meshtastic] Factory reset failed:', e);
+            return { success: false, error: e?.message || String(e) };
+        }
+    }
+    
+    /**
+     * Reset all GridDown-side Meshtastic app state.
+     * Clears PKI keys, DM conversations, message history, outbound queue,
+     * channel read state, wizard state, and cached device config.
+     * Does NOT touch the Meshtastic device hardware.
+     *
+     * Use cases: handing a tablet to a new operator, clearing stale state
+     * after team changes, troubleshooting persistent app-level issues.
+     *
+     * @returns {{ success: boolean, cleared: string[] }}
+     */
+    async function resetAppState() {
+        const cleared = [];
+        
+        try {
+            // PKI keys
+            state.myKeyPair = null;
+            state.peerPublicKeys = new Map();
+            state.pendingKeyRequests = new Map();
+            await Storage.Settings.remove('meshtastic_keypair');
+            await Storage.Settings.remove('meshtastic_peer_keys');
+            cleared.push('PKI keys');
+            
+            // DM conversations
+            state.dmConversations = new Map();
+            state.dmUnreadCounts = new Map();
+            state.pendingDMs = new Map();
+            state.activeDMContact = null;
+            cleared.push('DM conversations');
+            
+            // Message history and states
+            state.messages = {};
+            state.messageStates = new Map();
+            state.pendingAcks = new Map();
+            state.packetIdToMessageId = new Map();
+            await Storage.Settings.remove('meshtastic_messages');
+            await Storage.Settings.remove('meshtastic_dm_conversations');
+            cleared.push('Message history');
+            
+            // Outbound queue
+            state.outboundQueue = [];
+            state._queueProcessing = false;
+            cleared.push('Outbound queue');
+            
+            // Channels — restore defaults
+            state.channels = [...DEFAULT_CHANNELS];
+            state.activeChannelId = 'primary';
+            state.channelReadState = new Map();
+            state.channels.forEach(ch => {
+                state.channelReadState.set(ch.id, {
+                    lastReadAt: Date.now(),
+                    lastReadMessageId: null
+                });
+            });
+            cleared.push('Channels');
+            
+            // Wizard state
+            state.wizardCompleted = false;
+            cleared.push('Setup wizard');
+            
+            // Cached device config
+            state.deviceConfig.configLoaded = false;
+            await Storage.Settings.remove('meshtastic_device_config');
+            cleared.push('Device config cache');
+            
+            // Node map — keep nodes but clear stale metadata
+            for (const [, node] of state.nodes) {
+                delete node.lastCheckin;
+                delete node.verified;
+                delete node.keyFingerprint;
+            }
+            cleared.push('Node metadata');
+            
+            // Traceroutes
+            state.traceroutes = new Map();
+            state.activeTraceroute = null;
+            cleared.push('Traceroute history');
+            
+            // Persist the cleaned state
+            await saveSettings();
+            
+            // Update UI
+            updateTeamMembers();
+            Events.emit('meshtastic:app_reset', { cleared });
+            
+            console.log('[Meshtastic] App state reset. Cleared:', cleared.join(', '));
+            return { success: true, cleared };
+        } catch (e) {
+            console.error('[Meshtastic] App state reset error:', e);
+            return { success: false, cleared, error: e?.message || String(e) };
+        }
+    }
+
+    // =========================================================================
     // SETTINGS
     // =========================================================================
     
@@ -6609,6 +7747,16 @@ const MeshtasticModule = (function() {
         state.shortName = shortName || longName.substring(0, 4).toUpperCase();
         saveSettings();
         updateTeamMembers();
+        
+        // Push to device hardware if connected
+        if (state.connectionState === ConnectionState.CONNECTED &&
+            typeof MeshtasticClient !== 'undefined' &&
+            MeshtasticClient.isConnected && MeshtasticClient.isConnected() &&
+            typeof MeshtasticClient.setOwner === 'function') {
+            MeshtasticClient.setOwner(state.longName, state.shortName).catch(err => {
+                console.warn('[Meshtastic] Could not push owner to device:', err.message);
+            });
+        }
     }
     
     /**
@@ -6801,12 +7949,70 @@ const MeshtasticModule = (function() {
         sendSOS,
         sendCheckin,
         
+        // Reset
+        factoryResetDevice,
+        resetAppState,
+        
         // Settings
         setUserName,
         setCallback,
         
         // Data access
         getNodes,
+        
+        // Demo/Training API - allows external tools to inject simulated nodes
+        injectDemoNodes: (demoNodes) => {
+            // Only allow in demo mode for security
+            if (!window.__GRIDDOWN_DEMO_MODE__ && !window.__SCENEFORGE_DEMO_MODE__) {
+                console.warn('[Meshtastic] injectDemoNodes requires demo mode to be enabled');
+                return false;
+            }
+            if (!Array.isArray(demoNodes)) return false;
+            for (const n of demoNodes) {
+                if (n.nodeNum || n.id) {
+                    const nodeNum = n.nodeNum || parseInt(n.id, 16) || Date.now();
+                    n._injected = true;
+                    n._injectedAt = Date.now();
+                    state.nodes.set(nodeNum, n);
+                }
+            }
+            console.log(`[Meshtastic] Injected ${demoNodes.length} demo nodes`);
+            return true;
+        },
+        
+        // Clear only injected demo nodes
+        clearDemoNodes: () => {
+            let cleared = 0;
+            for (const [nodeNum, node] of state.nodes) {
+                if (node._injected) {
+                    state.nodes.delete(nodeNum);
+                    cleared++;
+                }
+            }
+            console.log(`[Meshtastic] Cleared ${cleared} demo nodes`);
+            return cleared;
+        },
+        
+        // Inject demo messages (for training scenarios)
+        injectDemoMessages: (demoMessages, channelId = 0) => {
+            if (!window.__GRIDDOWN_DEMO_MODE__ && !window.__SCENEFORGE_DEMO_MODE__) {
+                console.warn('[Meshtastic] injectDemoMessages requires demo mode to be enabled');
+                return false;
+            }
+            if (!Array.isArray(demoMessages)) return false;
+            
+            if (!state.messages[channelId]) {
+                state.messages[channelId] = [];
+            }
+            
+            for (const msg of demoMessages) {
+                msg._injected = true;
+                msg._injectedAt = Date.now();
+                state.messages[channelId].push(msg);
+            }
+            console.log(`[Meshtastic] Injected ${demoMessages.length} demo messages to channel ${channelId}`);
+            return true;
+        },
         
         // =========================================================
         // PHASE 1: Device Configuration
@@ -6816,6 +8022,7 @@ const MeshtasticModule = (function() {
         setModemPreset,
         setTxPower,
         setHopLimit,
+        setRadioConfig,
         requestDeviceConfig,
         getRegionOptions,
         getModemPresetOptions,

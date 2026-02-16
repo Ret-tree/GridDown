@@ -198,17 +198,17 @@ const SatWeatherModule = (function() {
      * GIBS uses YYYY-MM-DD date format in the REST URL
      * For daily products, we use yesterday's date for complete global coverage
      */
-    function getGibsTileUrl(productKey) {
+    function getGibsTileUrl(productKey, dateStr = null) {
         const product = PRODUCTS[productKey];
         if (!product || product.source !== 'gibs') return null;
         
-        // Use yesterday's date for complete global coverage
+        // Use provided date, or yesterday's date for complete global coverage
         // (today's data may be incomplete depending on satellite passes)
-        const dateStr = getYesterdayDateString();
+        const date = dateStr || getYesterdayDateString();
         
         // WMTS REST pattern for GIBS (using GoogleMapsCompatible projection)
         // Format: {base}/{layer}/default/{date}/{tileMatrixSet}/{z}/{y}/{x}.{format}
-        return `${GIBS_BASE}/${product.id}/default/${dateStr}/${product.tileMatrixSet}/{z}/{y}/{x}.${product.format}`;
+        return `${GIBS_BASE}/${product.id}/default/${date}/${product.tileMatrixSet}/{z}/{y}/{x}.${product.format}`;
     }
     
     /**
@@ -226,6 +226,15 @@ const SatWeatherModule = (function() {
     function getYesterdayDateString() {
         const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
         return yesterday.toISOString().split('T')[0];
+    }
+    
+    /**
+     * Get date string for N hours ago in YYYY-MM-DD format (UTC)
+     * Used for animation frames
+     */
+    function getDateStringHoursAgo(hours) {
+        const past = new Date(Date.now() - hours * 60 * 60 * 1000);
+        return past.toISOString().split('T')[0];
     }
     
     /**

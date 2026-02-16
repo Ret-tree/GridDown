@@ -53,6 +53,8 @@ const NetworkStatusModule = (function() {
                         // Check actual connectivity
                         checkConnectivity().then(online => {
                             if (online) handleOnline();
+                        }).catch(err => {
+                            console.warn('[Network] Connectivity check failed:', err.message);
                         });
                     }
                 }

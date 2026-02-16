@@ -91,38 +91,70 @@ const SearchModule = (function() {
     // Help topics searchable in the app
     const HELP_TOPICS = [
         // Navigation & GPS
-        { id: 'help-gps', name: 'GPS & Location', keywords: ['gps', 'location', 'position', 'coordinates', 'accuracy'], icon: '📍', description: 'How GPS positioning works in GridDown', content: 'GridDown uses your device GPS for positioning. In GPS-denied environments, use celestial navigation or rangefinder resection.' },
-        { id: 'help-offline', name: 'Offline Maps', keywords: ['offline', 'maps', 'download', 'cache', 'tiles'], icon: '🗺️', description: 'Download maps for offline use', content: 'Download map tiles before going off-grid. Go to Offline panel to select regions and download.' },
-        { id: 'help-navigation', name: 'Route Navigation', keywords: ['navigation', 'route', 'navigate', 'directions', 'turn'], icon: '🧭', description: 'Navigate along a route', content: 'Create a route, then tap Start Navigation. Follow turn-by-turn guidance with distance and bearing.' },
+        { id: 'help-gps', name: 'GPS & Location', keywords: ['gps', 'location', 'position', 'coordinates', 'accuracy'], icon: '📍', description: 'How GPS positioning works in GridDown', content: 'GridDown uses your device GPS for positioning. In GPS-denied environments, use celestial navigation or rangefinder resection.', panel: 'gps' },
+        { id: 'help-offline', name: 'Offline Maps', keywords: ['offline', 'maps', 'download', 'cache', 'tiles'], icon: '🗺️', description: 'Download maps for offline use', content: 'Download map tiles before going off-grid. Select regions and download for offline access.', panel: 'offline' },
+        { id: 'help-navigation', name: 'Route Navigation', keywords: ['navigation', 'route', 'navigate', 'directions', 'turn'], icon: '🧭', description: 'Navigate along a route', content: 'Create a route, then tap Start Navigation. Follow turn-by-turn guidance with distance and bearing.', panel: 'navigation' },
         
         // Celestial Navigation
-        { id: 'help-celestial', name: 'Celestial Navigation', keywords: ['celestial', 'stars', 'navigation', 'sextant', 'astronomy'], icon: '⭐', description: 'Navigate using stars and celestial bodies', content: 'Use the star chart, camera sextant, and noon sight tools to determine position without GPS.' },
-        { id: 'help-star-id', name: 'Star Identification', keywords: ['star', 'identify', 'recognition', 'constellation'], icon: '✨', description: 'Identify stars using your camera', content: 'Point camera at sky, tap a star to identify it. Works offline using built-in star catalog.' },
-        { id: 'help-resection', name: 'Rangefinder Resection', keywords: ['resection', 'rangefinder', 'triangulation', 'position', 'fix'], icon: '📐', description: 'Determine position using known landmarks', content: 'Take bearings to 2-3 known landmarks (peaks, towers) to calculate your position without GPS.' },
+        { id: 'help-celestial', name: 'Celestial Navigation', keywords: ['celestial', 'stars', 'navigation', 'sextant', 'astronomy'], icon: '⭐', description: 'Navigate using stars and celestial bodies', content: 'Use the star chart, camera sextant, and noon sight tools to determine position without GPS.', panel: 'celestial' },
+        { id: 'help-star-id', name: 'Star Identification', keywords: ['star', 'identify', 'recognition', 'constellation'], icon: '✨', description: 'Identify stars using your camera', content: 'Point camera at sky, tap a star to identify it. Works offline using built-in star catalog.', panel: 'celestial' },
+        { id: 'help-resection', name: 'Rangefinder Resection', keywords: ['resection', 'rangefinder', 'triangulation', 'position', 'fix'], icon: '📐', description: 'Determine position using known landmarks', content: 'Take bearings to 2-3 known landmarks (peaks, towers) to calculate your position without GPS.', panel: 'navigation' },
         
         // Communication
-        { id: 'help-radio', name: 'Radio Frequencies', keywords: ['radio', 'frequency', 'channel', 'communication', 'ham'], icon: '📻', description: 'Managing radio frequencies', content: 'Store and organize radio frequencies for your team. Supports ham, GMRS, FRS, MURS bands.' },
-        { id: 'help-meshtastic', name: 'Meshtastic Integration', keywords: ['meshtastic', 'mesh', 'lora', 'radio', 'messaging'], icon: '📡', description: 'Connect to Meshtastic mesh network', content: 'Connect via Bluetooth to share positions and messages over LoRa mesh network.' },
-        { id: 'help-aprs', name: 'APRS Tracking', keywords: ['aprs', 'packet', 'amateur', 'tracking'], icon: '📶', description: 'Amateur radio position reporting', content: 'View APRS stations and send position reports (requires amateur radio license).' },
+        { id: 'help-radio', name: 'Radio Frequencies', keywords: ['radio', 'frequency', 'channel', 'communication', 'ham'], icon: '📻', description: 'Managing radio frequencies', content: 'Store and organize radio frequencies for your team. Supports ham, GMRS, FRS, MURS bands.', panel: 'radio' },
+        { id: 'help-meshtastic', name: 'Meshtastic Integration', keywords: ['meshtastic', 'mesh', 'lora', 'radio', 'messaging'], icon: '📡', description: 'Connect to Meshtastic mesh network', content: 'Connect via Bluetooth to share positions and messages over LoRa mesh network.', panel: 'team' },
+        { id: 'help-aprs', name: 'APRS Tracking', keywords: ['aprs', 'packet', 'amateur', 'tracking'], icon: '📶', description: 'Amateur radio position reporting', content: 'View APRS stations and send position reports (requires amateur radio license).', panel: 'team' },
         
         // Emergency
-        { id: 'help-sos', name: 'Emergency SOS', keywords: ['sos', 'emergency', 'help', 'rescue', 'distress'], icon: '🆘', description: 'Send emergency distress signal', content: 'Activate SOS to flash screen/light, sound alarm, and prepare emergency message with coordinates.' },
-        { id: 'help-sarsat', name: 'SARSAT Beacons', keywords: ['sarsat', 'beacon', 'elt', 'plb', 'epirb', 'emergency'], icon: '🔔', description: 'Detect emergency beacons', content: 'With SDR hardware, detect 406 MHz emergency beacon signals from ELTs, PLBs, and EPIRBs.' },
+        { id: 'help-sos', name: 'Emergency SOS', keywords: ['sos', 'emergency', 'help', 'rescue', 'distress'], icon: '🆘', description: 'Send emergency distress signal', content: 'Activate SOS to flash screen/light, sound alarm, and prepare emergency message with coordinates.', panel: 'sos' },
+        { id: 'help-sarsat', name: 'SARSAT Beacons', keywords: ['sarsat', 'beacon', 'elt', 'plb', 'epirb', 'emergency'], icon: '🔔', description: 'Detect emergency beacons', content: 'With SDR hardware, detect 406 MHz emergency beacon signals from ELTs, PLBs, and EPIRBs.', panel: 'sarsat' },
         
         // Tools
-        { id: 'help-measure', name: 'Distance Measurement', keywords: ['measure', 'distance', 'length', 'ruler'], icon: '📏', description: 'Measure distances on the map', content: 'Tap Measure tool, then tap points on map to measure distance. Shows both metric and imperial.' },
-        { id: 'help-bearing', name: 'Compass Bearing', keywords: ['bearing', 'compass', 'direction', 'azimuth', 'heading'], icon: '🧭', description: 'Get compass bearing to a point', content: 'Tap a waypoint or map location to see bearing and distance from your position.' },
-        { id: 'help-waypoints', name: 'Waypoints', keywords: ['waypoint', 'marker', 'point', 'save', 'location'], icon: '📍', description: 'Create and manage waypoints', content: 'Tap map to add waypoint, or use search to create at specific coordinates. Organize by type and color.' },
+        { id: 'help-measure', name: 'Distance Measurement', keywords: ['measure', 'distance', 'length', 'ruler'], icon: '📏', description: 'Measure distances on the map', content: 'Tap Measure tool, then tap points on map to measure distance. Shows both metric and imperial.', panel: 'map' },
+        { id: 'help-bearing', name: 'Compass Bearing', keywords: ['bearing', 'compass', 'direction', 'azimuth', 'heading'], icon: '🧭', description: 'Get compass bearing to a point', content: 'Tap a waypoint or map location to see bearing and distance from your position.', panel: 'gps' },
+        { id: 'help-waypoints', name: 'Waypoints', keywords: ['waypoint', 'marker', 'point', 'save', 'location'], icon: '📍', description: 'Create and manage waypoints', content: 'Tap map to add waypoint, or use search to create at specific coordinates. Organize by type and color.', panel: 'waypoints' },
         
         // Weather
-        { id: 'help-weather', name: 'Weather Information', keywords: ['weather', 'forecast', 'temperature', 'conditions'], icon: '🌤️', description: 'View weather forecasts', content: 'Weather data from NWS when online. Check satellite imagery for offline weather assessment.' },
-        { id: 'help-barometer', name: 'Barometer', keywords: ['barometer', 'pressure', 'altitude', 'weather'], icon: '🌡️', description: 'Track atmospheric pressure', content: 'Monitor pressure trends to predict weather changes. Falling pressure often indicates incoming storms.' },
+        { id: 'help-weather', name: 'Weather Information', keywords: ['weather', 'forecast', 'temperature', 'conditions', 'wind', 'rain', 'snow'], icon: '🌤️', description: 'View weather forecasts and conditions', content: 'Weather data from Open-Meteo when online. Shows current conditions, 7-day forecast, hourly data, wind, dewpoint, UV index, and route weather analysis.', panel: 'weather' },
+        { id: 'help-barometer', name: 'Barometer', keywords: ['barometer', 'pressure', 'altitude', 'weather', 'storm', 'altimeter'], icon: '🌡️', description: 'Track atmospheric pressure and barometric altitude', content: 'Monitor pressure trends to predict weather changes. Also provides barometric altitude more accurate than GPS.', panel: 'gps' },
+        { id: 'help-wind', name: 'Wind Indicator', keywords: ['wind', 'direction', 'speed', 'gusts', 'beaufort', 'breeze', 'gale'], icon: '💨', description: 'Real-time wind conditions on map', content: 'Wind speed, direction arrow, and gust alerts displayed on the map. Color-coded by Beaufort scale. Updates when weather data is fetched.', panel: 'weather' },
+        { id: 'help-dewpoint', name: 'Dewpoint & UV Index', keywords: ['dewpoint', 'dew', 'uv', 'ultraviolet', 'humidity', 'fog', 'condensation'], icon: '💧', description: 'Dewpoint and UV index readings', content: 'Dewpoint indicates fog risk and condensation potential. UV index shows sun exposure risk.', panel: 'weather' },
+        { id: 'help-aqi', name: 'Air Quality', keywords: ['air', 'quality', 'aqi', 'pollution', 'smoke', 'pm2.5', 'ozone'], icon: '🌬️', description: 'EPA AirNow air quality index', content: 'AQI readings for US, Canada, and Mexico. Shows pollutant levels, health guidance, and map overlay.', panel: 'weather' },
+        { id: 'help-satellite', name: 'Satellite & Radar Imagery', keywords: ['satellite', 'radar', 'nexrad', 'goes', 'imagery', 'storm', 'clouds'], icon: '🛰️', description: 'Weather satellite and radar overlays', content: 'NEXRAD radar for US precipitation, NASA VIIRS daily satellite imagery. Toggle overlays on the map.', panel: 'weather' },
+        { id: 'help-streamgauge', name: 'Stream Gauges', keywords: ['stream', 'gauge', 'water', 'level', 'river', 'flow', 'usgs', 'flood'], icon: '💧', description: 'USGS real-time water level monitoring', content: 'View nearby stream gauge data including flow rate, water level, and temperature.', panel: 'weather' },
+        
+        // Hiking & Terrain
+        { id: 'help-hiking', name: 'Hiking Mode', keywords: ['hiking', 'hike', 'trail', 'trek', 'walking', 'pace', 'naismith'], icon: '🥾', description: 'Track hikes with time and distance', content: 'Start a hike to track distance, duration, and pace. Uses Naismith and Tobler formulas for time estimates.', panel: 'navigation' },
+        { id: 'help-terrain', name: 'Terrain Analysis', keywords: ['terrain', 'slope', 'elevation', 'cover', 'concealment', 'trafficability', 'site'], icon: '⛰️', description: 'Analyze terrain slope, cover, and suitability', content: 'Slope classification, trafficability assessment, solar exposure, flood risk, and cover/concealment analysis.', panel: 'terrain' },
+        
+        // Dead Reckoning & Inertial Nav
+        { id: 'help-deadreckoning', name: 'Dead Reckoning', keywords: ['dead', 'reckoning', 'dr', 'inertial', 'pedestrian', 'step', 'imu'], icon: '📐', description: 'Navigate without GPS using step counting', content: 'Pedestrian dead reckoning uses device sensors to estimate position from last known fix.', panel: 'celestial' },
+        
+        // Coordinates
+        { id: 'help-coords', name: 'Coordinate Converter', keywords: ['coordinate', 'convert', 'converter', 'mgrs', 'utm', 'decimal', 'dms', 'degrees'], icon: '🎯', description: 'Convert between coordinate formats', content: 'Convert between decimal degrees, DMS, UTM, and MGRS formats. Copy to clipboard or navigate to coordinates.', panel: 'coords' },
+        
+        // Planning & Logistics
+        { id: 'help-logistics', name: 'Logistics Planning', keywords: ['logistics', 'supply', 'food', 'water', 'fuel', 'weight', 'pack', 'gear'], icon: '📦', description: 'Plan supplies and logistics', content: 'Calculate food, water, fuel, and gear requirements for trips. Weight budgets and resupply planning.', panel: 'logistics' },
+        { id: 'help-contingency', name: 'Contingency Planning', keywords: ['contingency', 'planning', 'bailout', 'bail', 'emergency', 'plan', 'alternate', 'escape'], icon: '🛡️', description: 'Create contingency and bail-out plans', content: 'Define bail-out points, alternate routes, and emergency procedures for trip planning.', panel: 'contingency' },
+        
+        // Field References
+        { id: 'help-medical', name: 'Medical Reference', keywords: ['medical', 'first', 'aid', 'injury', 'treatment', 'emergency', 'health'], icon: '🏥', description: 'Field medical reference guide', content: 'Quick reference for common field injuries and medical emergencies. Not a substitute for professional medical training.', panel: 'medical' },
+        { id: 'help-fieldguides', name: 'Field Guides', keywords: ['field', 'guide', 'plant', 'animal', 'identification', 'reference', 'knots', 'survival'], icon: '📖', description: 'Offline field reference guides', content: 'Reference materials for field identification, knots, survival skills, and other outdoor knowledge.', panel: 'fieldguides' },
+        
+        // Hardware & SDR
+        { id: 'help-sstv', name: 'SSTV Image Transmission', keywords: ['sstv', 'slow', 'scan', 'television', 'image', 'picture', 'transmit'], icon: '📺', description: 'Send and receive images over radio', content: 'Slow Scan Television for transmitting images over amateur radio. Receive, transmit, and enhance SSTV images.', panel: 'sstv' },
+        { id: 'help-rfsentinel', name: 'RF Sentinel', keywords: ['rf', 'sentinel', 'spectrum', 'sdr', 'signal', 'detection', 'drone', 'fpv'], icon: '📡', description: 'RF spectrum monitoring and drone detection', content: 'Connect RF Sentinel Pro SDR hardware for spectrum monitoring. Detects FPV drone signals and other RF activity.', panel: 'rfsentinel' },
+        { id: 'help-radiacode', name: 'Radiation Monitoring', keywords: ['radiation', 'radiacode', 'geiger', 'nuclear', 'dosimeter', 'cpm', 'microsievert'], icon: '☢️', description: 'RadiaCode radiation detector integration', content: 'Connect RadiaCode device via Bluetooth to monitor ambient radiation levels. Map overlay shows readings.', panel: 'team' },
+        { id: 'help-tak', name: 'TAK/ATAK Bridge', keywords: ['tak', 'atak', 'wintak', 'cot', 'cursor', 'target', 'military', 'tactical'], icon: '🎖️', description: 'Cursor on Target integration', content: 'Bridge to ATAK/WinTAK tactical systems via Cursor on Target (CoT) protocol. Share positions and markers.', panel: 'team' },
+        { id: 'help-compass', name: 'Compass & Declination', keywords: ['compass', 'declination', 'magnetic', 'true', 'north', 'variation'], icon: '🧭', description: 'Magnetic declination and compass corrections', content: 'GridDown calculates magnetic declination using WMM model. Displayed on the map bar. Click for details or to adjust.' },
+        { id: 'help-track', name: 'Track Recording & Export', keywords: ['track', 'record', 'gpx', 'breadcrumb', 'trail', 'log', 'gps', 'trace'], icon: '📍', description: 'Record GPS tracks and export as GPX', content: 'Record your movement as a GPS track. Export as GPX file for use in other apps.', panel: 'gps' },
+        { id: 'help-device-setup', name: 'Meshtastic Device Setup', keywords: ['meshtastic', 'setup', 'device', 'configure', 'bluetooth', 'lora', 'region', 'firmware'], icon: '📱', description: 'Configure new Meshtastic devices', content: 'Step-by-step wizard to set up a new Meshtastic device: name, region, modem preset, TX power. No Meshtastic app needed.', panel: 'team' },
         
         // Data
-        { id: 'help-import', name: 'Import GPX/KML', keywords: ['import', 'gpx', 'kml', 'file', 'data'], icon: '📥', description: 'Import routes and waypoints', content: 'Import GPX or KML files to load routes and waypoints from other apps.' },
-        { id: 'help-export', name: 'Export Data', keywords: ['export', 'save', 'backup', 'gpx', 'share'], icon: '📤', description: 'Export your data', content: 'Export waypoints and routes as GPX files to share or backup.' },
+        { id: 'help-import', name: 'Import GPX/KML', keywords: ['import', 'gpx', 'kml', 'file', 'data'], icon: '📥', description: 'Import routes and waypoints', content: 'Import GPX or KML files to load routes and waypoints from other apps.', panel: 'routes' },
+        { id: 'help-export', name: 'Export Data', keywords: ['export', 'save', 'backup', 'gpx', 'share'], icon: '📤', description: 'Export your data', content: 'Export waypoints and routes as GPX files to share or backup.', panel: 'routes' },
         
-        // General
+        // General (no panel - informational only)
         { id: 'help-keyboard', name: 'Keyboard Shortcuts', keywords: ['keyboard', 'shortcut', 'hotkey', 'keys'], icon: '⌨️', description: 'View all keyboard shortcuts', content: 'Ctrl+K: Search, N: North, G: GPS, L: Layers, M: Measure, +/-: Zoom' },
         { id: 'help-night-mode', name: 'Night Mode', keywords: ['night', 'dark', 'red', 'mode', 'vision'], icon: '🌙', description: 'Preserve night vision', content: 'Red-tinted display to preserve dark adaptation. Activate via settings or search "night mode".' }
     ];
@@ -152,7 +184,7 @@ const SearchModule = (function() {
         
         // Hardware
         { id: 'setting-bluetooth', name: 'Bluetooth Devices', keywords: ['bluetooth', 'device', 'connect', 'hardware'], icon: '📶', description: 'Manage Bluetooth connections', action: 'openBluetoothSettings', type: 'panel' },
-        { id: 'setting-radiacode', name: 'Radiacode Detector', keywords: ['radiacode', 'radiation', 'detector', 'geiger'], icon: '☢️', description: 'Configure radiation detector', action: 'openRadiacodeSettings', panel: 'radiacode' },
+        { id: 'setting-radiacode', name: 'Radiacode Detector', keywords: ['radiacode', 'radiation', 'detector', 'geiger'], icon: '☢️', description: 'Configure radiation detector', action: 'openRadiacodeSettings', panel: 'team' },
         
         // About
         { id: 'setting-version', name: 'App Version', keywords: ['version', 'about', 'info', 'update'], icon: 'ℹ️', description: 'View app version and check for updates', action: 'showAbout', type: 'info' },
@@ -258,6 +290,7 @@ const SearchModule = (function() {
     let recentActions = []; // Track recently used actions
     let favorites = []; // Pinned/favorite items
     let searchContainer = null;
+    let searchInputEl = null;
     let debounceTimer = null;
     let initialized = false;
     let searchEvents = null; // EventManager scoped manager
@@ -361,24 +394,142 @@ const SearchModule = (function() {
         
         document.body.appendChild(searchContainer);
         
+        // Setup event delegation on stable containers
+        setupSearchDelegation();
+        
         // Bind events
         const backdrop = searchContainer.querySelector('.global-search__backdrop');
-        const input = searchContainer.querySelector('#global-search-input');
+        searchInputEl = searchContainer.querySelector('#global-search-input');
         const filters = searchContainer.querySelectorAll('.global-search__filter');
         
         backdrop.addEventListener('click', close);
         
-        input.addEventListener('input', (e) => {
+        searchInputEl.addEventListener('input', (e) => {
             query = e.target.value;
             debouncedSearch();
         });
         
-        input.addEventListener('keydown', handleInputKeydown);
+        searchInputEl.addEventListener('keydown', handleInputKeydown);
         
         filters.forEach(btn => {
             btn.addEventListener('click', () => {
                 setCategory(btn.dataset.category || null);
             });
+        });
+    }
+
+    /**
+     * Setup event delegation on stable search containers.
+     * Replaces per-render addEventListener calls that leaked on every keystroke.
+     */
+    function setupSearchDelegation() {
+        const body = searchContainer.querySelector('#search-results');
+        if (!body) return;
+
+        // --- Click delegation on the search body (covers results, suggestions, recent, quick actions) ---
+        body.addEventListener('click', (e) => {
+            const target = e.target;
+
+            // Search result favorite toggle (must be checked before item click)
+            const favBtn = target.closest('.global-search__item-fav');
+            if (favBtn) {
+                e.stopPropagation();
+                const idx = parseInt(favBtn.dataset.favIndex);
+                if (results[idx]) {
+                    toggleFavorite(results[idx]);
+                    renderResults();
+                }
+                return;
+            }
+
+            // Search result item click
+            const resultItem = target.closest('#search-results-list .global-search__item');
+            if (resultItem) {
+                selectedIndex = parseInt(resultItem.dataset.index);
+                activateSelected();
+                return;
+            }
+
+            // Suggestion item click
+            const suggestionItem = target.closest('#search-suggestions .global-search__item');
+            if (suggestionItem) {
+                selectedIndex = parseInt(suggestionItem.dataset.index);
+                activateSuggestion();
+                return;
+            }
+
+            // Quick action button
+            const quickAction = target.closest('.global-search__quick-action-btn');
+            if (quickAction) {
+                const actionId = quickAction.dataset.action;
+                const action = ACTION_COMMANDS.find(a => a.action === actionId);
+                if (action) {
+                    executeAction(action);
+                    close();
+                }
+                return;
+            }
+
+            // Favorite remove button
+            const removeBtn = target.closest('.global-search__favorite-remove');
+            if (removeBtn) {
+                e.stopPropagation();
+                removeFavorite(removeBtn.dataset.removeId);
+                renderRecentSearches();
+                return;
+            }
+
+            // Favorite item click
+            const favItem = target.closest('.global-search__favorite-item');
+            if (favItem) {
+                const idx = parseInt(favItem.dataset.favoriteIndex);
+                if (favorites[idx]) {
+                    activateFavorite(favorites[idx]);
+                }
+                return;
+            }
+
+            // Recent search item
+            const recentItem = target.closest('.global-search__recent-item');
+            if (recentItem) {
+                query = recentItem.dataset.query;
+                searchInputEl.value = query;
+                performSearch();
+                return;
+            }
+
+            // Clear favorites
+            if (target.closest('#clear-favorites')) {
+                if (confirm('Clear all favorites?')) {
+                    favorites = [];
+                    saveFavorites();
+                    renderRecentSearches();
+                }
+                return;
+            }
+
+            // Clear recent
+            if (target.closest('#clear-recent')) {
+                clearRecentSearches();
+                return;
+            }
+        });
+
+        // --- Mouseenter delegation for hover-to-select ---
+        body.addEventListener('mouseover', (e) => {
+            const resultItem = e.target.closest('#search-results-list .global-search__item');
+            if (resultItem) {
+                selectedIndex = parseInt(resultItem.dataset.index);
+                updateSelection();
+                return;
+            }
+
+            const suggestionItem = e.target.closest('#search-suggestions .global-search__item');
+            if (suggestionItem) {
+                selectedIndex = parseInt(suggestionItem.dataset.index);
+                updateSuggestionSelection();
+                return;
+            }
         });
     }
 
@@ -493,7 +644,7 @@ const SearchModule = (function() {
         searchContainer.setAttribute('aria-hidden', 'false');
         
         // Focus input
-        const input = searchContainer.querySelector('#global-search-input');
+        const input = searchInputEl;
         input.value = query;
         input.focus();
         input.select();
@@ -524,7 +675,7 @@ const SearchModule = (function() {
         document.body.style.overflow = '';
         
         // Reset aria-expanded
-        const input = searchContainer.querySelector('#global-search-input');
+        const input = searchInputEl;
         if (input) {
             input.setAttribute('aria-expanded', 'false');
         }
@@ -549,7 +700,7 @@ const SearchModule = (function() {
      */
     function clearQuery() {
         query = '';
-        const input = searchContainer.querySelector('#global-search-input');
+        const input = searchInputEl;
         input.value = '';
         results = [];
         selectedIndex = 0;
@@ -711,11 +862,12 @@ const SearchModule = (function() {
             try {
                 const freqResults = RadioModule.searchAll ? RadioModule.searchAll(lowerQuery) : [];
                 freqResults.slice(0, 10).forEach(freq => {
+                    const freqVal = freq.freq || freq.frequency;
                     searchResults.push({
-                        id: 'freq-' + freq.frequency,
+                        id: 'freq-' + (freqVal || freq.channel),
                         category: 'frequency',
-                        title: freq.name || freq.frequency,
-                        subtitle: `${freq.frequency} MHz • ${freq.category || freq.type || 'Radio'}`,
+                        title: freq.name || (freq.channel ? `Ch ${freq.channel}` : `${freqVal} MHz`),
+                        subtitle: `${freqVal} MHz • ${freq._category || freq.category || freq.service || 'Radio'}`,
                         icon: '📻',
                         color: '#8b5cf6',
                         data: freq,
@@ -956,11 +1108,17 @@ const SearchModule = (function() {
                     else if (keywordMatch) score = 45;
                     else if (descMatch) score = 35;
                     
+                    // Show panel destination in subtitle for navigable help entries
+                    const panelLabel = topic.panel ? 
+                        (Constants.NAV_ITEMS.find(n => n.id === topic.panel) || {}).label : null;
+                    const subtitle = panelLabel ? 
+                        `${topic.description} → ${panelLabel}` : topic.description;
+                    
                     searchResults.push({
                         id: topic.id,
                         category: 'help',
                         title: topic.name,
-                        subtitle: topic.description,
+                        subtitle: subtitle,
                         icon: topic.icon,
                         color: '#06b6d4',
                         data: topic,
@@ -1470,33 +1628,7 @@ const SearchModule = (function() {
         
         resultsEl.innerHTML = html;
         
-        // Bind click events
-        resultsEl.querySelectorAll('.global-search__item').forEach(el => {
-            el.addEventListener('click', (e) => {
-                // Don't activate if clicking fav button
-                if (e.target.classList.contains('global-search__item-fav')) return;
-                
-                selectedIndex = parseInt(el.dataset.index);
-                activateSelected();
-            });
-            
-            el.addEventListener('mouseenter', () => {
-                selectedIndex = parseInt(el.dataset.index);
-                updateSelection();
-            });
-        });
-        
-        // Bind favorite button events
-        resultsEl.querySelectorAll('.global-search__item-fav').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const idx = parseInt(btn.dataset.favIndex);
-                if (results[idx]) {
-                    toggleFavorite(results[idx]);
-                    renderResults();
-                }
-            });
-        });
+        // Event listeners handled by setupSearchDelegation()
         
         // Scroll selected into view
         scrollSelectedIntoView();
@@ -1561,46 +1693,7 @@ const SearchModule = (function() {
         
         recentEl.innerHTML = html;
         
-        // Bind events for favorites
-        recentEl.querySelector('#clear-favorites')?.addEventListener('click', () => {
-            if (confirm('Clear all favorites?')) {
-                favorites = [];
-                saveFavorites();
-                renderRecentSearches();
-            }
-        });
-        
-        recentEl.querySelectorAll('.global-search__favorite-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                // Don't trigger if clicking remove button
-                if (e.target.classList.contains('global-search__favorite-remove')) return;
-                
-                const idx = parseInt(item.dataset.favoriteIndex);
-                if (favorites[idx]) {
-                    activateFavorite(favorites[idx]);
-                }
-            });
-        });
-        
-        recentEl.querySelectorAll('.global-search__favorite-remove').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const id = btn.dataset.removeId;
-                removeFavorite(id);
-                renderRecentSearches();
-            });
-        });
-        
-        // Bind events for recent searches
-        recentEl.querySelector('#clear-recent')?.addEventListener('click', clearRecentSearches);
-        
-        recentEl.querySelectorAll('.global-search__recent-item').forEach(btn => {
-            btn.addEventListener('click', () => {
-                query = btn.dataset.query;
-                searchContainer.querySelector('#global-search-input').value = query;
-                performSearch();
-            });
-        });
+        // Event listeners handled by setupSearchDelegation()
     }
 
     /**
@@ -2005,18 +2098,7 @@ const SearchModule = (function() {
         
         suggestionsEl.innerHTML = html;
         
-        // Bind click events
-        suggestionsEl.querySelectorAll('.global-search__item').forEach(el => {
-            el.addEventListener('click', () => {
-                selectedIndex = parseInt(el.dataset.index);
-                activateSuggestion();
-            });
-            
-            el.addEventListener('mouseenter', () => {
-                selectedIndex = parseInt(el.dataset.index);
-                updateSuggestionSelection();
-            });
-        });
+        // Event listeners handled by setupSearchDelegation()
     }
 
     /**
@@ -2061,17 +2143,7 @@ const SearchModule = (function() {
             </div>
         `;
         
-        // Bind click events
-        quickActionsEl.querySelectorAll('.global-search__quick-action-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const actionId = btn.dataset.action;
-                const action = ACTION_COMMANDS.find(a => a.action === actionId);
-                if (action) {
-                    executeAction(action);
-                    close();
-                }
-            });
-        });
+        // Event listeners handled by setupSearchDelegation()
     }
 
     /**
@@ -2560,6 +2632,10 @@ const SearchModule = (function() {
                         if (typeof ModalsModule !== 'undefined') {
                             ModalsModule.showToast('Coordinates copied!', 'success');
                         }
+                    }).catch(() => {
+                        if (typeof ModalsModule !== 'undefined') {
+                            ModalsModule.showToast('Could not copy coordinates', 'error');
+                        }
                     });
                 }
                 break;
@@ -2570,6 +2646,20 @@ const SearchModule = (function() {
      * Show help topic content
      */
     function showHelpTopic(topic) {
+        // If topic has a panel, navigate directly to it
+        if (topic.panel) {
+            State.UI.setActivePanel(topic.panel);
+            Events.emit(Events.EVENTS.PANEL_CHANGE, { panel: topic.panel });
+            if (Helpers.isMobile()) State.UI.openPanel();
+            
+            if (typeof ModalsModule !== 'undefined') {
+                ModalsModule.showToast(`${topic.icon} ${topic.name}: ${topic.content}`, 'info', 3000);
+            }
+            Events.emit('search:help', { topic });
+            return;
+        }
+        
+        // No panel — show informational modal
         const modalHtml = `
             <div class="help-topic-modal">
                 <div class="help-topic-modal__header">
@@ -2658,9 +2748,9 @@ const SearchModule = (function() {
                 break;
                 
             case 'changeMapLayer':
-                // Open layers panel
-                State.UI.setActivePanel('layers');
-                Events.emit(Events.EVENTS.PANEL_CHANGE, { panel: 'layers' });
+                // Open map panel (layers are in map panel)
+                State.UI.setActivePanel('map');
+                Events.emit(Events.EVENTS.PANEL_CHANGE, { panel: 'map' });
                 break;
                 
             case 'openOfflineMaps':
@@ -3026,8 +3116,8 @@ const SearchModule = (function() {
                 break;
                 
             case 'checkWeather':
-                if (typeof WeatherModule !== 'undefined') {
-                    WeatherModule.refresh();
+                if (typeof WeatherModule !== 'undefined' && WeatherModule.getMapCenterWeather) {
+                    WeatherModule.getMapCenterWeather().catch(() => {});
                 }
                 break;
                 
@@ -3321,7 +3411,7 @@ const SearchModule = (function() {
         
         // Show toast with frequency info
         if (typeof ModalsModule !== 'undefined') {
-            ModalsModule.showToast(`${freq.name || 'Frequency'}: ${freq.frequency} MHz`, 'info');
+            ModalsModule.showToast(`${freq.name || 'Frequency'}: ${freq.freq || freq.frequency} MHz`, 'info');
         }
         
         // Emit event
@@ -3452,7 +3542,7 @@ const SearchModule = (function() {
         search: (q) => {
             query = q;
             if (isOpen) {
-                searchContainer.querySelector('#global-search-input').value = q;
+                searchInputEl.value = q;
             }
             performSearch();
         }

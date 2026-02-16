@@ -171,6 +171,51 @@ const State = (function() {
             set('routes', rts.length ? rts : Constants.SAMPLE_ROUTES);
             // mapRegions is now managed by OfflineModule
             set('teamMembers', Constants.SAMPLE_TEAM);
+            
+            // Restore UI state that was previously lost on refresh
+            const uiState = await Storage.Settings.get('uiState');
+            if (uiState) {
+                if (uiState.activePanel) set('activePanel', uiState.activePanel);
+                if (uiState.isPanelOpen !== undefined) set('isPanelOpen', uiState.isPanelOpen);
+                if (uiState.selectedVehicle) set('selectedVehicle', uiState.selectedVehicle);
+                if (uiState.waypointFilter) set('waypointFilter', uiState.waypointFilter);
+            }
+            
+            // Restore GPS navigation target (stored as waypoint ID string)
+            const savedNavTarget = await Storage.Settings.get('gpsNavTarget');
+            if (savedNavTarget) {
+                // Verify the waypoint still exists before restoring nav
+                const waypoints = get('waypoints');
+                const targetExists = waypoints.some(wp => wp.id === savedNavTarget);
+                if (targetExists) {
+                    set('gpsNavTarget', savedNavTarget);
+                }
+            }
+            
+            // Auto-save UI state on change (debounced)
+            let uiSaveTimer = null;
+            subscribe(() => {
+                clearTimeout(uiSaveTimer);
+                uiSaveTimer = setTimeout(() => {
+                    Storage.Settings.set('uiState', {
+                        activePanel: get('activePanel'),
+                        isPanelOpen: get('isPanelOpen'),
+                        selectedVehicle: get('selectedVehicle'),
+                        waypointFilter: get('waypointFilter')
+                    });
+                }, 500);
+            }, ['activePanel', 'isPanelOpen', 'selectedVehicle', 'waypointFilter']);
+            
+            // Auto-save GPS nav target on change
+            subscribe(() => {
+                const target = get('gpsNavTarget');
+                if (target) {
+                    Storage.Settings.set('gpsNavTarget', target);
+                } else {
+                    Storage.Settings.set('gpsNavTarget', null);
+                }
+            }, ['gpsNavTarget']);
+            
         } catch (e) {
             console.error('State init failed:', e);
             set('waypoints', Constants.SAMPLE_WAYPOINTS);

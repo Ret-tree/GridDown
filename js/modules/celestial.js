@@ -613,7 +613,9 @@ const CelestialModule = (function() {
         const yOrb = r * Math.sin(v);
         
         // Convert to ecliptic coordinates
-        const wRad = w * DEG_TO_RAD;
+        // Argument of perihelion (ω) = longitude of perihelion (ϖ) - longitude of ascending node (Ω)
+        const argPeri = normalizeAngle(w - O);
+        const wRad = argPeri * DEG_TO_RAD;
         const ORad = O * DEG_TO_RAD;
         
         const cosO = Math.cos(ORad);
