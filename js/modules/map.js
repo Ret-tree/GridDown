@@ -906,29 +906,44 @@ const MapModule = (function() {
     function renderTilesForLayer(width, height, layerKey, isOverlay = false) {
         const zoom = mapState.zoom;
         const tileSize = mapState.tileSize;
-        const centerTile = latLonToTile(mapState.lat, mapState.lon, zoom);
-        const n = Math.pow(2, zoom);
+        
+        // Tile servers only serve tiles at integer zoom levels.
+        // During pinch zoom, mapState.zoom is fractional (e.g., 12.7).
+        // We fetch tiles at the floored zoom level and scale them visually
+        // by the fractional remainder for smooth interpolation.
+        const tileZoom = Math.floor(zoom);
+        const interpScale = Math.pow(2, zoom - tileZoom);
+        const scaledTileSize = tileSize * interpScale;
+        
+        const n = Math.pow(2, tileZoom);
         
         const server = TILE_SERVERS[layerKey];
         if (!server) return;
         
         // Check zoom limit - use max zoom tiles if beyond limit
-        const effectiveZoom = Math.min(zoom, server.maxZoom);
-        const zoomDiff = zoom - effectiveZoom;
+        const effectiveZoom = Math.min(tileZoom, server.maxZoom);
+        const zoomDiff = tileZoom - effectiveZoom;
         const scaleFactor = Math.pow(2, zoomDiff);
         
+        // Calculate center position in tile-space at the integer tile zoom
         const centerX = (mapState.lon + 180) / 360 * n;
         const centerLatRad = mapState.lat * Math.PI / 180;
         const centerY = (1 - Math.log(Math.tan(centerLatRad) + 1 / Math.cos(centerLatRad)) / Math.PI) / 2 * n;
         
-        const offsetX = (centerX - centerTile.x) * tileSize;
-        const offsetY = (centerY - centerTile.y) * tileSize;
+        // Integer tile coordinates of the center
+        const centerTileX = Math.floor(centerX);
+        const centerTileY = Math.floor(centerY);
         
-        const tilesX = Math.ceil(width / tileSize) + 2;
-        const tilesY = Math.ceil(height / tileSize) + 2;
+        // Sub-tile offset scaled to rendered tile size
+        const offsetX = (centerX - centerTileX) * scaledTileSize;
+        const offsetY = (centerY - centerTileY) * scaledTileSize;
         
-        const startTileX = centerTile.x - Math.floor(tilesX / 2);
-        const startTileY = centerTile.y - Math.floor(tilesY / 2);
+        // How many tiles cover the viewport at this scaled size
+        const tilesX = Math.ceil(width / scaledTileSize) + 2;
+        const tilesY = Math.ceil(height / scaledTileSize) + 2;
+        
+        const startTileX = centerTileX - Math.floor(tilesX / 2);
+        const startTileY = centerTileY - Math.floor(tilesY / 2);
         
         // Set composite operation for overlays
         if (isOverlay) {
@@ -945,13 +960,13 @@ const MapModule = (function() {
                 
                 if (tileY < 0 || tileY >= n) continue;
                 
-                const screenX = width / 2 + (dx - Math.floor(tilesX / 2)) * tileSize - offsetX;
-                const screenY = height / 2 + (dy - Math.floor(tilesY / 2)) * tileSize - offsetY;
+                const screenX = width / 2 + (dx - Math.floor(tilesX / 2)) * scaledTileSize - offsetX;
+                const screenY = height / 2 + (dy - Math.floor(tilesY / 2)) * scaledTileSize - offsetY;
                 
                 // Only draw placeholder for base layer
                 if (!isOverlay) {
                     ctx.fillStyle = '#2a2f3e';
-                    ctx.fillRect(screenX, screenY, tileSize, tileSize);
+                    ctx.fillRect(screenX, screenY, scaledTileSize, scaledTileSize);
                 }
                 
                 const cacheKey = `${layerKey}/${effectiveZoom}/${wrappedTileX}/${tileY}`;
@@ -962,9 +977,9 @@ const MapModule = (function() {
                         const srcSize = tileSize / scaleFactor;
                         const srcX = ((wrappedTileX * scaleFactor) % 1) * tileSize;
                         const srcY = ((tileY * scaleFactor) % 1) * tileSize;
-                        ctx.drawImage(tileCache.get(cacheKey), srcX, srcY, srcSize, srcSize, screenX, screenY, tileSize, tileSize);
+                        ctx.drawImage(tileCache.get(cacheKey), srcX, srcY, srcSize, srcSize, screenX, screenY, scaledTileSize, scaledTileSize);
                     } else {
-                        ctx.drawImage(tileCache.get(cacheKey), screenX, screenY, tileSize, tileSize);
+                        ctx.drawImage(tileCache.get(cacheKey), screenX, screenY, scaledTileSize, scaledTileSize);
                     }
                 } else {
                     // Show loading indicator for base layer
@@ -972,9 +987,9 @@ const MapModule = (function() {
                         loadingCount++;
                         // Draw loading placeholder
                         ctx.fillStyle = '#1e2433';
-                        ctx.fillRect(screenX, screenY, tileSize, tileSize);
+                        ctx.fillRect(screenX, screenY, scaledTileSize, scaledTileSize);
                         ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-                        ctx.strokeRect(screenX, screenY, tileSize, tileSize);
+                        ctx.strokeRect(screenX, screenY, scaledTileSize, scaledTileSize);
                     }
                     
                     loadTile(wrappedTileX, tileY, effectiveZoom, layerKey)
@@ -1092,9 +1107,13 @@ const MapModule = (function() {
      * Render a single custom tile layer
      */
     function renderCustomTileLayer(width, height, layer) {
-        const effectiveZoom = Math.min(mapState.zoom, layer.maxZoom);
-        const scale = Math.pow(2, mapState.zoom);
-        const worldSize = mapState.tileSize * scale;
+        const tileZoom = Math.floor(mapState.zoom);
+        const interpScale = Math.pow(2, mapState.zoom - tileZoom);
+        const scaledTileSize = mapState.tileSize * interpScale;
+        
+        const effectiveZoom = Math.min(tileZoom, layer.maxZoom);
+        const scale = Math.pow(2, tileZoom);
+        const worldSize = scaledTileSize * scale;
         
         const centerX = ((mapState.lon + 180) / 360) * worldSize;
         const centerY = ((1 - Math.log(Math.tan(mapState.lat * Math.PI / 180) + 
@@ -1103,10 +1122,10 @@ const MapModule = (function() {
         const startX = centerX - width / 2;
         const startY = centerY - height / 2;
         
-        const startTileX = Math.floor(startX / mapState.tileSize);
-        const startTileY = Math.floor(startY / mapState.tileSize);
-        const endTileX = Math.ceil((startX + width) / mapState.tileSize);
-        const endTileY = Math.ceil((startY + height) / mapState.tileSize);
+        const startTileX = Math.floor(startX / scaledTileSize);
+        const startTileY = Math.floor(startY / scaledTileSize);
+        const endTileX = Math.ceil((startX + width) / scaledTileSize);
+        const endTileY = Math.ceil((startY + height) / scaledTileSize);
         
         const maxTile = Math.pow(2, effectiveZoom) - 1;
         
@@ -1116,8 +1135,8 @@ const MapModule = (function() {
                 
                 if (tileY < 0 || tileY > maxTile) continue;
                 
-                const drawX = tileX * mapState.tileSize - startX;
-                const drawY = tileY * mapState.tileSize - startY;
+                const drawX = tileX * scaledTileSize - startX;
+                const drawY = tileY * scaledTileSize - startY;
                 
                 // Replace placeholders in URL template
                 const url = layer.url
@@ -1131,7 +1150,7 @@ const MapModule = (function() {
                 if (tileCache.has(cacheKey)) {
                     const cached = tileCache.get(cacheKey);
                     if (cached.loaded) {
-                        ctx.drawImage(cached.img, drawX, drawY, mapState.tileSize, mapState.tileSize);
+                        ctx.drawImage(cached.img, drawX, drawY, scaledTileSize, scaledTileSize);
                     }
                 } else if (!pendingTiles.has(cacheKey)) {
                     // Start loading tile
@@ -3623,8 +3642,15 @@ const MapModule = (function() {
             mapState.dragStart = null;
             gestureState.isActive = false;
             
-            // Save position after gesture completes
+            // Snap zoom to nearest integer after pinch gesture completes.
+            // Fractional zoom is used during the gesture for smooth visual interpolation,
+            // but final zoom must be integer for clean tile rendering.
             if (gestureState.initialZoom !== mapState.zoom || gestureState.initialBearing !== mapState.bearing) {
+                mapState.zoom = Math.round(mapState.zoom);
+                mapState.zoom = Math.max(3, Math.min(19, mapState.zoom));
+                if (zoomLevelEl) zoomLevelEl.textContent = mapState.zoom + 'z';
+                updateScaleBar();
+                render();
                 saveMapPosition();
             }
             
@@ -3635,7 +3661,12 @@ const MapModule = (function() {
             mapState.dragStart = { x: touch.clientX, y: touch.clientY };
             mapState.isDragging = true;
             
-            // Save position after pinch/rotate gesture
+            // Snap zoom to integer after pinch gesture and save position
+            mapState.zoom = Math.round(mapState.zoom);
+            mapState.zoom = Math.max(3, Math.min(19, mapState.zoom));
+            if (zoomLevelEl) zoomLevelEl.textContent = mapState.zoom + 'z';
+            updateScaleBar();
+            render();
             saveMapPosition();
         }
     }
