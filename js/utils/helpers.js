@@ -11,7 +11,7 @@ const Helpers = (function() {
     const debounce = (fn, wait) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), wait); }; };
     const throttle = (fn, limit) => { let t; return (...a) => { if (!t) { fn(...a); t = true; setTimeout(() => t = false, limit); } }; };
     const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
-    const isMobile = () => window.matchMedia('(max-width: 768px)').matches;
+    const isMobile = () => window.matchMedia('(max-width: 1366px) and (pointer: coarse), (max-width: 768px)').matches;
     const isTouch = () => 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     
     const createElement = (tag, attrs = {}, children = []) => {
