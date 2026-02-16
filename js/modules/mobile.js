@@ -19,7 +19,7 @@ const MobileModule = (function() {
 
     // Configuration
     const CONFIG = {
-        fabBreakpoint: 768,           // Hide FAB above this width
+        fabBreakpoint: 1024,          // Hide FAB above this width (tablet support)
         installPromptDelay: 30000,    // Wait 30s before showing install prompt
         installPromptKey: 'griddown_install_dismissed',
         batteryUpdateInterval: 60000, // Update battery every 60s
@@ -65,8 +65,12 @@ const MobileModule = (function() {
             createStatusIndicators();
         }
 
-        // Listen for resize to handle orientation changes
+        // Listen for resize and orientation changes (tablets rotate frequently in field)
         window.addEventListener('resize', handleResize);
+        window.addEventListener('orientationchange', () => {
+            // Delay slightly — viewport dimensions update after orientationchange fires
+            setTimeout(handleResize, 100);
+        });
 
         initialized = true;
         console.log(`Mobile module initialized (isMobile: ${isMobile})`);
