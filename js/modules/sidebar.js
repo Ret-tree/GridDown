@@ -100,7 +100,7 @@ const SidebarModule = (function() {
             btn.onclick = () => {
                 State.UI.setActivePanel(btn.dataset.panel);
                 Events.emit(Events.EVENTS.PANEL_CHANGE, { panel: btn.dataset.panel });
-                State.UI.openPanel();
+                if (Helpers.isMobile()) State.UI.openPanel();
             };
         });
         
