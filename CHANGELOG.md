@@ -2,6 +2,59 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.57.54] - 2025-02-16
+
+### Enhanced — Tablet Landscape Layout (Phase 3: Tablet Support)
+- **Tablet landscape overlay layout** — New CSS tier at `@media (min-width: 1025px) and (max-width: 1366px) and (pointer: coarse)` targets 10-12" tablets in landscape orientation (Tab Active5 Pro at ~1280px, iPad Pro, etc.). Sidebar stays vertical but slims from 72px to 56px. Panels become slide-over overlays instead of pushing the map, maximizing tactical map area to ~96% of screen width. Panel slides in from behind the sidebar with 0.3s cubic-bezier animation and drop shadow.
+- **CRITICAL FIX: Helpers.isMobile() breakpoint mismatch** — `Helpers.isMobile()` in helpers.js still checked `(max-width: 768px)` despite Phase 1 updating CSS to 1024px. This caused panels to be completely invisible on the Tab Active5 Pro at 800px portrait because CSS applied overlay positioning (`translateX(-100%)`) but JS never added the `panel--open` class. Fixed to `(max-width: 1366px) and (pointer: coarse), (max-width: 768px)` matching all CSS overlay panel states.
+- **Slim sidebar for landscape** — Sidebar narrows to 56px with hidden nav labels, dividers, and status labels. Logo shrinks to 36px. Nav items remain 44×44 for reliable touch targeting. Settings button and status dots preserved.
+- **Overlay panel behavior** — Panels position fixed to the right of the sidebar, overlaying the map with `box-shadow: 4px 0 24px` when open. Width set to 340px. Map area is never compressed — panels slide on top.
+- **Map overlay element repositioning** — Offline toggle and wind indicator shift right by `var(--sidebar-width)` to clear the sidebar. Nav HUD positioned bottom-left with responsive width `clamp(280px, 40vw, 400px)`. Measure results panel stays bottom-right.
+- **FAB and mobile status hidden in landscape** — Sidebar provides navigation in landscape, making the FAB redundant. Mobile status indicators hidden since sidebar status remains visible.
+
+### Technical
+- Modified: `css/app.css` — added ~170-line `@media (min-width: 1025px) and (max-width: 1366px) and (pointer: coarse)` section. Customizes sidebar, panel, and map overlay positioning for tablet landscape.
+- Modified: `js/utils/helpers.js` — `isMobile()` updated from `(max-width: 768px)` to `(max-width: 1366px) and (pointer: coarse), (max-width: 768px)`. Fixes panel visibility on tablets and correctly gates overlay behavior for Phase 3.
+- Modified: `sw.js` — cache version bump to v6.57.54
+- Desktop impact: ZERO — `pointer: coarse` never matches on desktop. The `(max-width: 768px)` fallback in isMobile() is identical to previous behavior.
+
+## [6.57.53] - 2025-02-16
+
+### Enhanced — Touch Targets for Glove Use (Phase 2: Tablet Support)
+- **All interactive elements meet 48px minimum touch targets on touch devices** — Comprehensive `@media (pointer: coarse)` CSS section ensures reliable tap accuracy with gloves on rugged tablets like the Samsung Galaxy Tab Active5 Pro. Desktop users with mouse/trackpad (`pointer: fine`) see zero visual changes.
+- **Base button class** (`.btn`) — min-height raised to 44px on touch devices
+- **Map control buttons** — increased from 44×44 to 48×48 with larger SVG icons (22px)
+- **Toggle switches** — enlarged from 40×22 to 52×28 with proportionally larger slider knob for reliable glove taps
+- **Modal close buttons** — enlarged from 24×24 to 44×44 with active state feedback
+- **Settings rows** — min-height 48px, selects get 44px min-height with larger text
+- **Celestial navigation tabs** — min-height 48px with increased padding, overriding inline styles
+- **Waypoint/route action buttons** — edit, delete, elevation profile buttons enlarged to 44×44 minimum despite inline `padding:6px` styles
+- **SSTV, APRS, CoT/TAK, GPS action buttons** — all enlarged to 44px minimum height
+- **Form inputs and textareas** — min-height 44px on touch devices
+- **Layer buttons, cards, vehicle buttons, type buttons, coord format buttons** — all meet 48px minimum
+- **300ms tap delay eliminated** — `touch-action: manipulation` on body element
+- **Tap highlight removed** — `-webkit-tap-highlight-color: transparent` for cleaner visual feedback
+
+### Technical
+- Modified: `css/app.css` — added ~240-line `@media (pointer: coarse)` section at end of file. Uses `!important` only for elements with inline styles in panels.js (celestial tabs, waypoint buttons, route buttons, etc.) that cannot be overridden otherwise. All rules scoped to touch devices.
+- Modified: `sw.js` — cache version bump to v6.57.53
+- Desktop impact: ZERO — `pointer: coarse` never matches on desktop Chrome with mouse/trackpad
+
+## [6.57.52] - 2025-02-16
+
+### Enhanced — Tablet Support (Phase 1: Breakpoint & Detection)
+- **Responsive breakpoints updated for tablet devices** — All 11 `@media (max-width: 768px)` rules updated to support tablets like the Samsung Galaxy Tab Active5 Pro (10.1" at 1920×1200). Layout rules use `@media (max-width: 1024px) and (pointer: coarse), (max-width: 768px)` which activates on touch devices up to 1024px wide while preserving the 768px fallback for narrow desktop windows. Mobile-only UI (FAB, status bar, install banner) uses `@media (max-width: 1024px) and (pointer: coarse)` without fallback — these never appear on desktop regardless of window size.
+- **FAB breakpoint raised to 1024px** — `MobileModule.CONFIG.fabBreakpoint` updated from 768 to 1024 so the Floating Action Button appears on tablets. The existing `checkIsMobile()` dual-check (touch support AND width) prevents desktop activation.
+- **Orientation change listener** — Added `orientationchange` event listener alongside existing `resize` handler with 100ms debounce for viewport dimension updates. Ensures mobile UI state updates correctly when tablets rotate between portrait and landscape in field use.
+- **Persistent storage request** — Added `navigator.storage.persist()` call during app initialization to prevent Android from evicting cached map tiles and offline data under storage pressure. Non-critical — gracefully degrades if denied.
+
+### Technical
+- Modified: `css/app.css` — 8 layout media queries updated to compound `(max-width: 1024px) and (pointer: coarse), (max-width: 768px)`, 3 mobile-only queries to `(max-width: 1024px) and (pointer: coarse)`
+- Modified: `js/modules/mobile.js` — `fabBreakpoint: 1024`, added `orientationchange` listener with debounce
+- Modified: `js/app.js` — added `navigator.storage.persist()` after `Storage.init()`
+- Modified: `sw.js` — cache version bump to v6.57.52
+- Desktop impact: ZERO — `pointer: coarse` never matches on desktop Chrome with mouse/trackpad
+
 ## [6.57.51] - 2025-02-15
 
 ### Fixed
