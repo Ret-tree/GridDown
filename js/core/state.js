@@ -5,7 +5,7 @@ const State = (function() {
     'use strict';
 
     let state = {
-        activePanel: 'map', isOffline: false, isPanelOpen: false, isLoading: true,
+        activePanel: 'map', isOffline: false, isPanelOpen: true, isLoading: true,
         zoom: 12, center: { x: 0, y: 0 },
         mapLayers: { baseLayer: 'standard', overlays: [], terrain: false, satellite: false, contours: false, grid: false },
         mousePosition: null,

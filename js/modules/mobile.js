@@ -250,10 +250,7 @@ const MobileModule = (function() {
                 if (typeof State !== 'undefined') {
                     State.UI.setActivePanel('celestial');
                     Events.emit(Events.EVENTS.PANEL_CHANGE, { panel: 'celestial' });
-                    
-                    // Open panel on mobile
-                    const panel = document.getElementById('panel');
-                    if (panel) panel.classList.add('panel--open');
+                    State.UI.openPanel();
                 }
                 break;
 
@@ -262,9 +259,7 @@ const MobileModule = (function() {
                 if (typeof State !== 'undefined') {
                     State.UI.setActivePanel('sos');
                     Events.emit(Events.EVENTS.PANEL_CHANGE, { panel: 'sos' });
-                    
-                    const panel = document.getElementById('panel');
-                    if (panel) panel.classList.add('panel--open');
+                    State.UI.openPanel();
                 }
                 haptic('warning');
                 break;
