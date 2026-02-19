@@ -58,6 +58,12 @@ const MapModule = (function() {
         interactionMode: null // Special interaction modes: 'resection-landmark', etc.
     };
     
+    // When true, latLonToPixel returns map-space coordinates (no bearing rotation).
+    // The canvas context transform handles rotation during rendering.
+    // Outside rendering (hit testing, click handlers), latLonToPixel returns
+    // screen-space coordinates with bearing rotation applied.
+    let _insideRotatedContext = false;
+    
     // Multi-touch gesture state for pinch/rotation
     let gestureState = {
         isActive: false,
@@ -622,8 +628,10 @@ const MapModule = (function() {
         let pixelX = width / 2 + (pointX - centerX) * mapState.tileSize;
         let pixelY = height / 2 + (pointY - centerY) * mapState.tileSize;
         
-        // Apply rotation around center if map is rotated
-        if (mapState.bearing !== 0) {
+        // Apply rotation around center if map is rotated.
+        // Skip during rendering — the canvas context transform handles rotation,
+        // so applying it here too would double-rotate all markers/overlays.
+        if (!_insideRotatedContext && mapState.bearing !== 0) {
             const bearingRad = -mapState.bearing * Math.PI / 180;
             const dx = pixelX - width / 2;
             const dy = pixelY - height / 2;
@@ -764,6 +772,11 @@ const MapModule = (function() {
             ctx.translate(-centerX, -centerY);
         }
         
+        // Flag tells latLonToPixel to skip bearing rotation — the canvas
+        // context transform already handles it.  Without this, every marker
+        // drawn via latLonToPixel would be rotated twice.
+        _insideRotatedContext = true;
+        
         // Render rotated map content
         // Need to render more tiles when rotated to cover corners
         const rotatedWidth = mapState.bearing !== 0 ? width * 1.5 : width;
@@ -797,6 +810,8 @@ const MapModule = (function() {
         renderRFLOSOverlay(width, height);
         renderStreamGaugeOverlay(width, height);
         renderOverlayMarkers(width, height);
+        
+        _insideRotatedContext = false;
         
         // Restore state (removes rotation)
         ctx.restore();
