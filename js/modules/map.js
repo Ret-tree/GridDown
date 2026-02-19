@@ -136,6 +136,8 @@ const MapModule = (function() {
         active: false,
         zoom: 0,
         bearing: 0,
+        lat: 0,
+        lon: 0,
         pinchCX: 0,   // pinch center X (CSS px relative to canvas) at last repaint
         pinchCY: 0
     };
@@ -293,6 +295,12 @@ const MapModule = (function() {
         mapEvents.on(canvas, 'touchstart', handleTouchStart, { passive: false });
         mapEvents.on(canvas, 'touchmove', handleTouchMove, { passive: false });
         mapEvents.on(canvas, 'touchend', handleTouchEnd);
+        
+        // Pointer events — used exclusively for getCoalescedEvents() which
+        // provides sub-frame touch positions that TouchEvent doesn't expose.
+        // This improves inertia velocity estimation and smooths out the 
+        // "quantized" feel of touch interactions at high refresh rates.
+        mapEvents.on(canvas, 'pointermove', handlePointerMoveCoalesced);
         
         // Keyboard shortcuts (document-level)
         mapEvents.on(document, 'keydown', handleGlobalKeyDown);
@@ -645,6 +653,12 @@ const MapModule = (function() {
         canvas.style.height = rect.height + 'px';
         ctx.scale(effectiveDpr, effectiveDpr);
         
+        // High-quality bilinear interpolation for tile upscaling during
+        // fractional zoom.  Reduces the "blurry sawtooth" effect inherent
+        // in raster tiles scaled between integer zoom levels.
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
         // Cache canvas bounds for touch handlers (avoids forced reflow per event)
         const canvasRect = canvas.getBoundingClientRect();
         cachedCanvasRect.left = canvasRect.left;
@@ -780,8 +794,10 @@ const MapModule = (function() {
             img.onload = () => {
                 tileCache.set(key, img);
                 pendingTiles.delete(key);
-                // Limit cache size per layer type
-                const cacheLimit = tileServer.type === 'overlay' ? 100 : 200;
+                // Limit cache size per layer type.
+                // 400 base tiles retains ~2 zoom levels (current + previous)
+                // ensuring fallback tiles are available during zoom transitions.
+                const cacheLimit = tileServer.type === 'overlay' ? 150 : 400;
                 const layerKeys = Array.from(tileCache.keys()).filter(k => k.startsWith(server + '/'));
                 if (layerKeys.length > cacheLimit) {
                     tileCache.delete(layerKeys[0]);
@@ -801,11 +817,14 @@ const MapModule = (function() {
     function render() {
         if (!ctx) return;
         
-        // Clear any CSS transform before painting — render() is synchronous so the
-        // browser won't composite the un-transformed canvas; it only sees the final
-        // repainted result at the end of this RAF callback.
-        canvas.style.transform = '';
-        canvas.style.transformOrigin = '';
+        // Clear any CSS gesture transform before painting.  render() is called
+        // synchronously inside a RAF callback, so the browser won't composite
+        // the un-transformed canvas mid-frame — it only sees the final
+        // repainted pixels at the end of this callback.
+        if (canvas.style.transform) {
+            canvas.style.transform = '';
+            canvas.style.transformOrigin = '';
+        }
         
         const width = canvas.width / effectiveDpr;
         const height = canvas.height / effectiveDpr;
@@ -892,12 +911,14 @@ const MapModule = (function() {
         renderAttribution(width, height);
         renderCompassRose(width, height);
         
-        // Update gesture render state so CSS transform can compute
-        // the delta between "what's painted" and "current mapState"
+        // Update gestureRenderState so the next CSS transform delta is computed
+        // relative to what's actually painted on this frame.
         if (gestureState.isActive || oneFingerZoomState.isActive) {
             gestureRenderState.active = true;
             gestureRenderState.zoom = mapState.zoom;
             gestureRenderState.bearing = mapState.bearing;
+            gestureRenderState.lat = mapState.lat;
+            gestureRenderState.lon = mapState.lon;
             gestureRenderState.pinchCX = gestureState.centerX - cachedCanvasRect.left;
             gestureRenderState.pinchCY = gestureState.centerY - cachedCanvasRect.top;
         }
@@ -1015,6 +1036,9 @@ const MapModule = (function() {
         // During pinch zoom, mapState.zoom is fractional (e.g., 12.7).
         // We fetch tiles at the floored zoom level and scale them visually
         // by the fractional remainder for smooth interpolation.
+        // Math.floor ensures tiles always scale UP (1.0× to 2.0×) during zoom-in,
+        // which feels natural. Math.round was tried but creates a jarring shrink
+        // at the 0.5 boundary where tiles suddenly switch direction.
         const tileZoom = Math.floor(zoom);
         const interpScale = Math.pow(2, zoom - tileZoom);
         const scaledTileSize = tileSize * interpScale;
@@ -1115,6 +1139,38 @@ const MapModule = (function() {
         // Show loading indicator if tiles are loading
         if (loadingCount > 0 && !isOverlay) {
             showTileLoadingIndicator(width, height, loadingCount);
+        }
+        
+        // Prefetch tiles at the next zoom level when approaching the integer
+        // transition boundary. With Math.floor, tileZoom increments at each
+        // integer crossing (12.99→13.0). Pre-warming the cache at frac > 0.6
+        // ensures z+1 tiles are ready before the visual switchover.
+        if (!isOverlay && !Number.isInteger(zoom)) {
+            const frac = zoom - tileZoom; // always 0..1 with Math.floor
+            if (frac > 0.6) {
+                const prefetchZoom = tileZoom + 1;
+                if (prefetchZoom <= (server.maxZoom || 19)) {
+                    const pfN = Math.pow(2, prefetchZoom);
+                    const pfCenterX = (mapState.lon + 180) / 360 * pfN;
+                    const pfCenterLatRad = mapState.lat * Math.PI / 180;
+                    const pfCenterY = (1 - Math.log(Math.tan(pfCenterLatRad) + 1 / Math.cos(pfCenterLatRad)) / Math.PI) / 2 * pfN;
+                    const pfCenterTileX = Math.floor(pfCenterX);
+                    const pfCenterTileY = Math.floor(pfCenterY);
+                    // Prefetch a small grid around center (just the core visible tiles)
+                    const pfRadius = 3;
+                    for (let dx = -pfRadius; dx <= pfRadius; dx++) {
+                        for (let dy = -pfRadius; dy <= pfRadius; dy++) {
+                            const tx = ((pfCenterTileX + dx) % pfN + pfN) % pfN;
+                            const ty = pfCenterTileY + dy;
+                            if (ty < 0 || ty >= pfN) continue;
+                            const key = `${layerKey}/${prefetchZoom}/${tx}/${ty}`;
+                            if (!tileCache.has(key) && !pendingTiles.has(key)) {
+                                loadTile(tx, ty, prefetchZoom, layerKey).catch(() => {});
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     
@@ -3762,24 +3818,30 @@ const MapModule = (function() {
     
     /**
      * Apply a CSS transform to the canvas for instant visual feedback during pinch.
-     * The transform bridges the gap between touch events and the next RAF repaint,
-     * giving the compositor (GPU) the ability to scale/rotate/translate the canvas
-     * at zero JavaScript cost. render() clears this on each repaint.
+     * The transform bridges the gap between touch events (up to 120Hz) and the
+     * next RAF repaint (~60Hz).  The browser compositor applies scale/rotate/translate
+     * on the GPU at zero JavaScript cost, so the user sees immediate response.
+     * render() clears this transform on each repaint and updates gestureRenderState.
      */
     function applyGestureCSSTransform() {
         if (!gestureRenderState.active) {
-            // First call of this gesture — initialize from current state.
-            // No transform needed yet since the canvas shows the current state.
+            // First call of this gesture — snapshot what's currently painted.
+            // No CSS transform needed yet since the canvas already shows current state.
             gestureRenderState.active = true;
             gestureRenderState.zoom = mapState.zoom;
             gestureRenderState.bearing = mapState.bearing;
+            gestureRenderState.lat = mapState.lat;
+            gestureRenderState.lon = mapState.lon;
             gestureRenderState.pinchCX = gestureState.centerX - cachedCanvasRect.left;
             gestureRenderState.pinchCY = gestureState.centerY - cachedCanvasRect.top;
             return;
         }
         
+        // Compute the visual delta between what's painted and current mapState
         const scale = Math.pow(2, mapState.zoom - gestureRenderState.zoom);
         const rotateDeg = -(mapState.bearing - gestureRenderState.bearing);
+        
+        // Track finger midpoint movement since last repaint
         const curCX = gestureState.centerX - cachedCanvasRect.left;
         const curCY = gestureState.centerY - cachedCanvasRect.top;
         const tx = curCX - gestureRenderState.pinchCX;
@@ -3792,16 +3854,17 @@ const MapModule = (function() {
     }
     
     /**
-     * Clear gesture CSS transform and mark state inactive.
+     * Clear gesture CSS transform and mark state as needing re-init.
+     * Called at gesture boundaries (touch start, touch end).
      */
     function clearGestureCSSTransform() {
-        if (gestureRenderState.active) {
+        if (gestureRenderState.active || canvas.style.transform) {
             canvas.style.transform = '';
             canvas.style.transformOrigin = '';
             gestureRenderState.active = false;
         }
     }
-
+    
     function handleTouchStart(e) {
         // Close context menu if open
         if (contextMenuState.isOpen) {
@@ -3960,6 +4023,21 @@ const MapModule = (function() {
             
             if (zoomLevelEl) zoomLevelEl.textContent = Math.round(mapState.zoom) + 'z';
             updateScaleBar();
+            
+            // CSS transform for instant visual feedback during one-finger zoom.
+            // Scale around the fixed tap anchor point.
+            if (gestureRenderState.active) {
+                const scale = Math.pow(2, mapState.zoom - gestureRenderState.zoom);
+                canvas.style.transformOrigin = `${px}px ${py}px`;
+                canvas.style.transform = `scale(${scale})`;
+            } else {
+                gestureRenderState.active = true;
+                gestureRenderState.zoom = mapState.zoom;
+                gestureRenderState.bearing = mapState.bearing;
+                gestureRenderState.pinchCX = px;
+                gestureRenderState.pinchCY = py;
+            }
+            
             scheduleRender();
             return;
         }
@@ -4012,8 +4090,12 @@ const MapModule = (function() {
                 while (mapState.lon < -180) mapState.lon += 360;
                 mapState.dragStart = { x: touch.clientX, y: touch.clientY };
                 
-                // Record position sample for inertia velocity computation
-                recordInertiaSample(touch.clientX, touch.clientY);
+                // Fallback velocity recording for browsers without pointer coalesced events.
+                // handlePointerMoveCoalesced provides sub-frame positions when available,
+                // but this ensures basic inertia works everywhere.
+                if (!window.PointerEvent || !PointerEvent.prototype.getCoalescedEvents) {
+                    recordInertiaSample(touch.clientX, touch.clientY);
+                }
                 
                 scheduleRender();
                 debouncedSaveMapPosition();
@@ -4089,7 +4171,9 @@ const MapModule = (function() {
             gestureState.centerY = currentCenter.y;
             
             // Apply CSS transform for instant visual feedback (GPU-composited).
-            // The actual canvas repaint follows on the next RAF via scheduleRender().
+            // Between this touch event and the next RAF, the browser compositor
+            // scales/rotates/translates the canvas at zero JS cost.
+            // render() then clears the transform and paints the correct state.
             applyGestureCSSTransform();
             scheduleRender();
             updateScaleBar();
@@ -4292,6 +4376,30 @@ const MapModule = (function() {
             if (b !== 0 && (b <= 10 || b >= 350)) {
                 resetBearing();
             }
+        }
+    }
+    
+    /**
+     * Process coalesced pointer events for sub-frame touch position accuracy.
+     * Chrome on Android provides getCoalescedEvents() which contains all
+     * intermediate touch positions that occurred between the previous and
+     * current pointer event dispatch. Without this, 2-4 positions per event
+     * are discarded at 120Hz, causing "quantized" feeling and poor inertia.
+     *
+     * This handler supplements the TouchEvent handlers — it ONLY records
+     * high-resolution velocity samples into the inertia ring buffer.
+     * The actual pan/zoom math remains in the touch handlers.
+     */
+    function handlePointerMoveCoalesced(e) {
+        // Only process touch pointers during single-finger drag
+        if (e.pointerType !== 'touch' || !mapState.isDragging) return;
+        if (gestureState.isActive || oneFingerZoomState.isActive) return;
+        
+        // Use coalesced events if available (Chrome 59+)
+        const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+        
+        for (const pe of events) {
+            recordInertiaSample(pe.clientX, pe.clientY);
         }
     }
 
