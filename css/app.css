@@ -66,7 +66,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible {
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; overflow: hidden; }
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 body { font-family: 'IBM Plex Sans', -apple-system, sans-serif; font-size: 14px; color: var(--color-text-primary); background: var(--color-bg-base); -webkit-font-smoothing: antialiased; }
 button { font: inherit; border: none; background: none; color: inherit; cursor: pointer; }
 input, textarea, select { font: inherit; color: var(--color-text-primary); background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 10px; padding: 12px 14px; outline: none; width: 100%; }
@@ -4652,7 +4652,7 @@ body.night-mode .aqi-station-popup .leaflet-popup-tip {
     }
     
     body {
-        touch-action: manipulation; /* Eliminate 300ms tap delay */
+        touch-action: none; /* App handles all touch gestures in JavaScript */
     }
     
     /* --- Base button class --- */
