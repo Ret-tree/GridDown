@@ -1396,7 +1396,14 @@ const RFSentinelModule = (function() {
         state.tracks.set(track.id, {
             ...track,
             type,
-            lastUpdate: Date.now(),
+            // Use last_seen from RF Sentinel when available — this is the
+            // actual detection timestamp from the database and matches how
+            // RF Sentinel's own dashboard ages tracks.  For real-time WS
+            // updates last_seen ≈ Date.now(); for REST-seeded tracks it
+            // reflects the true age so counts stay aligned with RF Sentinel.
+            lastUpdate: track.last_seen
+                ? new Date(track.last_seen).getTime()
+                : Date.now(),
             isNew: isNew
         });
         
