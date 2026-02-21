@@ -320,6 +320,31 @@ const RFSentinelModule = (function() {
                     });
                 }
             }
+            
+            // Same-origin detection: if GridDown is served from RF Sentinel
+            // (e.g. http://10.42.1.1:8080/griddown/ via Ethernet Direct Link),
+            // auto-detect the host from the page URL unless the user has
+            // explicitly saved a different host.
+            if (typeof window !== 'undefined' && window.location) {
+                const pageHost = window.location.hostname;
+                const pagePort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+                const isPrivateIP = (
+                    pageHost.endsWith('.local') ||
+                    pageHost === 'localhost' ||
+                    pageHost.startsWith('127.') ||
+                    pageHost.startsWith('10.') ||
+                    pageHost.startsWith('192.168.') ||
+                    /^172\.(1[6-9]|2\d|3[01])\./.test(pageHost)
+                );
+                
+                // Only auto-detect if on a private/local network AND user
+                // hasn't explicitly saved a different host
+                if (isPrivateIP && (!settings || !settings.host)) {
+                    state.host = pageHost;
+                    state.port = parseInt(pagePort, 10) || CONFIG.defaultPort;
+                    console.log(`RFSentinel: Same-origin detected — using ${state.host}:${state.port}`);
+                }
+            }
         } catch (e) {
             console.warn('RFSentinel: Could not load settings:', e);
         }
