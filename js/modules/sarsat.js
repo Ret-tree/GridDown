@@ -24,6 +24,8 @@ const SarsatModule = (function() {
         // Discovery settings
         discoveryTimeout: 2000,            // Per-address probe timeout in ms
         discoveryPort: 8406,               // Default port to probe
+        statusTimeout: 45000,              // Consider receiver offline after 45s without status (3x heartbeat)
+        commandTimeout: 10000,             // Timeout for command responses in ms
         commonAddresses: [                 // Addresses to probe during discovery
             'sarsat-rx.local',
             'sarsat.local',
@@ -161,6 +163,16 @@ const SarsatModule = (function() {
         // Saved receivers
         savedReceivers: [],          // Array of { url, name, lastConnected, lastSeen }
         
+        // Receiver status (from heartbeat)
+        receiverStatus: null,        // Latest status message from receiver
+        lastStatusTime: null,        // When last status was received
+        statusTimeoutTimer: null,    // Timer for detecting stale connection
+        receiverOnline: false,       // True if heartbeat received within timeout
+        
+        // Command tracking
+        pendingCommands: new Map(),  // requestId -> { resolve, reject, timeout }
+        commandIdCounter: 0,
+        
         // Beacon database
         beacons: new Map(),          // hexId -> beacon object
         
@@ -227,6 +239,7 @@ const SarsatModule = (function() {
         }
         
         _stopAutoReconnect();
+        _clearStatusTimeout();
         
         if (sarsatEvents) {
             sarsatEvents.clear();
@@ -622,6 +635,16 @@ const SarsatModule = (function() {
                         Events.emit('sarsat:connected', { type: 'websocket', url: wsUrl });
                     }
                     
+                    // Auto-request beacon replay from receiver's database
+                    // Uses setTimeout to avoid blocking the connection handler
+                    setTimeout(() => {
+                        if (state.connected && state.webSocket) {
+                            requestRecentBeacons().catch(e => {
+                                console.debug('[SARSAT] Beacon replay request failed:', e.message);
+                            });
+                        }
+                    }, 500);
+                    
                     resolve();
                 };
                 
@@ -687,6 +710,16 @@ const SarsatModule = (function() {
         state.connected = false;
         state.connectionType = null;
         
+        // Clear status tracking
+        _clearStatusTimeout();
+        
+        // Reject any pending commands
+        state.pendingCommands.forEach((pending, id) => {
+            clearTimeout(pending.timeout);
+            pending.reject(new Error('Disconnected'));
+        });
+        state.pendingCommands.clear();
+        
         console.log('[SARSAT] Disconnected');
         
         if (typeof Events !== 'undefined') {
@@ -743,7 +776,7 @@ const SarsatModule = (function() {
             
             try {
                 const message = JSON.parse(line);
-                processBeaconMessage(message);
+                _routeMessage(message);
             } catch (e) {
                 // Not JSON - might be raw hex data
                 if (/^[0-9A-Fa-f]{22,30}$/.test(line)) {
@@ -753,6 +786,197 @@ const SarsatModule = (function() {
                 }
             }
         });
+    }
+    
+    /**
+     * Route incoming JSON message based on msgType
+     */
+    function _routeMessage(message) {
+        const msgType = message.msgType;
+        
+        if (msgType === 'status') {
+            _handleStatus(message);
+        } else if (msgType === 'response') {
+            _handleCommandResponse(message);
+        } else if (msgType === 'beacon') {
+            // New-format beacon with msgType tag
+            processBeaconMessage(message);
+        } else if (message.hexId) {
+            // Legacy format: no msgType, but has hexId → it's a beacon
+            processBeaconMessage(message);
+        } else {
+            console.debug('[SARSAT] Unknown message type:', msgType, message);
+        }
+    }
+    
+    /**
+     * Handle receiver status heartbeat
+     */
+    function _handleStatus(status) {
+        state.receiverStatus = status;
+        state.lastStatusTime = Date.now();
+        state.receiverOnline = true;
+        
+        // Reset status timeout
+        _resetStatusTimeout();
+        
+        if (typeof Events !== 'undefined') {
+            Events.emit('sarsat:status_update', status);
+        }
+        
+        // Log welcome message on first connect
+        if (status.welcome) {
+            console.log('[SARSAT] Receiver welcome status received. Uptime:', 
+                Math.round(status.uptimeSeconds || 0), 's, SDR:', status.sdrConnected);
+        }
+    }
+    
+    /**
+     * Start/reset the status timeout timer
+     * If no heartbeat received within timeout, mark receiver as offline
+     */
+    function _resetStatusTimeout() {
+        if (state.statusTimeoutTimer) {
+            clearTimeout(state.statusTimeoutTimer);
+        }
+        state.statusTimeoutTimer = setTimeout(() => {
+            state.receiverOnline = false;
+            console.warn('[SARSAT] Receiver heartbeat timeout - receiver may be offline');
+            if (typeof Events !== 'undefined') {
+                Events.emit('sarsat:receiver_offline');
+            }
+        }, CONFIG.statusTimeout);
+    }
+    
+    /**
+     * Clear the status timeout timer
+     */
+    function _clearStatusTimeout() {
+        if (state.statusTimeoutTimer) {
+            clearTimeout(state.statusTimeoutTimer);
+            state.statusTimeoutTimer = null;
+        }
+        state.receiverOnline = false;
+        state.receiverStatus = null;
+        state.lastStatusTime = null;
+    }
+    
+    /**
+     * Handle command response from receiver
+     */
+    function _handleCommandResponse(response) {
+        const requestId = response.requestId;
+        
+        if (requestId && state.pendingCommands.has(requestId)) {
+            const pending = state.pendingCommands.get(requestId);
+            clearTimeout(pending.timeout);
+            state.pendingCommands.delete(requestId);
+            pending.resolve(response);
+        }
+        
+        // Emit event for any listeners (e.g. self_test_result)
+        if (typeof Events !== 'undefined') {
+            Events.emit('sarsat:command_response', response);
+        }
+    }
+    
+    // ==================== Command Sending ====================
+    
+    /**
+     * Send a command to the receiver via WebSocket
+     * @param {string} cmd - Command name
+     * @param {Object} params - Additional parameters
+     * @returns {Promise<Object>} Response from receiver
+     */
+    function sendCommand(cmd, params = {}) {
+        return new Promise((resolve, reject) => {
+            if (!state.connected || !state.webSocket) {
+                reject(new Error('Not connected to receiver'));
+                return;
+            }
+            if (state.webSocket.readyState !== WebSocket.OPEN) {
+                reject(new Error('WebSocket not open'));
+                return;
+            }
+            
+            const requestId = `cmd_${++state.commandIdCounter}_${Date.now()}`;
+            
+            const message = {
+                cmd: cmd,
+                requestId: requestId,
+                ...params
+            };
+            
+            // Set up timeout
+            const timeout = setTimeout(() => {
+                state.pendingCommands.delete(requestId);
+                reject(new Error(`Command '${cmd}' timed out after ${CONFIG.commandTimeout}ms`));
+            }, CONFIG.commandTimeout);
+            
+            // Store pending command
+            state.pendingCommands.set(requestId, { resolve, reject, timeout });
+            
+            try {
+                state.webSocket.send(JSON.stringify(message));
+            } catch (e) {
+                clearTimeout(timeout);
+                state.pendingCommands.delete(requestId);
+                reject(e);
+            }
+        });
+    }
+    
+    /**
+     * Request immediate status from receiver
+     */
+    function requestStatus() {
+        return sendCommand('get_status');
+    }
+    
+    /**
+     * Request current receiver configuration
+     */
+    function requestConfig() {
+        return sendCommand('get_config');
+    }
+    
+    /**
+     * Set receiver gain remotely
+     * @param {string|number} gain - 'auto' or numeric dB value
+     */
+    function setRemoteGain(gain) {
+        return sendCommand('set_gain', { value: gain });
+    }
+    
+    /**
+     * Set receiver primary frequency remotely
+     * @param {number} freqMhz - Frequency in MHz (e.g. 406.025)
+     */
+    function setRemoteFrequency(freqMhz) {
+        return sendCommand('set_frequency', { value: freqMhz });
+    }
+    
+    /**
+     * Trigger self-test on the receiver
+     */
+    function triggerSelfTest() {
+        return sendCommand('self_test');
+    }
+    
+    /**
+     * Request replay of recent beacons (for newly connected clients)
+     */
+    function requestRecentBeacons() {
+        return sendCommand('get_recent_beacons');
+    }
+    
+    /**
+     * Request beacons from the receiver's persistent log
+     * @param {number} hours - How many hours of history (default: 24, max: 8760)
+     * @param {number} limit - Max number of beacons to return (default: 500)
+     */
+    function requestBeaconLog(hours = 24, limit = 500) {
+        return sendCommand('get_beacon_log', { hours, limit });
     }
     
     /**
@@ -780,14 +1004,20 @@ const SarsatModule = (function() {
             return;
         }
         
+        // Replay flag: beacon replayed from receiver's database on connect
+        const isReplay = msg.replay === true;
+        
         // Skip test beacons if setting is disabled
         if (msg.testMode && !state.settings.showTestBeacons) {
             console.debug('[SARSAT] Ignoring test beacon:', msg.hexId);
             return;
         }
         
-        state.stats.beaconsReceived++;
-        state.stats.lastMessageTime = Date.now();
+        // Only count live beacons in stats (not replays)
+        if (!isReplay) {
+            state.stats.beaconsReceived++;
+            state.stats.lastMessageTime = Date.now();
+        }
         
         const hexId = msg.hexId.toUpperCase();
         const beaconType = BEACON_TYPES[msg.type] || BEACON_TYPES.UNKNOWN;
@@ -820,6 +1050,7 @@ const SarsatModule = (function() {
         beacon.lastHeard = Date.now();
         beacon.receiveCount++;
         beacon.rssi = msg.rssi;
+        beacon.snr = msg.snr;
         beacon.frequency = msg.frequency;
         
         // Update position if available
@@ -846,7 +1077,13 @@ const SarsatModule = (function() {
         
         // Emit events
         if (typeof Events !== 'undefined') {
-            Events.emit('sarsat:beacon_received', { beacon, isNew: isNewBeacon });
+            Events.emit('sarsat:beacon_received', { beacon, isNew: isNewBeacon, isReplay });
+        }
+        
+        // Skip alerts and notifications for replayed (historical) beacons
+        if (isReplay) {
+            console.debug(`[SARSAT] Replayed beacon: ${hexId} (${beaconType.name})`);
+            return;
         }
         
         // Create waypoint for new beacons with position
@@ -1126,6 +1363,21 @@ const SarsatModule = (function() {
         saveReceiver,
         removeReceiver,
         renameReceiver,
+        
+        // Receiver Status (from heartbeat)
+        getReceiverStatus: () => state.receiverStatus ? { ...state.receiverStatus } : null,
+        isReceiverOnline: () => state.receiverOnline,
+        getLastStatusTime: () => state.lastStatusTime,
+        
+        // Remote Commands
+        sendCommand,
+        requestStatus,
+        requestConfig,
+        setRemoteGain,
+        setRemoteFrequency,
+        triggerSelfTest,
+        requestRecentBeacons,
+        requestBeaconLog,
         
         // Settings
         getSettings: () => ({ ...state.settings }),

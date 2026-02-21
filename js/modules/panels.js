@@ -22192,6 +22192,8 @@ After spreading:
         const connectionType = moduleAvailable ? SarsatModule.getConnectionType() : null;
         const reconnectAttempts = moduleAvailable ? SarsatModule.getReconnectAttempts() : 0;
         const hasSerial = typeof navigator !== 'undefined' && 'serial' in navigator;
+        const receiverStatus = moduleAvailable ? SarsatModule.getReceiverStatus() : null;
+        const receiverOnline = moduleAvailable ? SarsatModule.isReceiverOnline() : false;
         
         const hasEmergency = emergencyBeacons.length > 0;
         
@@ -22306,25 +22308,151 @@ After spreading:
                     ` : `
                         <!-- Connected State -->
                         <div style="background:var(--color-bg-elevated);border-radius:8px;padding:12px;margin-bottom:12px">
-                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                                <span style="color:#22c55e;font-size:16px">📡</span>
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+                                <span style="color:${receiverOnline ? '#22c55e' : '#f59e0b'};font-size:16px">📡</span>
                                 <div style="flex:1">
                                     <div style="font-size:13px;font-weight:500">
                                         ${connectionType === 'serial' ? 'USB Serial' : _extractFriendlyUrl(connectionUrl)}
                                     </div>
                                     <div style="font-size:10px;color:var(--color-text-muted)">
                                         ${connectionType === 'websocket' ? connectionUrl : 'Direct serial connection'}
+                                        ${receiverOnline ? '' : ' · <span style="color:#f59e0b">No heartbeat</span>'}
                                     </div>
                                 </div>
                             </div>
-                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
-                                <div style="display:flex;justify-content:space-between">
-                                    <span style="color:var(--color-text-muted)">Beacons:</span>
-                                    <span style="font-weight:500">${stats.beaconsReceived}</span>
+                            
+                            <!-- Receiver Health (from heartbeat) -->
+                            ${receiverStatus ? `
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:12px;margin-bottom:10px">
+                                    <div style="display:flex;justify-content:space-between">
+                                        <span style="color:var(--color-text-muted)">SDR:</span>
+                                        <span style="font-weight:500;color:${receiverStatus.sdrConnected ? '#22c55e' : '#ef4444'}">${receiverStatus.sdrConnected ? 'Online' : 'Offline'}</span>
+                                    </div>
+                                    <div style="display:flex;justify-content:space-between">
+                                        <span style="color:var(--color-text-muted)">Uptime:</span>
+                                        <span style="font-weight:500">${_formatUptime(receiverStatus.uptimeSeconds)}</span>
+                                    </div>
+                                    <div style="display:flex;justify-content:space-between">
+                                        <span style="color:var(--color-text-muted)">Noise Floor:</span>
+                                        <span style="font-weight:500">${receiverStatus.noiseFloorDbm != null ? receiverStatus.noiseFloorDbm + ' dBm' : '—'}</span>
+                                    </div>
+                                    <div style="display:flex;justify-content:space-between">
+                                        <span style="color:var(--color-text-muted)">Gain:</span>
+                                        <span style="font-weight:500">${receiverStatus.gain === 'auto' ? 'Auto' : receiverStatus.gain + ' dB'}</span>
+                                    </div>
+                                    <div style="display:flex;justify-content:space-between">
+                                        <span style="color:var(--color-text-muted)">Signals:</span>
+                                        <span style="font-weight:500">${receiverStatus.signalsDetected || 0}</span>
+                                    </div>
+                                    <div style="display:flex;justify-content:space-between">
+                                        <span style="color:var(--color-text-muted)">Decoded:</span>
+                                        <span style="font-weight:500">${receiverStatus.messagesDecoded || 0}</span>
+                                    </div>
+                                    ${receiverStatus.cpuTempC != null ? `
+                                        <div style="display:flex;justify-content:space-between">
+                                            <span style="color:var(--color-text-muted)">CPU Temp:</span>
+                                            <span style="font-weight:500;${receiverStatus.cpuTempC > 75 ? 'color:#ef4444' : receiverStatus.cpuTempC > 65 ? 'color:#f59e0b' : ''}">${receiverStatus.cpuTempC}°C</span>
+                                        </div>
+                                    ` : ''}
+                                    ${receiverStatus.ledState ? `
+                                        <div style="display:flex;justify-content:space-between">
+                                            <span style="color:var(--color-text-muted)">Status LED:</span>
+                                            <span style="font-weight:500">${_ledStateDisplay(receiverStatus.ledState.state)}</span>
+                                        </div>
+                                    ` : ''}
+                                    ${receiverStatus.lastDetectionTime ? `
+                                        <div style="display:flex;justify-content:space-between">
+                                            <span style="color:var(--color-text-muted)">Last Signal:</span>
+                                            <span style="font-weight:500">${_formatTimeSince(receiverStatus.lastDetectionTime)}</span>
+                                        </div>
+                                        ${receiverStatus.lastDetectionSnr != null ? `
+                                            <div style="display:flex;justify-content:space-between">
+                                                <span style="color:var(--color-text-muted)">Last SNR:</span>
+                                                <span style="font-weight:500;color:${receiverStatus.lastDetectionSnr >= 15 ? '#22c55e' : receiverStatus.lastDetectionSnr >= 10 ? '#84cc16' : receiverStatus.lastDetectionSnr >= 5 ? '#f59e0b' : '#ef4444'}">${receiverStatus.lastDetectionSnr} dB</span>
+                                            </div>
+                                        ` : ''}
+                                        ${receiverStatus.lastDetectionRssi != null ? `
+                                            <div style="display:flex;justify-content:space-between">
+                                                <span style="color:var(--color-text-muted)">Last RSSI:</span>
+                                                <span style="font-weight:500">${receiverStatus.lastDetectionRssi} dBm</span>
+                                            </div>
+                                        ` : ''}
+                                    ` : ''}
                                 </div>
-                                <div style="display:flex;justify-content:space-between">
-                                    <span style="color:var(--color-text-muted)">Decoded:</span>
-                                    <span style="font-weight:500">${stats.messagesDecoded}</span>
+                                
+                                <!-- Signal Quality Bar -->
+                                ${receiverStatus.noiseFloorDbm != null ? `
+                                    <div style="margin-bottom:10px">
+                                        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--color-text-muted);margin-bottom:3px">
+                                            <span>Reception Quality</span>
+                                            <span>${_signalQualityLabel(receiverStatus.noiseFloorDbm)}</span>
+                                        </div>
+                                        <div style="height:4px;background:var(--color-bg-secondary);border-radius:2px;overflow:hidden">
+                                            <div style="height:100%;width:${_signalQualityPercent(receiverStatus.noiseFloorDbm)}%;background:${_signalQualityColor(receiverStatus.noiseFloorDbm)};border-radius:2px;transition:width 0.5s"></div>
+                                        </div>
+                                    </div>
+                                ` : ''}
+                                
+                                <!-- Frequency Stats (collapsed by default) -->
+                                ${receiverStatus.frequencyStats && receiverStatus.frequencyStats.length > 0 ? `
+                                    <details style="margin-bottom:10px">
+                                        <summary style="font-size:11px;color:var(--color-text-muted);cursor:pointer;user-select:none">
+                                            Frequency Channels (${receiverStatus.frequencyStats.length})
+                                        </summary>
+                                        <div style="margin-top:6px;font-size:11px">
+                                            ${receiverStatus.frequencyStats.map(f => `
+                                                <div style="display:flex;justify-content:space-between;padding:3px 0;${receiverStatus.currentFreqMhz === f.freqMhz ? 'font-weight:600' : ''}">
+                                                    <span style="font-family:monospace">${f.freqMhz} MHz${receiverStatus.currentFreqMhz === f.freqMhz ? ' ◀' : ''}</span>
+                                                    <span style="color:var(--color-text-muted)">${f.detections} det / ${f.decodes} dec</span>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    </details>
+                                ` : ''}
+                                
+                                ${receiverStatus.beaconLog ? `
+                                    <!-- Beacon Log -->
+                                    <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;margin-bottom:10px;padding:6px 8px;background:var(--color-bg-secondary);border-radius:6px">
+                                        <span style="color:var(--color-text-muted)">💾 Beacon Log:</span>
+                                        <span style="font-weight:500">${receiverStatus.beaconLog.session} this session · ${receiverStatus.beaconLog.last24h} last 24h · ${receiverStatus.beaconLog.total} total</span>
+                                    </div>
+                                ` : ''}
+                            ` : `
+                                <!-- Fallback: no heartbeat data yet -->
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;margin-bottom:10px">
+                                    <div style="display:flex;justify-content:space-between">
+                                        <span style="color:var(--color-text-muted)">Beacons:</span>
+                                        <span style="font-weight:500">${stats.beaconsReceived}</span>
+                                    </div>
+                                    <div style="display:flex;justify-content:space-between">
+                                        <span style="color:var(--color-text-muted)">Decoded:</span>
+                                        <span style="font-weight:500">${stats.messagesDecoded}</span>
+                                    </div>
+                                </div>
+                                <div style="font-size:10px;color:var(--color-text-muted);margin-bottom:10px;font-style:italic">
+                                    Waiting for receiver heartbeat...
+                                </div>
+                            `}
+                            
+                            <!-- Remote Controls -->
+                            <div style="display:flex;gap:6px;margin-bottom:10px">
+                                <div style="flex:1">
+                                    <label style="font-size:10px;color:var(--color-text-muted);display:block;margin-bottom:3px">Gain</label>
+                                    <div style="display:flex;gap:4px">
+                                        <select id="sarsat-remote-gain" style="flex:1;padding:6px 8px;background:var(--color-bg-secondary);border:1px solid var(--color-border);border-radius:6px;color:var(--color-text-primary);font-size:12px">
+                                            <option value="auto" ${(!receiverStatus || receiverStatus.gain === 'auto') ? 'selected' : ''}>Auto</option>
+                                            <option value="10" ${receiverStatus?.gain === '10' ? 'selected' : ''}>10 dB</option>
+                                            <option value="20" ${receiverStatus?.gain === '20' ? 'selected' : ''}>20 dB</option>
+                                            <option value="30" ${receiverStatus?.gain === '30' ? 'selected' : ''}>30 dB</option>
+                                            <option value="40" ${receiverStatus?.gain === '40' ? 'selected' : ''}>40 dB</option>
+                                            <option value="49.6" ${receiverStatus?.gain === '49.6' ? 'selected' : ''}>49.6 dB</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div style="display:flex;align-items:flex-end;gap:4px">
+                                    <button class="btn btn--small btn--secondary" id="sarsat-self-test" title="Run self-test on receiver" style="padding:6px 10px;font-size:11px">
+                                        🧪 Test
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -22345,6 +22473,13 @@ After spreading:
                                     <span style="font-size:11px;color:var(--color-text-secondary)">${b.countryName}</span>
                                 </div>
                                 <div style="font-family:monospace;font-size:12px;margin-top:4px">${b.hexId}</div>
+                                ${b.snr != null || b.rssi != null ? `
+                                    <div style="display:flex;gap:10px;font-size:10px;margin-top:4px;color:var(--color-text-secondary)">
+                                        ${b.snr != null ? `<span style="color:${b.snr >= 15 ? '#22c55e' : b.snr >= 10 ? '#84cc16' : b.snr >= 5 ? '#f59e0b' : '#ef4444'}">SNR ${b.snr.toFixed ? b.snr.toFixed(1) : b.snr} dB</span>` : ''}
+                                        ${b.rssi != null ? `<span>RSSI ${b.rssi} dBm</span>` : ''}
+                                        ${b.frequency ? `<span>${b.frequency} MHz</span>` : ''}
+                                    </div>
+                                ` : ''}
                                 ${b.lat !== undefined ? `
                                     <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">
                                         📍 ${b.lat.toFixed(4)}°, ${b.lon.toFixed(4)}°
@@ -22426,6 +22561,14 @@ After spreading:
                                             <div>${new Date(b.lastHeard).toLocaleTimeString()}</div>
                                         </div>
                                     </div>
+                                    ${b.rssi != null || b.snr != null || b.frequency ? `
+                                        <div style="display:flex;gap:10px;margin-top:5px;font-size:10px;color:var(--color-text-muted)">
+                                            ${b.snr != null ? `<span style="color:${b.snr >= 15 ? '#22c55e' : b.snr >= 10 ? '#84cc16' : b.snr >= 5 ? '#f59e0b' : '#ef4444'}">SNR ${b.snr.toFixed ? b.snr.toFixed(1) : b.snr} dB</span>` : ''}
+                                            ${b.rssi != null ? `<span>RSSI ${b.rssi} dBm</span>` : ''}
+                                            ${b.frequency ? `<span>${b.frequency} MHz</span>` : ''}
+                                            <span>×${b.receiveCount}</span>
+                                        </div>
+                                    ` : ''}
                                     ${b.lat !== undefined ? `
                                         <div style="display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px solid var(--color-border);font-size:11px">
                                             <span>📍 ${b.lat.toFixed(4)}°, ${b.lon.toFixed(4)}°</span>
@@ -22485,6 +22628,57 @@ After spreading:
         if (hours < 24) return `${hours}h ago`;
         const days = Math.floor(hours / 24);
         return `${days}d ago`;
+    }
+    
+    /** Helper: format uptime seconds into human-readable string */
+    function _formatUptime(seconds) {
+        if (!seconds && seconds !== 0) return '—';
+        seconds = Math.floor(seconds);
+        if (seconds < 60) return `${seconds}s`;
+        const m = Math.floor(seconds / 60);
+        if (m < 60) return `${m}m ${seconds % 60}s`;
+        const h = Math.floor(m / 60);
+        if (h < 24) return `${h}h ${m % 60}m`;
+        const d = Math.floor(h / 24);
+        return `${d}d ${h % 24}h`;
+    }
+    
+    /** Helper: signal quality label from noise floor dBm */
+    function _signalQualityLabel(noiseFloor) {
+        if (noiseFloor <= -115) return 'Excellent';
+        if (noiseFloor <= -105) return 'Good';
+        if (noiseFloor <= -95) return 'Fair';
+        if (noiseFloor <= -85) return 'Poor';
+        return 'Very Poor';
+    }
+    
+    /** Helper: signal quality percentage from noise floor dBm */
+    function _signalQualityPercent(noiseFloor) {
+        // -120 dBm = 100%, -80 dBm = 0%
+        return Math.max(0, Math.min(100, ((noiseFloor + 80) / -40) * 100));
+    }
+    
+    /** Helper: signal quality color from noise floor dBm */
+    function _signalQualityColor(noiseFloor) {
+        if (noiseFloor <= -110) return '#22c55e';
+        if (noiseFloor <= -100) return '#84cc16';
+        if (noiseFloor <= -90) return '#f59e0b';
+        return '#ef4444';
+    }
+    
+    function _ledStateDisplay(state) {
+        const states = {
+            'off':       { dot: '⚫', label: 'Off',       color: '#6b7280' },
+            'starting':  { dot: '🟢', label: 'Starting',  color: '#84cc16' },
+            'running':   { dot: '🟢', label: 'Running',   color: '#22c55e' },
+            'beacon':    { dot: '🟢', label: 'Beacon!',   color: '#22c55e' },
+            'emergency': { dot: '🔴', label: 'EMERGENCY', color: '#ef4444' },
+            'warning':   { dot: '🟡', label: 'Warning',   color: '#f59e0b' },
+            'fault':     { dot: '🔴', label: 'Fault',     color: '#ef4444' },
+            'searching': { dot: '🟢', label: 'Searching', color: '#84cc16' }
+        };
+        const s = states[state] || states['off'];
+        return `<span style="color:${s.color}">${s.dot} ${s.label}</span>`;
     }
     
     /** Helper: extract friendly display from WebSocket URL */
@@ -22722,9 +22916,99 @@ After spreading:
             };
         }
         
-        // Listen for beacon updates and connection state changes
+        // Remote Gain Control
+        const gainSelect = container.querySelector('#sarsat-remote-gain');
+        if (gainSelect) {
+            gainSelect.onchange = async () => {
+                const value = gainSelect.value;
+                try {
+                    const result = await SarsatModule.setRemoteGain(value);
+                    if (result.success) {
+                        if (typeof ModalsModule !== 'undefined') {
+                            ModalsModule.showToast(`Gain set to ${result.gain === 'auto' ? 'Auto' : result.gain + ' dB'}`, 'info');
+                        }
+                    } else {
+                        if (typeof ModalsModule !== 'undefined') {
+                            ModalsModule.showToast('Gain change failed: ' + (result.error || 'Unknown error'), 'error');
+                        }
+                    }
+                } catch (e) {
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('Gain command failed: ' + e.message, 'error');
+                    }
+                }
+            };
+        }
+        
+        // Self-Test Button
+        const selfTestBtn = container.querySelector('#sarsat-self-test');
+        if (selfTestBtn) {
+            selfTestBtn.onclick = async () => {
+                selfTestBtn.disabled = true;
+                selfTestBtn.textContent = '⏳ Running...';
+                
+                try {
+                    const result = await SarsatModule.triggerSelfTest();
+                    if (result.success) {
+                        if (typeof ModalsModule !== 'undefined') {
+                            ModalsModule.showToast('Self-test started on receiver', 'info');
+                        }
+                        // Listen for the test result
+                        const onResult = (response) => {
+                            if (response.cmd === 'self_test_result') {
+                                Events.off('sarsat:command_response', onResult);
+                                selfTestBtn.disabled = false;
+                                selfTestBtn.textContent = '🧪 Test';
+                                if (response.passed) {
+                                    if (typeof ModalsModule !== 'undefined') {
+                                        ModalsModule.showToast('✅ Self-test PASSED', 'info');
+                                    }
+                                } else {
+                                    if (typeof ModalsModule !== 'undefined') {
+                                        ModalsModule.showToast('❌ Self-test FAILED — check DSP chain', 'warning');
+                                    }
+                                }
+                            }
+                        };
+                        if (typeof Events !== 'undefined') {
+                            Events.on('sarsat:command_response', onResult);
+                        }
+                        // Safety timeout to reset button
+                        setTimeout(() => {
+                            selfTestBtn.disabled = false;
+                            selfTestBtn.textContent = '🧪 Test';
+                            if (typeof Events !== 'undefined') {
+                                Events.off('sarsat:command_response', onResult);
+                            }
+                        }, 30000);
+                    }
+                } catch (e) {
+                    selfTestBtn.disabled = false;
+                    selfTestBtn.textContent = '🧪 Test';
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('Self-test failed: ' + e.message, 'error');
+                    }
+                }
+            };
+        }
+        
+        // Listen for beacon updates, status heartbeats, and connection state changes
         if (typeof Events !== 'undefined') {
             Events.on('sarsat:beacon_received', () => {
+                if (State.get('activePanel') === 'sarsat') {
+                    renderSarsat();
+                }
+            });
+            
+            // Re-render on status heartbeat (throttled — only if panel is open)
+            Events.on('sarsat:status_update', () => {
+                if (State.get('activePanel') === 'sarsat') {
+                    renderSarsat();
+                }
+            });
+            
+            // Re-render if receiver goes offline (heartbeat timeout)
+            Events.on('sarsat:receiver_offline', () => {
                 if (State.get('activePanel') === 'sarsat') {
                     renderSarsat();
                 }
