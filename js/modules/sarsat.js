@@ -19,6 +19,21 @@ const SarsatModule = (function() {
         defaultBaudRate: 115200,           // Serial connection baud rate
         webSocketPort: 8406,               // WebSocket server port
         reconnectDelay: 5000,              // Reconnect delay in ms
+        maxReconnectAttempts: 12,          // Max auto-reconnect attempts (60s total)
+        
+        // Discovery settings
+        discoveryTimeout: 2000,            // Per-address probe timeout in ms
+        discoveryPort: 8406,               // Default port to probe
+        commonAddresses: [                 // Addresses to probe during discovery
+            'sarsat-rx.local',
+            'sarsat.local',
+            'raspberrypi.local',
+            'griddown-sarsat.local',
+            '192.168.4.1',                 // Common AP mode address
+            '192.168.1.100',
+            '192.168.1.101',
+            '10.0.0.100'
+        ],
         
         // Beacon management
         beaconTimeout: 3600000,            // 1 hour - fade beacons not heard
@@ -128,10 +143,23 @@ const SarsatModule = (function() {
         connected: false,
         connecting: false,
         connectionType: null,        // 'serial', 'websocket', 'bluetooth'
+        connectionUrl: null,         // Active WebSocket URL when connected
         port: null,
         reader: null,
         writer: null,
         webSocket: null,
+        
+        // Auto-reconnect
+        autoReconnect: true,
+        reconnectAttempts: 0,
+        reconnectTimer: null,
+        
+        // Discovery
+        discovering: false,
+        discoveryResults: [],        // Array of { url, latency, status }
+        
+        // Saved receivers
+        savedReceivers: [],          // Array of { url, name, lastConnected, lastSeen }
         
         // Beacon database
         beacons: new Map(),          // hexId -> beacon object
@@ -198,6 +226,8 @@ const SarsatModule = (function() {
             disconnect();
         }
         
+        _stopAutoReconnect();
+        
         if (sarsatEvents) {
             sarsatEvents.clear();
             sarsatEvents = null;
@@ -216,6 +246,11 @@ const SarsatModule = (function() {
                 const saved = await Storage.Settings.get('sarsat');
                 if (saved) {
                     state.settings = { ...state.settings, ...saved };
+                }
+                // Load saved receivers
+                const receivers = await Storage.Settings.get('sarsat_receivers');
+                if (receivers && Array.isArray(receivers)) {
+                    state.savedReceivers = receivers;
                 }
             }
         } catch (e) {
@@ -288,6 +323,230 @@ const SarsatModule = (function() {
         }
     }
 
+    // ==================== Saved Receivers ====================
+    
+    /**
+     * Save a receiver to the saved list
+     */
+    function saveReceiver(url, name) {
+        const existing = state.savedReceivers.find(r => r.url === url);
+        if (existing) {
+            existing.name = name || existing.name;
+            existing.lastConnected = Date.now();
+        } else {
+            state.savedReceivers.push({
+                url: url,
+                name: name || _extractReceiverName(url),
+                lastConnected: Date.now(),
+                lastSeen: Date.now()
+            });
+        }
+        _persistReceivers();
+    }
+    
+    /**
+     * Remove a saved receiver
+     */
+    function removeReceiver(url) {
+        state.savedReceivers = state.savedReceivers.filter(r => r.url !== url);
+        _persistReceivers();
+    }
+    
+    /**
+     * Rename a saved receiver
+     */
+    function renameReceiver(url, newName) {
+        const receiver = state.savedReceivers.find(r => r.url === url);
+        if (receiver) {
+            receiver.name = newName;
+            _persistReceivers();
+        }
+    }
+    
+    /**
+     * Get saved receivers list
+     */
+    function getSavedReceivers() {
+        return [...state.savedReceivers].sort((a, b) => (b.lastConnected || 0) - (a.lastConnected || 0));
+    }
+    
+    /**
+     * Extract a friendly name from a WebSocket URL
+     */
+    function _extractReceiverName(url) {
+        try {
+            const parsed = new URL(url);
+            const host = parsed.hostname;
+            if (host.endsWith('.local')) return host.replace('.local', '');
+            if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return `Receiver @ ${host}`;
+            return host;
+        } catch (e) {
+            return 'SARSAT Receiver';
+        }
+    }
+    
+    /**
+     * Persist receivers to storage
+     */
+    async function _persistReceivers() {
+        try {
+            if (typeof Storage !== 'undefined' && Storage.Settings) {
+                await Storage.Settings.set('sarsat_receivers', state.savedReceivers);
+            }
+        } catch (e) {
+            console.warn('[SARSAT] Could not save receivers:', e);
+        }
+    }
+    
+    // ==================== Network Discovery ====================
+    
+    /**
+     * Scan for SARSAT receivers on the network
+     * Probes common addresses and any custom addresses
+     * @param {string[]} extraAddresses - Additional addresses to probe
+     * @returns {Promise<Array>} Array of { url, latency, reachable }
+     */
+    async function discoverReceivers(extraAddresses = []) {
+        if (state.discovering) {
+            console.warn('[SARSAT] Discovery already in progress');
+            return state.discoveryResults;
+        }
+        
+        state.discovering = true;
+        state.discoveryResults = [];
+        
+        if (typeof Events !== 'undefined') {
+            Events.emit('sarsat:discovery_start');
+        }
+        
+        // Build list of addresses to probe
+        const addresses = [...new Set([
+            ...CONFIG.commonAddresses,
+            ...extraAddresses,
+            // Also probe saved receiver hosts
+            ...state.savedReceivers.map(r => {
+                try { return new URL(r.url).hostname; } catch(e) { return null; }
+            }).filter(Boolean)
+        ])];
+        
+        const port = CONFIG.discoveryPort;
+        
+        // Probe all addresses in parallel with timeout
+        const probePromises = addresses.map(addr => _probeAddress(addr, port));
+        const results = await Promise.all(probePromises);
+        
+        state.discoveryResults = results.filter(r => r.reachable);
+        state.discovering = false;
+        
+        // Update lastSeen on saved receivers that were found
+        state.discoveryResults.forEach(result => {
+            const saved = state.savedReceivers.find(r => r.url === result.url);
+            if (saved) {
+                saved.lastSeen = Date.now();
+            }
+        });
+        if (state.discoveryResults.length > 0) {
+            _persistReceivers();
+        }
+        
+        if (typeof Events !== 'undefined') {
+            Events.emit('sarsat:discovery_complete', { 
+                found: state.discoveryResults.length,
+                results: state.discoveryResults
+            });
+        }
+        
+        console.log(`[SARSAT] Discovery complete: ${state.discoveryResults.length} receiver(s) found`);
+        return state.discoveryResults;
+    }
+    
+    /**
+     * Probe a single address for a SARSAT WebSocket server
+     */
+    async function _probeAddress(host, port) {
+        const url = `ws://${host}:${port}`;
+        const startTime = performance.now();
+        
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                resolve({ url, host, latency: null, reachable: false });
+            }, CONFIG.discoveryTimeout);
+            
+            try {
+                const ws = new WebSocket(url);
+                
+                ws.onopen = () => {
+                    clearTimeout(timeout);
+                    const latency = Math.round(performance.now() - startTime);
+                    ws.close();
+                    resolve({ url, host, latency, reachable: true });
+                };
+                
+                ws.onerror = () => {
+                    clearTimeout(timeout);
+                    resolve({ url, host, latency: null, reachable: false });
+                };
+                
+            } catch (e) {
+                clearTimeout(timeout);
+                resolve({ url, host, latency: null, reachable: false });
+            }
+        });
+    }
+    
+    // ==================== Auto-Reconnect ====================
+    
+    /**
+     * Start auto-reconnect loop
+     */
+    function _startAutoReconnect() {
+        if (!state.autoReconnect || !state.connectionUrl) return;
+        if (state.reconnectTimer) return;
+        
+        state.reconnectAttempts = 0;
+        _attemptReconnect();
+    }
+    
+    /**
+     * Attempt a single reconnect
+     */
+    function _attemptReconnect() {
+        if (state.connected || !state.autoReconnect) {
+            _stopAutoReconnect();
+            return;
+        }
+        
+        if (state.reconnectAttempts >= CONFIG.maxReconnectAttempts) {
+            console.log('[SARSAT] Max reconnect attempts reached, giving up');
+            _stopAutoReconnect();
+            if (typeof Events !== 'undefined') {
+                Events.emit('sarsat:reconnect_failed');
+            }
+            return;
+        }
+        
+        state.reconnectAttempts++;
+        console.log(`[SARSAT] Reconnect attempt ${state.reconnectAttempts}/${CONFIG.maxReconnectAttempts}`);
+        
+        connectWebSocket(state.connectionUrl).then(() => {
+            console.log('[SARSAT] Reconnected successfully');
+            _stopAutoReconnect();
+        }).catch(() => {
+            state.reconnectTimer = setTimeout(_attemptReconnect, CONFIG.reconnectDelay);
+        });
+    }
+    
+    /**
+     * Stop auto-reconnect
+     */
+    function _stopAutoReconnect() {
+        if (state.reconnectTimer) {
+            clearTimeout(state.reconnectTimer);
+            state.reconnectTimer = null;
+        }
+        state.reconnectAttempts = 0;
+    }
+
     // ==================== Connection Management ====================
 
     /**
@@ -350,10 +609,14 @@ const SarsatModule = (function() {
                 ws.onopen = () => {
                     state.webSocket = ws;
                     state.connectionType = 'websocket';
+                    state.connectionUrl = wsUrl;
                     state.connected = true;
                     state.connecting = false;
                     
-                    console.log('[SARSAT] Connected via WebSocket');
+                    // Auto-save this receiver on successful connection
+                    saveReceiver(wsUrl);
+                    
+                    console.log('[SARSAT] Connected via WebSocket to', wsUrl);
                     
                     if (typeof Events !== 'undefined') {
                         Events.emit('sarsat:connected', { type: 'websocket', url: wsUrl });
@@ -389,6 +652,10 @@ const SarsatModule = (function() {
     async function disconnect() {
         if (!state.connected) return;
         
+        // Flag as user-initiated so onDisconnected skips auto-reconnect
+        state._userDisconnect = true;
+        _stopAutoReconnect();
+        
         if (state.webSocket) {
             state.webSocket.close();
             state.webSocket = null;
@@ -414,6 +681,9 @@ const SarsatModule = (function() {
      * Handle disconnection
      */
     function onDisconnected() {
+        const wasWebSocket = state.connectionType === 'websocket';
+        const previousUrl = state.connectionUrl;
+        
         state.connected = false;
         state.connectionType = null;
         
@@ -422,6 +692,12 @@ const SarsatModule = (function() {
         if (typeof Events !== 'undefined') {
             Events.emit('sarsat:disconnected');
         }
+        
+        // Auto-reconnect for WebSocket connections (not user-initiated disconnects)
+        if (wasWebSocket && previousUrl && state.autoReconnect && !state._userDisconnect) {
+            _startAutoReconnect();
+        }
+        state._userDisconnect = false;
     }
     
     /**
@@ -836,6 +1112,20 @@ const SarsatModule = (function() {
         isConnected: () => state.connected,
         isConnecting: () => state.connecting,
         getConnectionType: () => state.connectionType,
+        getConnectionUrl: () => state.connectionUrl,
+        isReconnecting: () => state.reconnectTimer !== null,
+        getReconnectAttempts: () => state.reconnectAttempts,
+        
+        // Discovery
+        discoverReceivers,
+        isDiscovering: () => state.discovering,
+        getDiscoveryResults: () => [...state.discoveryResults],
+        
+        // Saved Receivers
+        getSavedReceivers,
+        saveReceiver,
+        removeReceiver,
+        renameReceiver,
         
         // Settings
         getSettings: () => ({ ...state.settings }),
@@ -843,6 +1133,8 @@ const SarsatModule = (function() {
             state.settings = { ...state.settings, ...updates };
             saveSettings();
         },
+        setAutoReconnect: (enabled) => { state.autoReconnect = enabled; },
+        getAutoReconnect: () => state.autoReconnect,
         
         // Beacon data
         getBeacon,

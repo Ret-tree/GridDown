@@ -22180,13 +22180,34 @@ After spreading:
         const moduleAvailable = typeof SarsatModule !== 'undefined';
         const isConnected = moduleAvailable && SarsatModule.isConnected();
         const isConnecting = moduleAvailable && SarsatModule.isConnecting();
+        const isReconnecting = moduleAvailable && SarsatModule.isReconnecting();
+        const isDiscovering = moduleAvailable && SarsatModule.isDiscovering();
         const beacons = moduleAvailable ? SarsatModule.getBeacons() : [];
         const emergencyBeacons = moduleAvailable ? SarsatModule.getEmergencyBeacons() : [];
         const stats = moduleAvailable ? SarsatModule.getStats() : { beaconsReceived: 0, messagesDecoded: 0 };
         const settings = moduleAvailable ? SarsatModule.getSettings() : {};
         const BEACON_TYPES = moduleAvailable ? SarsatModule.BEACON_TYPES : {};
+        const savedReceivers = moduleAvailable ? SarsatModule.getSavedReceivers() : [];
+        const connectionUrl = moduleAvailable ? SarsatModule.getConnectionUrl() : null;
+        const connectionType = moduleAvailable ? SarsatModule.getConnectionType() : null;
+        const reconnectAttempts = moduleAvailable ? SarsatModule.getReconnectAttempts() : 0;
+        const hasSerial = typeof navigator !== 'undefined' && 'serial' in navigator;
         
         const hasEmergency = emergencyBeacons.length > 0;
+        
+        // Determine connection status display
+        let statusText = 'Disconnected';
+        let statusColor = 'background:rgba(100,116,139,0.2);color:#64748b';
+        if (isConnected) {
+            statusText = connectionType === 'serial' ? 'Serial' : 'Connected';
+            statusColor = 'background:rgba(34,197,94,0.2);color:#22c55e';
+        } else if (isConnecting) {
+            statusText = 'Connecting...';
+            statusColor = 'background:rgba(245,158,11,0.2);color:#f59e0b';
+        } else if (isReconnecting) {
+            statusText = `Reconnecting (${reconnectAttempts})...`;
+            statusColor = 'background:rgba(245,158,11,0.2);color:#f59e0b';
+        }
         
         container.innerHTML = `
             <div class="panel__header">
@@ -22211,43 +22232,104 @@ After spreading:
                 <!-- Connection Card -->
                 <div class="card" style="margin-bottom:16px;${hasEmergency ? 'border-left:3px solid #ef4444' : isConnected ? 'border-left:3px solid #22c55e' : ''}">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                        <span style="font-weight:600">PLB/ELT Receiver</span>
-                        <span style="font-size:12px;padding:2px 8px;border-radius:4px;${isConnected ? 'background:rgba(34,197,94,0.2);color:#22c55e' : isConnecting ? 'background:rgba(245,158,11,0.2);color:#f59e0b' : 'background:rgba(100,116,139,0.2);color:#64748b'}">
-                            ${isConnected ? 'Connected' : isConnecting ? 'Connecting...' : 'Disconnected'}
+                        <span style="font-weight:600">406 MHz Receiver</span>
+                        <span style="font-size:12px;padding:2px 8px;border-radius:4px;${statusColor}">
+                            ${statusText}
                         </span>
                     </div>
                     
                     ${!isConnected ? `
+                        <!-- Receiver Address Input -->
                         <div class="form-group" style="margin-bottom:12px">
-                            <label class="form-label">WebSocket Server</label>
-                            <input type="text" id="sarsat-ws-url" value="${settings.wsServerUrl || 'ws://localhost:8406'}" 
-                                placeholder="ws://raspberrypi.local:8406"
-                                style="width:100%;padding:8px;background:var(--bg-primary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary)">
+                            <label class="form-label" style="display:flex;justify-content:space-between;align-items:center">
+                                <span>Receiver Address</span>
+                                <button class="btn btn--small btn--secondary" id="sarsat-scan" ${isDiscovering ? 'disabled' : ''} 
+                                    style="padding:2px 8px;font-size:10px" title="Scan network for SARSAT receivers">
+                                    ${isDiscovering ? '⏳ Scanning...' : '🔍 Scan Network'}
+                                </button>
+                            </label>
+                            <div style="display:flex;gap:6px;margin-top:4px">
+                                <input type="text" id="sarsat-ws-url" value="${settings.wsServerUrl || 'ws://raspberrypi.local:8406'}" 
+                                    placeholder="ws://sarsat-rx.local:8406"
+                                    style="flex:1;padding:10px 12px;background:var(--color-bg-elevated);border:1px solid var(--color-border);border-radius:8px;color:var(--color-text-primary);font-size:13px;font-family:monospace"
+                                    aria-label="WebSocket receiver address">
+                                <button class="btn btn--primary" id="sarsat-connect-ws" style="padding:10px 16px;white-space:nowrap" ${isConnecting ? 'disabled' : ''}>
+                                    ${Icons.get('wifi')} Connect
+                                </button>
+                            </div>
+                            <p style="font-size:10px;color:var(--color-text-muted);margin-top:6px">
+                                Enter the IP or hostname of your Raspberry Pi receiver
+                            </p>
                         </div>
                         
-                        <div style="display:flex;gap:8px">
-                            <button class="btn btn--primary" id="sarsat-connect-ws" style="flex:1">
-                                ${Icons.get('wifi')} Connect WebSocket
-                            </button>
-                            <button class="btn btn--secondary" id="sarsat-connect-serial">
-                                ${Icons.get('usb')} Serial
-                            </button>
-                        </div>
+                        <!-- Discovery Results -->
+                        <div id="sarsat-discovery-results" style="display:none;margin-bottom:12px"></div>
                         
-                        <p style="font-size:11px;color:var(--text-secondary);margin-top:8px">
-                            Requires external 406 MHz SDR receiver (Raspberry Pi + RTL-SDR)
-                        </p>
+                        <!-- Saved Receivers -->
+                        ${savedReceivers.length > 0 ? `
+                            <div style="margin-bottom:12px">
+                                <div style="font-size:11px;font-weight:600;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">
+                                    Saved Receivers
+                                </div>
+                                ${savedReceivers.map(r => {
+                                    const timeSince = r.lastConnected ? _formatTimeSince(r.lastConnected) : 'Never';
+                                    return `
+                                    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--color-bg-elevated);border-radius:8px;margin-bottom:6px;cursor:pointer"
+                                         class="sarsat-saved-receiver" data-sarsat-receiver-url="${r.url}" role="button" tabindex="0"
+                                         aria-label="Connect to ${r.name}">
+                                        <span style="font-size:16px">📡</span>
+                                        <div style="flex:1;min-width:0">
+                                            <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.name}</div>
+                                            <div style="font-size:10px;color:var(--color-text-muted);font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.url}</div>
+                                        </div>
+                                        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+                                            <span style="font-size:10px;color:var(--color-text-muted)">${timeSince}</span>
+                                            <button class="btn btn--small" data-sarsat-remove-receiver="${r.url}" 
+                                                style="padding:2px 6px;font-size:10px;color:var(--color-text-muted)" title="Remove" aria-label="Remove ${r.name}">✕</button>
+                                        </div>
+                                    </div>`;
+                                }).join('')}
+                            </div>
+                        ` : ''}
+                        
+                        <!-- Serial fallback (desktop only) -->
+                        ${hasSerial ? `
+                            <div style="border-top:1px solid var(--color-border);padding-top:12px">
+                                <button class="btn btn--secondary" id="sarsat-connect-serial" style="width:100%">
+                                    ${Icons.get('usb')} Connect via USB Serial
+                                </button>
+                                <p style="font-size:10px;color:var(--color-text-muted);margin-top:4px">
+                                    Direct wired connection (desktop/laptop only)
+                                </p>
+                            </div>
+                        ` : ''}
                     ` : `
-                        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px">
-                            <span>Beacons Received:</span>
-                            <span style="font-weight:500">${stats.beaconsReceived}</span>
-                        </div>
-                        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:12px">
-                            <span>Messages Decoded:</span>
-                            <span style="font-weight:500">${stats.messagesDecoded}</span>
+                        <!-- Connected State -->
+                        <div style="background:var(--color-bg-elevated);border-radius:8px;padding:12px;margin-bottom:12px">
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                                <span style="color:#22c55e;font-size:16px">📡</span>
+                                <div style="flex:1">
+                                    <div style="font-size:13px;font-weight:500">
+                                        ${connectionType === 'serial' ? 'USB Serial' : _extractFriendlyUrl(connectionUrl)}
+                                    </div>
+                                    <div style="font-size:10px;color:var(--color-text-muted)">
+                                        ${connectionType === 'websocket' ? connectionUrl : 'Direct serial connection'}
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+                                <div style="display:flex;justify-content:space-between">
+                                    <span style="color:var(--color-text-muted)">Beacons:</span>
+                                    <span style="font-weight:500">${stats.beaconsReceived}</span>
+                                </div>
+                                <div style="display:flex;justify-content:space-between">
+                                    <span style="color:var(--color-text-muted)">Decoded:</span>
+                                    <span style="font-weight:500">${stats.messagesDecoded}</span>
+                                </div>
+                            </div>
                         </div>
                         <button class="btn btn--danger" id="sarsat-disconnect" style="width:100%">
-                            ${Icons.get('x')} Disconnect
+                            ${Icons.get('close')} Disconnect
                         </button>
                     `}
                 </div>
@@ -22260,15 +22342,15 @@ After spreading:
                             <div style="padding:8px;background:rgba(0,0,0,0.2);border-radius:6px;margin-bottom:8px">
                                 <div style="display:flex;justify-content:space-between;align-items:center">
                                     <span style="font-weight:600">${BEACON_TYPES[b.type]?.icon || '📍'} ${b.type}</span>
-                                    <span style="font-size:11px;color:var(--text-secondary)">${b.countryName}</span>
+                                    <span style="font-size:11px;color:var(--color-text-secondary)">${b.countryName}</span>
                                 </div>
                                 <div style="font-family:monospace;font-size:12px;margin-top:4px">${b.hexId}</div>
                                 ${b.lat !== undefined ? `
-                                    <div style="font-size:11px;color:var(--text-secondary);margin-top:4px">
+                                    <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">
                                         📍 ${b.lat.toFixed(4)}°, ${b.lon.toFixed(4)}°
                                     </div>
                                 ` : ''}
-                                <div style="font-size:10px;color:var(--text-secondary);margin-top:4px">
+                                <div style="font-size:10px;color:var(--color-text-secondary);margin-top:4px">
                                     Last heard: ${new Date(b.lastHeard).toLocaleTimeString()}
                                 </div>
                             </div>
@@ -22284,28 +22366,28 @@ After spreading:
                             <span style="font-size:16px">✈️</span>
                             <div>
                                 <div style="font-weight:500">ELT</div>
-                                <div style="color:var(--text-secondary);font-size:10px">Aviation</div>
+                                <div style="color:var(--color-text-secondary);font-size:10px">Aviation</div>
                             </div>
                         </div>
                         <div style="display:flex;align-items:center;gap:8px">
                             <span style="font-size:16px">⚓</span>
                             <div>
                                 <div style="font-weight:500">EPIRB</div>
-                                <div style="color:var(--text-secondary);font-size:10px">Maritime</div>
+                                <div style="color:var(--color-text-secondary);font-size:10px">Maritime</div>
                             </div>
                         </div>
                         <div style="display:flex;align-items:center;gap:8px">
                             <span style="font-size:16px">🚶</span>
                             <div>
                                 <div style="font-weight:500">PLB</div>
-                                <div style="color:var(--text-secondary);font-size:10px">Personal</div>
+                                <div style="color:var(--color-text-secondary);font-size:10px">Personal</div>
                             </div>
                         </div>
                         <div style="display:flex;align-items:center;gap:8px">
                             <span style="font-size:16px">🚨</span>
                             <div>
                                 <div style="font-weight:500">SSAS</div>
-                                <div style="color:var(--text-secondary);font-size:10px">Ship Security</div>
+                                <div style="color:var(--color-text-secondary);font-size:10px">Ship Security</div>
                             </div>
                         </div>
                     </div>
@@ -22321,7 +22403,7 @@ After spreading:
                     </div>
                     
                     ${beacons.length === 0 ? `
-                        <div style="text-align:center;padding:24px;color:var(--text-secondary)">
+                        <div style="text-align:center;padding:24px;color:var(--color-text-secondary)">
                             <div style="font-size:32px;margin-bottom:8px">📡</div>
                             <div>No beacons received</div>
                             <div style="font-size:11px;margin-top:4px">Connect receiver to monitor 406 MHz</div>
@@ -22329,23 +22411,23 @@ After spreading:
                     ` : `
                         <div style="max-height:300px;overflow-y:auto">
                             ${beacons.sort((a, b) => b.lastHeard - a.lastHeard).map(b => `
-                                <div style="padding:10px;background:var(--bg-secondary);border-radius:6px;margin-bottom:8px;${b.isTest ? 'opacity:0.7' : ''}" 
+                                <div style="padding:10px;background:var(--color-bg-secondary);border-radius:6px;margin-bottom:8px;${b.isTest ? 'opacity:0.7' : ''}" 
                                      data-sarsat-beacon="${b.hexId}">
                                     <div style="display:flex;justify-content:space-between;align-items:center">
                                         <div style="display:flex;align-items:center;gap:8px">
                                             <span style="font-size:18px">${BEACON_TYPES[b.type]?.icon || '📍'}</span>
                                             <div>
                                                 <div style="font-weight:500">${b.type}${b.isTest ? ' <span style="color:#f59e0b;font-size:10px">[TEST]</span>' : ''}</div>
-                                                <div style="font-family:monospace;font-size:11px;color:var(--text-secondary)">${b.hexId}</div>
+                                                <div style="font-family:monospace;font-size:11px;color:var(--color-text-secondary)">${b.hexId}</div>
                                             </div>
                                         </div>
-                                        <div style="text-align:right;font-size:11px;color:var(--text-secondary)">
+                                        <div style="text-align:right;font-size:11px;color:var(--color-text-secondary)">
                                             <div>${b.countryName}</div>
                                             <div>${new Date(b.lastHeard).toLocaleTimeString()}</div>
                                         </div>
                                     </div>
                                     ${b.lat !== undefined ? `
-                                        <div style="display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:11px">
+                                        <div style="display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px solid var(--color-border);font-size:11px">
                                             <span>📍 ${b.lat.toFixed(4)}°, ${b.lon.toFixed(4)}°</span>
                                             <button class="btn btn--small" data-sarsat-goto="${b.hexId}">Go To</button>
                                         </div>
@@ -22359,6 +22441,11 @@ After spreading:
                 <!-- Settings -->
                 <div class="card">
                     <div class="card__title">Settings</div>
+                    
+                    <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer">
+                        <input type="checkbox" id="sarsat-auto-reconnect" ${moduleAvailable && SarsatModule.getAutoReconnect() ? 'checked' : ''}>
+                        <span style="font-size:13px">Auto-reconnect on connection loss</span>
+                    </label>
                     
                     <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer">
                         <input type="checkbox" id="sarsat-auto-waypoints" ${settings.autoCreateWaypoints ? 'checked' : ''}>
@@ -22377,7 +22464,7 @@ After spreading:
                 </div>
                 
                 <!-- Info -->
-                <div style="margin-top:16px;padding:12px;background:var(--bg-secondary);border-radius:8px;font-size:11px;color:var(--text-secondary)">
+                <div style="margin-top:16px;padding:12px;background:var(--color-bg-secondary);border-radius:8px;font-size:11px;color:var(--color-text-secondary)">
                     <strong>About COSPAS-SARSAT:</strong> International satellite-based search and rescue system. 
                     406 MHz beacons transmit distress signals to orbiting satellites which relay position data to rescue coordination centers.
                     This receiver is for <strong>supplementary monitoring only</strong> - always contact official rescue services in emergencies.
@@ -22386,6 +22473,31 @@ After spreading:
         `;
         
         attachSarsatHandlers();
+    }
+    
+    /** Helper: format time since a timestamp */
+    function _formatTimeSince(timestamp) {
+        const seconds = Math.floor((Date.now() - timestamp) / 1000);
+        if (seconds < 60) return 'Just now';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        return `${days}d ago`;
+    }
+    
+    /** Helper: extract friendly display from WebSocket URL */
+    function _extractFriendlyUrl(url) {
+        if (!url) return 'Unknown';
+        try {
+            const parsed = new URL(url);
+            const host = parsed.hostname;
+            if (host.endsWith('.local')) return host.replace('.local', '') + ' (local)';
+            return host;
+        } catch (e) {
+            return url;
+        }
     }
     
     function attachSarsatHandlers() {
@@ -22397,19 +22509,128 @@ After spreading:
         if (connectWsBtn) {
             connectWsBtn.onclick = async () => {
                 const urlInput = container.querySelector('#sarsat-ws-url');
-                const url = urlInput?.value || 'ws://localhost:8406';
+                let url = urlInput?.value?.trim() || 'ws://raspberrypi.local:8406';
+                
+                // Auto-prefix ws:// if missing
+                if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+                    url = 'ws://' + url;
+                }
+                // Auto-append port if missing
+                try {
+                    const parsed = new URL(url);
+                    if (!parsed.port) {
+                        url = `${parsed.protocol}//${parsed.hostname}:8406${parsed.pathname}`;
+                    }
+                } catch(e) { /* leave as-is */ }
                 
                 try {
+                    connectWsBtn.disabled = true;
+                    connectWsBtn.innerHTML = '⏳ Connecting...';
                     SarsatModule.updateSettings({ wsServerUrl: url });
                     await SarsatModule.connectWebSocket(url);
                     renderSarsat();
                 } catch (e) {
+                    connectWsBtn.disabled = false;
+                    connectWsBtn.innerHTML = Icons.get('wifi') + ' Connect';
                     if (typeof ModalsModule !== 'undefined') {
                         ModalsModule.showToast('Connection failed: ' + e.message, 'error');
                     }
                 }
             };
         }
+        
+        // Scan Network
+        const scanBtn = container.querySelector('#sarsat-scan');
+        if (scanBtn) {
+            scanBtn.onclick = async () => {
+                scanBtn.disabled = true;
+                scanBtn.textContent = '⏳ Scanning...';
+                
+                try {
+                    const results = await SarsatModule.discoverReceivers();
+                    const resultsDiv = container.querySelector('#sarsat-discovery-results');
+                    
+                    if (resultsDiv) {
+                        if (results.length === 0) {
+                            resultsDiv.style.display = 'block';
+                            resultsDiv.innerHTML = `
+                                <div style="padding:10px;background:var(--color-bg-elevated);border-radius:8px;font-size:12px;color:var(--color-text-muted);text-align:center">
+                                    No receivers found on network. Verify the Pi is powered on and running the SARSAT server.
+                                </div>
+                            `;
+                        } else {
+                            resultsDiv.style.display = 'block';
+                            resultsDiv.innerHTML = `
+                                <div style="font-size:11px;font-weight:600;color:var(--color-text-muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">
+                                    Found ${results.length} Receiver${results.length > 1 ? 's' : ''}
+                                </div>
+                                ${results.map(r => `
+                                    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.2);border-radius:8px;margin-bottom:4px;cursor:pointer"
+                                         class="sarsat-discovery-item" data-sarsat-discovered-url="${r.url}">
+                                        <div style="display:flex;align-items:center;gap:8px">
+                                            <span style="color:#22c55e">📡</span>
+                                            <div>
+                                                <div style="font-size:12px;font-weight:500">${r.host}</div>
+                                                <div style="font-size:10px;color:var(--color-text-muted);font-family:monospace">${r.url}</div>
+                                            </div>
+                                        </div>
+                                        <span style="font-size:10px;color:#22c55e">${r.latency}ms</span>
+                                    </div>
+                                `).join('')}
+                            `;
+                            
+                            // Bind click handlers for discovered receivers
+                            resultsDiv.querySelectorAll('.sarsat-discovery-item').forEach(item => {
+                                item.onclick = () => {
+                                    const url = item.dataset.sarsatDiscoveredUrl;
+                                    const urlInput = container.querySelector('#sarsat-ws-url');
+                                    if (urlInput) urlInput.value = url;
+                                };
+                            });
+                        }
+                    }
+                } catch (e) {
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('Scan failed: ' + e.message, 'error');
+                    }
+                } finally {
+                    scanBtn.disabled = false;
+                    scanBtn.textContent = '🔍 Scan Network';
+                }
+            };
+        }
+        
+        // Saved Receiver click-to-connect
+        container.querySelectorAll('.sarsat-saved-receiver').forEach(el => {
+            el.onclick = async (e) => {
+                // Don't trigger if clicking the remove button
+                if (e.target.closest('[data-sarsat-remove-receiver]')) return;
+                
+                const url = el.dataset.sarsatReceiverUrl;
+                try {
+                    el.style.opacity = '0.5';
+                    el.style.pointerEvents = 'none';
+                    await SarsatModule.connectWebSocket(url);
+                    renderSarsat();
+                } catch (e2) {
+                    el.style.opacity = '1';
+                    el.style.pointerEvents = '';
+                    if (typeof ModalsModule !== 'undefined') {
+                        ModalsModule.showToast('Connection failed: ' + e2.message, 'error');
+                    }
+                }
+            };
+        });
+        
+        // Remove Saved Receiver
+        container.querySelectorAll('[data-sarsat-remove-receiver]').forEach(btn => {
+            btn.onclick = (e) => {
+                e.stopPropagation();
+                const url = btn.dataset.sarsatRemoveReceiver;
+                SarsatModule.removeReceiver(url);
+                renderSarsat();
+            };
+        });
         
         // Connect Serial
         const connectSerialBtn = container.querySelector('#sarsat-connect-serial');
@@ -22470,6 +22691,14 @@ After spreading:
             };
         });
         
+        // Auto-reconnect checkbox
+        const autoReconnectCheckbox = container.querySelector('#sarsat-auto-reconnect');
+        if (autoReconnectCheckbox) {
+            autoReconnectCheckbox.onchange = () => {
+                SarsatModule.setAutoReconnect(autoReconnectCheckbox.checked);
+            };
+        }
+        
         // Settings checkboxes
         const autoWaypointsCheckbox = container.querySelector('#sarsat-auto-waypoints');
         if (autoWaypointsCheckbox) {
@@ -22493,7 +22722,7 @@ After spreading:
             };
         }
         
-        // Listen for beacon updates
+        // Listen for beacon updates and connection state changes
         if (typeof Events !== 'undefined') {
             Events.on('sarsat:beacon_received', () => {
                 if (State.get('activePanel') === 'sarsat') {

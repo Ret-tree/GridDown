@@ -85,7 +85,9 @@ const Icons = (function() {
         pill: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7Z"/><path d="m8.5 8.5 7 7"/></svg>',
         bookmark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>',
         bookmarkFilled: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>',
-        radar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 12l6-3"/><circle cx="12" cy="12" r="2"/><path d="M12 2a10 10 0 0 1 8.5 15.5"/><path d="M12 2a10 10 0 0 1 3.5 1.5"/></svg>'
+        radar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 12l6-3"/><circle cx="12" cy="12" r="2"/><path d="M12 2a10 10 0 0 1 8.5 15.5"/><path d="M12 2a10 10 0 0 1 3.5 1.5"/></svg>',
+        wifi: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0114 0"/><path d="M1.42 9a16 16 0 0121.16 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><circle cx="12" cy="20" r="1"/></svg>',
+        usb: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="18" r="2"/><circle cx="18" cy="10" r="2"/><path d="M12 2v14"/><path d="M12 8l4 2"/><path d="M12 12l-2 4"/><path d="M7 2h10"/></svg>'
     };
     const get = (name) => icons[name] || icons.alert;
     const create = (name, className = '') => { const el = document.createElement('span'); el.className = className; el.innerHTML = get(name); return el; };
