@@ -2,6 +2,39 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.57.60] - 2025-02-21
+
+### Enhanced — SARSAT Panel: WiFi-First Receiver Connection
+Major overhaul of the SARSAT beacon receiver panel connection UX, shifting from wired serial as the primary transport to WiFi/WebSocket for Raspberry Pi-based receivers.
+
+**New Features:**
+- **Network Discovery** — "Scan Network" button probes common hostnames and IPs (sarsat-rx.local, raspberrypi.local, 192.168.4.1, etc.) for SARSAT WebSocket servers. Shows reachable receivers with latency, click to populate address field.
+- **Saved Receivers** — Successfully connected receivers are automatically saved with name, URL, and last-connected timestamp. One-tap reconnect from the saved list. Remove individual entries with ✕ button.
+- **Auto-Reconnect** — When a WebSocket connection drops unexpectedly (Pi reboot, WiFi blip), GridDown automatically attempts reconnection up to 12 times over 60 seconds. User-initiated disconnects do not trigger auto-reconnect. New "Auto-reconnect on connection loss" setting toggle.
+- **Smart URL Input** — Auto-prefixes `ws://` if omitted, auto-appends `:8406` if no port specified. Monospace font for address field. Placeholder shows expected format.
+- **WiFi and USB SVG Icons** — Added proper `wifi` and `usb` icons to the icon library (previously fell back to alert icon).
+
+**UI Improvements:**
+- Connection card header renamed from "PLB/ELT Receiver" to "406 MHz Receiver"
+- Receiver address field promoted to prominent position with inline Connect button
+- USB Serial demoted to secondary option below saved receivers (hidden on devices without Web Serial API)
+- Connected state shows receiver name/hostname with full URL, stats in compact 2-column grid
+- Reconnecting state shows attempt counter in status badge
+- Discovery results display in green-tinted cards with latency badges
+- Fixed disconnect button icon from missing 'x' to correct 'close' icon
+
+**Architecture:**
+- SARSAT module (`sarsat.js`): Added saved receivers management (save/remove/rename with IndexedDB persistence), network discovery via parallel WebSocket probes, auto-reconnect with exponential backoff, connection URL tracking
+- Panel (`panels.js`): New saved receiver list with click-to-connect, discovery results UI, auto-reconnect checkbox, smart URL normalization
+- Icons (`icons.js`): Added `wifi` and `usb` SVG icons
+
+### Technical
+- Modified: `js/modules/sarsat.js` — New sections: Saved Receivers (save/remove/rename/persist), Network Discovery (parallel WebSocket probing), Auto-Reconnect (attempt loop with configurable max). Updated connectWebSocket() to track URL and auto-save. Updated onDisconnected() to trigger reconnect for non-user disconnects. New public API: discoverReceivers, getSavedReceivers, saveReceiver, removeReceiver, renameReceiver, getConnectionUrl, isReconnecting, getReconnectAttempts, setAutoReconnect, getAutoReconnect, isDiscovering, getDiscoveryResults
+- Modified: `js/modules/panels.js` — Complete rewrite of renderSarsat() and attachSarsatHandlers(). Added _formatTimeSince() and _extractFriendlyUrl() helpers. New handler bindings for scan, saved receiver click, remove receiver, auto-reconnect toggle, discovery item click
+- Modified: `js/utils/icons.js` — Added wifi and usb SVG icon definitions
+- Modified: `sw.js` — Cache version bump to v6.57.60
+- Zero impact on other panels or modules
+
 ## [6.57.54] - 2025-02-16
 
 ### Enhanced — Tablet Landscape Layout (Phase 3: Tablet Support)
