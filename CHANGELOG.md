@@ -2,6 +2,11 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.57.70] - 2025-02-21
+
+### Fixed
+- **ROOT CAUSE: Tile grid offset from GPS marker and all features when map is rotated** — When bearing ≠ 0, `render()` expands the viewport 1.5× to cover rotated corners and passes `rotatedWidth/rotatedHeight` to tile rendering functions. These functions centered the tile grid at `expandedWidth/2` (960px on a 1280px canvas), while `latLonToPixel` (used by GPS marker, waypoints, routes, and all other features) centers at `canvasWidth/2` (640px). This created a **377-pixel offset** between tiles and everything else. The offset rotated with the map, causing the GPS marker to appear hundreds of pixels from its correct position on the tiles at any non-zero bearing. Fixed both `renderTilesForLayer` and `renderCustomTileLayer` to center the tile grid at the actual canvas center, using the expanded dimensions only for tile coverage count. Also fixed `showTileLoadingIndicator` positioning.
+
 ## [6.57.69] - 2025-02-21
 
 ### Fixed

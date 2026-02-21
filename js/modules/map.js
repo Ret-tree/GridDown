@@ -1121,8 +1121,15 @@ const MapModule = (function() {
                 
                 if (tileY < 0 || tileY >= n) continue;
                 
-                const screenX = width / 2 + (dx - Math.floor(tilesX / 2)) * scaledTileSize - offsetX;
-                const screenY = height / 2 + (dy - Math.floor(tilesY / 2)) * scaledTileSize - offsetY;
+                // Position tiles relative to the ACTUAL canvas center, not the
+                // expanded viewport center.  When map is rotated, the viewport
+                // is expanded 1.5× to cover corners, but tile/marker coordinate
+                // systems must share the same center point.  latLonToPixel uses
+                // (canvas.width/dpr)/2 as center; tiles must match.
+                const canvasCX = (canvas.width / effectiveDpr) / 2;
+                const canvasCY = (canvas.height / effectiveDpr) / 2;
+                const screenX = canvasCX + (dx - Math.floor(tilesX / 2)) * scaledTileSize - offsetX;
+                const screenY = canvasCY + (dy - Math.floor(tilesY / 2)) * scaledTileSize - offsetY;
                 
                 // Only draw placeholder for base layer
                 if (!isOverlay) {
@@ -1219,15 +1226,17 @@ const MapModule = (function() {
      * Show tile loading indicator
      */
     function showTileLoadingIndicator(width, height, count) {
+        // Use actual canvas width for positioning, not expanded viewport
+        const actualWidth = canvas.width / effectiveDpr;
         ctx.fillStyle = 'rgba(15, 20, 25, 0.85)';
-        ctx.fillRect(width - 120, 70, 110, 30);
+        ctx.fillRect(actualWidth - 120, 70, 110, 30);
         ctx.strokeStyle = 'rgba(249, 115, 22, 0.3)';
-        ctx.strokeRect(width - 120, 70, 110, 30);
+        ctx.strokeRect(actualWidth - 120, 70, 110, 30);
         
         ctx.fillStyle = '#f97316';
         ctx.font = '11px system-ui, sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(`⏳ Loading ${count} tiles`, width - 112, 89);
+        ctx.fillText(`⏳ Loading ${count} tiles`, actualWidth - 112, 89);
     }
 
     // ==================== CUSTOM TILE LAYERS ====================
@@ -1324,13 +1333,20 @@ const MapModule = (function() {
         const centerY = ((1 - Math.log(Math.tan(mapState.lat * Math.PI / 180) + 
                          1 / Math.cos(mapState.lat * Math.PI / 180)) / Math.PI) / 2) * worldSize;
         
-        const startX = centerX - width / 2;
-        const startY = centerY - height / 2;
+        // Position tiles relative to actual canvas center, not expanded viewport.
+        // Coverage uses expanded width for corner coverage when rotated.
+        const canvasCX = (canvas.width / effectiveDpr) / 2;
+        const canvasCY = (canvas.height / effectiveDpr) / 2;
+        const startX = centerX - canvasCX;
+        const startY = centerY - canvasCY;
         
-        const startTileX = Math.floor(startX / scaledTileSize);
-        const startTileY = Math.floor(startY / scaledTileSize);
-        const endTileX = Math.ceil((startX + width) / scaledTileSize);
-        const endTileY = Math.ceil((startY + height) / scaledTileSize);
+        // Tile coverage range uses expanded viewport for corner coverage
+        const coverStartX = centerX - width / 2;
+        const coverStartY = centerY - height / 2;
+        const startTileX = Math.floor(coverStartX / scaledTileSize);
+        const startTileY = Math.floor(coverStartY / scaledTileSize);
+        const endTileX = Math.ceil((coverStartX + width) / scaledTileSize);
+        const endTileY = Math.ceil((coverStartY + height) / scaledTileSize);
         
         const maxTile = Math.pow(2, effectiveZoom) - 1;
         
