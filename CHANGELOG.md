@@ -2,6 +2,20 @@
 
 All notable changes to GridDown will be documented in this file.
 
+## [6.57.66] - 2025-02-21
+
+### Fixed
+- **GPS marker drift during pinch-to-zoom at high zoom levels** — Rotation snap-back was applied AFTER zoom snap, causing the zoom anchor math to compute lat/lon for the wrong bearing. At zoom 17+, the error was large enough to make the GPS marker appear off-position. Reordered: bearing snap-back now runs BEFORE zoom snap in both touchEnd paths (all-fingers-up and 2→1 finger transition), ensuring anchor math uses the final bearing.
+- **Accidental map rotation during pinch-to-zoom** — Rotation lock threshold was 15° which was too easily triggered by natural finger rotation on high-sensitivity touchscreens (Samsung glove mode, 120Hz digitizers). Increased to 25°. Rotation snap-back threshold increased from 20° to 45° so only truly deliberate rotation (> 45°) persists after a gesture.
+- **Overzoom tile rendering showed wrong map content** — When zooming past a tile server's maxZoom (e.g., zoom 18 on OpenTopo maxZoom 17), the parent tile lookup used child-grid coordinates, requesting non-existent tiles. Fixed to compute correct parent tile coordinates and sub-region extraction.
+- **Tile loading flood during pinch gestures** — Every render frame during a pinch fired tile requests for intermediate zoom levels, flooding the browser's 6-connection-per-domain limit and delaying final-zoom tile loads. Tile loading and prefetch now suppressed during active gestures; tiles load only at the final zoom level after gesture ends.
+
+## [6.57.65] - 2025-02-21
+
+### Fixed
+- **Touch tap interactions broken on touchscreen devices** — `e.preventDefault()` on `touchstart` suppressed browser-synthesized `click` events, preventing all tap actions (clicking waypoints, measure points, route builder, stream gauge markers, overlay markers). Added delayed single-tap click synthesis in `handleTouchEnd` with proper double-tap conflict resolution.
+- **Long press context menu failing on Samsung Galaxy Tab Active5 Pro** — Movement threshold was 5px, too tight for high-sensitivity touchscreen digitizers and Samsung glove mode. Finger micro-jitter would cancel the long press timer before the 600ms hold duration. Increased threshold to 15px.
+
 ## [6.57.64] - 2025-02-21
 
 ### Added — SARSAT: GPIO Status LED Driver
