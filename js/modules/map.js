@@ -77,7 +77,7 @@ const MapModule = (function() {
         initialLon: 0,
         initialCenterX: 0,      // first pinch midpoint in screen coords
         initialCenterY: 0,
-        rotationUnlocked: false, // true once fingers rotate > 15° (prevents accidental rotation)
+        rotationUnlocked: false, // true once fingers rotate > 25° (prevents accidental rotation)
         centerX: 0,
         centerY: 0,
         lastDistance: 0,
@@ -91,7 +91,8 @@ const MapModule = (function() {
         startY: 0,
         startTime: 0,
         isLongPress: false,
-        threshold: 5,         // pixels - max movement before canceling (lowered from 10 for touch responsiveness)
+        threshold: 15,        // pixels - max movement before canceling (15px accommodates
+                              // touch digitizer jitter and Samsung glove mode)
         duration: 600         // ms - hold duration to trigger
     };
     
@@ -117,7 +118,8 @@ const MapModule = (function() {
         lastTapX: 0,
         lastTapY: 0,
         suppressClick: false,  // prevents click handler from firing after double-tap zoom
-        animationId: null      // tracks running zoom animation
+        animationId: null,     // tracks running zoom animation
+        singleTapTimer: null   // delayed single-tap → handleClick dispatch
     };
     
     // Double-tap-hold-drag one-finger zoom state
@@ -1127,24 +1129,28 @@ const MapModule = (function() {
                     ctx.fillRect(screenX, screenY, scaledTileSize, scaledTileSize);
                 }
                 
-                const cacheKey = `${layerKey}/${effectiveZoom}/${wrappedTileX}/${tileY}`;
+                // When zoom exceeds maxZoom (overzoom), compute parent tile
+                // at effectiveZoom and extract the correct sub-region.
+                const parentX = scaleFactor > 1 ? Math.floor(wrappedTileX / scaleFactor) : wrappedTileX;
+                const parentY = scaleFactor > 1 ? Math.floor(tileY / scaleFactor) : tileY;
+                const cacheKey = `${layerKey}/${effectiveZoom}/${parentX}/${parentY}`;
+                
                 if (tileCache.has(cacheKey)) {
-                    // If we're past max zoom, scale up the tile
                     if (scaleFactor > 1) {
-                        // Calculate which portion of the tile to draw
+                        // Draw the sub-region of the parent tile that corresponds
+                        // to this overzoomed child tile
+                        const subX = wrappedTileX % scaleFactor;
+                        const subY = tileY % scaleFactor;
                         const srcSize = tileSize / scaleFactor;
-                        const srcX = ((wrappedTileX * scaleFactor) % 1) * tileSize;
-                        const srcY = ((tileY * scaleFactor) % 1) * tileSize;
+                        const srcX = subX * srcSize;
+                        const srcY = subY * srcSize;
                         ctx.drawImage(tileCache.get(cacheKey), srcX, srcY, srcSize, srcSize, screenX, screenY, scaledTileSize, scaledTileSize);
                     } else {
                         ctx.drawImage(tileCache.get(cacheKey), screenX, screenY, scaledTileSize, scaledTileSize);
                     }
                 } else {
                     // Tile not cached — try to render from a cached ancestor/descendant
-                    // before falling back to a dark placeholder. This prevents the
-                    // visible flash at integer zoom boundaries during pinch gestures.
-                    if (!drawFallbackTile(layerKey, wrappedTileX, tileY, effectiveZoom, screenX, screenY, scaledTileSize)) {
-                        // No fallback available — show placeholder for base layer
+                    if (!drawFallbackTile(layerKey, parentX, parentY, effectiveZoom, screenX, screenY, scaledTileSize)) {
                         if (!isOverlay) {
                             loadingCount++;
                             ctx.fillStyle = '#1e2433';
@@ -1154,9 +1160,13 @@ const MapModule = (function() {
                         }
                     }
                     
-                    loadTile(wrappedTileX, tileY, effectiveZoom, layerKey)
-                        .then(() => scheduleRender())
-                        .catch(() => {});
+                    // During active gestures, don't fetch new tiles — render
+                    // from cache/fallback only to avoid flooding the connection pool.
+                    if (!gestureState.isActive && !oneFingerZoomState.isActive && !mapState.isDragging) {
+                        loadTile(parentX, parentY, effectiveZoom, layerKey)
+                            .then(() => scheduleRender())
+                            .catch(() => {});
+                    }
                 }
             }
         }
@@ -1175,7 +1185,7 @@ const MapModule = (function() {
         // transition boundary. With Math.floor, tileZoom increments at each
         // integer crossing (12.99→13.0). Pre-warming the cache at frac > 0.6
         // ensures z+1 tiles are ready before the visual switchover.
-        if (!isOverlay && !Number.isInteger(zoom)) {
+        if (!isOverlay && !Number.isInteger(zoom) && !gestureState.isActive && !oneFingerZoomState.isActive) {
             const frac = zoom - tileZoom; // always 0..1 with Math.floor
             if (frac > 0.6) {
                 const prefetchZoom = tileZoom + 1;
@@ -1346,8 +1356,9 @@ const MapModule = (function() {
                     if (cached.loaded) {
                         ctx.drawImage(cached.img, drawX, drawY, scaledTileSize, scaledTileSize);
                     }
-                } else if (!pendingTiles.has(cacheKey)) {
-                    // Start loading tile
+                } else if (!pendingTiles.has(cacheKey) &&
+                           !gestureState.isActive && !oneFingerZoomState.isActive && !mapState.isDragging) {
+                    // Start loading tile (suppressed during gestures)
                     pendingTiles.add(cacheKey);
                     
                     const img = new Image();
@@ -3988,6 +3999,11 @@ const MapModule = (function() {
             
             if (dtTap < 350 && tapDist < 40 && doubleTapState.lastTapTime > 0) {
                 // Second tap detected — enter one-finger zoom mode
+                // Cancel pending single-tap click dispatch
+                if (doubleTapState.singleTapTimer) {
+                    clearTimeout(doubleTapState.singleTapTimer);
+                    doubleTapState.singleTapTimer = null;
+                }
                 oneFingerZoomState.isActive = true;
                 oneFingerZoomState.screenX = touch.clientX;
                 oneFingerZoomState.screenY = touch.clientY;
@@ -4257,12 +4273,13 @@ const MapModule = (function() {
             
             // --- Rotation lock ---
             // Prevent accidental rotation during pinch-zoom.  Fingers naturally
-            // rotate 5-15° during a zoom gesture, which previously caused the map
+            // rotate 5-15° during a zoom gesture, which would cause the map
             // to rotate, shifting the GPS marker's apparent position.
-            // Require > 15° of deliberate rotation before unlocking, matching
-            // Google Maps behavior.  Once unlocked, track normally.
+            // Require > 25° of deliberate rotation before unlocking, resisting
+            // accidental unlock on high-sensitivity touchscreens (Samsung
+            // glove mode, 120Hz digitizers).  Once unlocked, track normally.
             if (!gestureState.rotationUnlocked) {
-                if (Math.abs(angleDelta) > 15) {
+                if (Math.abs(angleDelta) > 25) {
                     gestureState.rotationUnlocked = true;
                 } else {
                     newBearing = gestureState.initialBearing;
@@ -4426,7 +4443,10 @@ const MapModule = (function() {
                 }
             }
             
-            // --- Double-tap detection (quick tap-tap, no hold) ---
+            // --- Double-tap detection & single-tap click synthesis ---
+            // e.preventDefault() on touchstart suppresses browser click events,
+            // so we must manually dispatch to handleClick for tap interactions
+            // (waypoint clicks, measure points, route builder, stream gauges, etc.).
             if (wasTap && e.changedTouches.length > 0) {
                 const touch = e.changedTouches[0];
                 const now = Date.now();
@@ -4436,10 +4456,11 @@ const MapModule = (function() {
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 
                 if (dtTap < 350 && dist < 40 && doubleTapState.lastTapTime > 0) {
-                    // Double-tap detected — zoom in centered on tap point
-                    // (This path handles cases where touchStart didn't catch it,
-                    //  e.g. very fast taps where the second down fires before
-                    //  the first up's state is fully committed.)
+                    // Double-tap detected — zoom in, cancel pending single-tap
+                    if (doubleTapState.singleTapTimer) {
+                        clearTimeout(doubleTapState.singleTapTimer);
+                        doubleTapState.singleTapTimer = null;
+                    }
                     doubleTapState.lastTapTime = 0;
                     const maxZoom = TILE_SERVERS[activeLayers.base]?.maxZoom || 19;
                     if (mapState.zoom < maxZoom) {
@@ -4447,10 +4468,28 @@ const MapModule = (function() {
                         animateZoomAt(touch.clientX, touch.clientY, mapState.zoom + 1);
                     }
                 } else {
-                    // First tap — record for potential double-tap
+                    // First tap — record for potential double-tap and schedule
+                    // a delayed single-tap click dispatch after the double-tap
+                    // window (350ms).  If a second tap arrives, the timer above
+                    // is cancelled and no click fires.
                     doubleTapState.lastTapTime = now;
                     doubleTapState.lastTapX = touch.clientX;
                     doubleTapState.lastTapY = touch.clientY;
+                    
+                    if (doubleTapState.singleTapTimer) {
+                        clearTimeout(doubleTapState.singleTapTimer);
+                    }
+                    const tapX = touch.clientX;
+                    const tapY = touch.clientY;
+                    doubleTapState.singleTapTimer = setTimeout(() => {
+                        doubleTapState.singleTapTimer = null;
+                        handleClick({
+                            clientX: tapX,
+                            clientY: tapY,
+                            preventDefault() {},
+                            stopPropagation() {}
+                        });
+                    }, 350);
                 }
             }
             
@@ -4466,6 +4505,24 @@ const MapModule = (function() {
             // Anchor the snap around the last pinch center to prevent a visible jump.
             // Only run this if a gesture actually changed zoom/bearing (wasGesture).
             if (wasGesture && (gestureState.initialZoom !== mapState.zoom || gestureState.initialBearing !== mapState.bearing)) {
+                // --- Rotation snap-back (BEFORE zoom snap) ---
+                // Must snap bearing first so the zoom anchor math uses the
+                // final bearing.  Previously, zoom snap adjusted lat/lon with
+                // the gesture bearing, then bearing snapped back — leaving
+                // lat/lon computed for the wrong bearing, causing the GPS
+                // marker to drift off-position at high zoom levels.
+                const b = mapState.bearing;
+                const ib = gestureState.initialBearing;
+                let bearingDelta = Math.abs(b - ib);
+                if (bearingDelta > 180) bearingDelta = 360 - bearingDelta;
+                const bearingNeedsSnap = b !== ib && bearingDelta < 45;
+                if (bearingNeedsSnap) {
+                    mapState.bearing = ib;
+                }
+                
+                // --- Zoom snap ---
+                // Snap fractional zoom to nearest integer, anchored at pinch
+                // center so the map doesn't visually jump.
                 const snappedZoom = Math.max(3, Math.min(19, Math.round(mapState.zoom)));
                 if (snappedZoom !== mapState.zoom) {
                     const anchorX = gestureState.centerX - cachedCanvasRect.left;
@@ -4484,28 +4541,15 @@ const MapModule = (function() {
                 render();
                 saveMapPosition();
                 
-                // --- Rotation snap-back ---
-                // If rotation was never deliberately unlocked (< 15° total), bearing
-                // is already at initialBearing.  If it was unlocked but the total
-                // change is small (< 20°), snap back to the initial bearing to undo
-                // accidental rotation.  This prevents the GPS marker from appearing
-                // to shift position after a pinch-zoom.
-                const b = mapState.bearing;
-                const ib = gestureState.initialBearing;
-                let bearingDelta = Math.abs(b - ib);
-                if (bearingDelta > 180) bearingDelta = 360 - bearingDelta;
-                if (b !== ib && bearingDelta < 20) {
-                    if (ib === 0) {
-                        resetBearing(); // animated snap to north
-                    } else {
-                        mapState.bearing = ib;
-                        render();
-                    }
+                // Animate bearing reset to north if needed (after render)
+                if (bearingNeedsSnap && ib === 0) {
+                    resetBearing();
                 }
+                updateCompassRose();
             }
             
         } else if (e.touches.length === 1) {
-            // Went from 2 fingers to 1 - transition to single-finger drag
+            // Went from 2 fingers to 1 — transition to single-finger drag
             gestureState.isActive = false;
             gestureState.pending = false;
             const touch = e.touches[0];
@@ -4513,7 +4557,19 @@ const MapModule = (function() {
             mapState.isDragging = true;
             inertiaState.history = []; // reset velocity history for the new drag
             
-            // Snap zoom to integer after pinch gesture, anchored at last pinch center
+            // --- Rotation snap-back FIRST (before zoom snap) ---
+            // Bearing must be finalized before zoom anchor math runs,
+            // otherwise lat/lon are computed for the wrong bearing.
+            const b2 = mapState.bearing;
+            const ib2 = gestureState.initialBearing;
+            let bearingDelta2 = Math.abs(b2 - ib2);
+            if (bearingDelta2 > 180) bearingDelta2 = 360 - bearingDelta2;
+            const bearingNeedsSnap2 = b2 !== ib2 && bearingDelta2 < 45;
+            if (bearingNeedsSnap2) {
+                mapState.bearing = ib2;
+            }
+            
+            // --- Zoom snap ---
             const snappedZoom = Math.max(3, Math.min(19, Math.round(mapState.zoom)));
             if (snappedZoom !== mapState.zoom) {
                 const anchorX = gestureState.centerX - cachedCanvasRect.left;
@@ -4532,19 +4588,10 @@ const MapModule = (function() {
             render();
             saveMapPosition();
             
-            // --- Rotation snap-back (2→1 finger transition) ---
-            const b = mapState.bearing;
-            const ib = gestureState.initialBearing;
-            let bearingDelta = Math.abs(b - ib);
-            if (bearingDelta > 180) bearingDelta = 360 - bearingDelta;
-            if (b !== ib && bearingDelta < 20) {
-                if (ib === 0) {
-                    resetBearing();
-                } else {
-                    mapState.bearing = ib;
-                    render();
-                }
+            if (bearingNeedsSnap2 && ib2 === 0) {
+                resetBearing();
             }
+            updateCompassRose();
         }
     }
     
