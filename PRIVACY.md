@@ -109,7 +109,7 @@ GridDown may request device permissions. **All are optional** and only activated
 | Feature | Purpose |
 |---------|---------|
 | APRS TNC | Connect to serial radio equipment |
-| RF Sentinel | Connect to SDR hardware |
+| AtlasRF | Connect to SDR hardware |
 
 **Connections are local** USB connections to your own hardware.
 
@@ -231,10 +231,10 @@ When operating offline, GridDown:
 - Track exports are **local files** you control
 - **No data sent to any server**
 
-### RF Sentinel Integration
+### AtlasRF Integration
 
-- Connects to **your own local** RF Sentinel hardware
-- Data flows between GridDown and your RF Sentinel only
+- Connects to **your own local** AtlasRF hardware
+- Data flows between GridDown and your AtlasRF only
 - **No data passes through BlackAtlas LLC**
 
 ### Celestial Navigation
@@ -303,7 +303,7 @@ When you connect external devices:
 |-----------------|---------------|
 | Web Bluetooth | Direct device-to-device |
 | Web Serial | Direct USB connection |
-| WebSocket (RF Sentinel) | Local network to your hardware |
+| WebSocket (AtlasRF) | Local network to your hardware |
 
 **No hardware data is transmitted to BlackAtlas LLC or any third party.**
 

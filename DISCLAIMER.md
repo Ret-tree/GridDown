@@ -162,7 +162,7 @@ GridDown should be used as **one tool among many** in your preparedness toolkit.
 - Always verify critical readings with backup methods
 - Battery-powered devices may fail without warning
 
-### RF Sentinel Integration
+### AtlasRF Integration
 
 - RF detection capabilities depend on external SDR hardware
 - Detection range and reliability vary with equipment and conditions

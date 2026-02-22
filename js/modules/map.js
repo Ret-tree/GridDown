@@ -907,7 +907,7 @@ const MapModule = (function() {
             renderTAKOverlay(width, height);
             renderAPRSStations(width, height);
             renderRadiaCodeOverlay(width, height);
-            renderRFSentinelOverlay(width, height);
+            renderAtlasRFOverlay(width, height);
             renderSarsatOverlay(width, height);
             renderNavigationBreadcrumbs(width, height);
             renderGPSPosition(width, height);
@@ -2334,14 +2334,14 @@ const MapModule = (function() {
     }
 
     /**
-     * Render RF Sentinel tracks (aircraft, ships, drones, etc.)
+     * Render AtlasRF tracks (aircraft, ships, drones, etc.)
      */
-    function renderRFSentinelOverlay(width, height) {
-        if (typeof RFSentinelModule === 'undefined') return;
-        if (!RFSentinelModule.isConnected()) return;
+    function renderAtlasRFOverlay(width, height) {
+        if (typeof AtlasRFModule === 'undefined') return;
+        if (!AtlasRFModule.isConnected()) return;
         
         // Use the module's built-in render function
-        RFSentinelModule.renderOnMap(ctx, width, height, latLonToPixel, mapState.zoom);
+        AtlasRFModule.renderOnMap(ctx, width, height, latLonToPixel, mapState.zoom);
     }
     
     function renderSarsatOverlay(width, height) {
@@ -2978,13 +2978,13 @@ const MapModule = (function() {
             return;
         }
         
-        // Check if clicked on an RF Sentinel track (aircraft, ship, drone, etc.)
-        if (typeof RFSentinelModule !== 'undefined' && RFSentinelModule.isConnected()) {
-            const hitTrack = RFSentinelModule.hitTest(x, y, latLonToPixel);
+        // Check if clicked on an AtlasRF track (aircraft, ship, drone, etc.)
+        if (typeof AtlasRFModule !== 'undefined' && AtlasRFModule.isConnected()) {
+            const hitTrack = AtlasRFModule.hitTest(x, y, latLonToPixel);
             if (hitTrack) {
-                const details = RFSentinelModule.getTrackDetails(hitTrack);
+                const details = AtlasRFModule.getTrackDetails(hitTrack);
                 if (details.length > 0 && typeof ModalsModule !== 'undefined') {
-                    const typeConfig = RFSentinelModule.TRACK_TYPES[hitTrack.type] || {};
+                    const typeConfig = AtlasRFModule.TRACK_TYPES[hitTrack.type] || {};
                     const title = `${typeConfig.icon || '📡'} ${hitTrack.callsign || hitTrack.name || hitTrack.id?.slice(0, 10) || 'Track'}`;
                     const bodyHtml = `
                         <div style="font-size:0.875rem;line-height:1.6">

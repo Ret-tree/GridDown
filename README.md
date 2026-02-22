@@ -63,9 +63,9 @@ GridDown is a feature-rich Progressive Web App (PWA) designed for operational pl
 
 ---
 
-## 📡 RF Sentinel Integration (NEW in v6.18)
+## 📡 AtlasRF Integration (NEW in v6.18)
 
-Connect to [RF Sentinel](https://github.com/yourrepo/rf-sentinel) for comprehensive off-grid situational awareness using software-defined radio.
+Connect to [AtlasRF](https://github.com/yourrepo/atlasrf) for comprehensive off-grid situational awareness using software-defined radio.
 
 ### Multi-Protocol RF Detection
 | Detection Type | Frequency | Symbol | Description |
@@ -83,7 +83,7 @@ Connect to [RF Sentinel](https://github.com/yourrepo/rf-sentinel) for comprehens
 - **REST Polling** - Periodic fetch every 5 seconds
 
 ### Off-Grid Weather via FIS-B
-- Switch weather source from Internet (NWS/IEM) to RF Sentinel FIS-B
+- Switch weather source from Internet (NWS/IEM) to AtlasRF FIS-B
 - Receives METARs, TAFs, SIGMETs, TFRs, PIREPs via 978 MHz UAT
 - Stale data detection with 15-minute threshold
 - True infrastructure-independent weather intelligence
@@ -341,7 +341,7 @@ Comprehensive offline reference library with **600+ entries** covering:
 - 7-day forecast with temperature and precipitation
 - Weather alerts and warnings
 - Automatic logistics adjustment for temperature
-- **Off-grid weather via RF Sentinel FIS-B** (NEW)
+- **Off-grid weather via AtlasRF FIS-B** (NEW)
 
 ### Sun/Moon Calculator
 - Rise and set times for current location
@@ -613,7 +613,7 @@ GridDown/
         ├── aprs.js         # APRS integration
         ├── meshtastic.js   # Mesh networking
         ├── radiacode.js    # Gamma spectrometer
-        ├── rfsentinel.js   # RF Sentinel integration
+        ├── atlasrf.js   # AtlasRF integration
         ├── sstv.js         # SSTV encode/decode
         ├── sstv-ai.js      # SSTV AI enhancement
         ├── sstv-dsp.js     # SSTV DSP (waterfall, slant, drift)
@@ -662,7 +662,7 @@ GridDown/
 | Chrome Android | 80+ | ✅ Full support |
 | Safari iOS | 13+ | ⚠️ Limited - no Web Bluetooth |
 
-**Note**: Web Bluetooth features (APRS, Meshtastic, RadiaCode, RF Sentinel via BLE) require Chrome, Edge, or Opera.
+**Note**: Web Bluetooth features (APRS, Meshtastic, RadiaCode, AtlasRF via BLE) require Chrome, Edge, or Opera.
 
 ---
 
@@ -778,7 +778,7 @@ For APRS, Meshtastic, or RadiaCode:
 }
 ```
 
-### RF Sentinel Track
+### AtlasRF Track
 ```json
 {
     "id": "ac_A1B2C3",
@@ -857,15 +857,15 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed release notes.
 - **v6.57.28** - Meshtastic config persistence fix (begin/commit transaction protocol for NVS flash writes)
 - **v6.57.27** - Meshtastic radio config programming fixed (protobuf contamination, missing reboot, batch writes)
 - **v6.57.26** - Team module audit: scannable QR codes, AES-256-GCM encryption, mesh sync fixes, RadiaCode heatmap activation
-- **v6.57.25** - RF Sentinel REST data shape normalization for track metadata
-- **v6.57.24** - RF Sentinel Direct Ethernet Link compatibility (protocol auto-detection, port alignment)
-- **v6.57.23** - RF Sentinel connection reliability (retry logic, WebSocket race condition fixes)
-- **v6.57.22** - RF Sentinel silhouette map icons (aircraft, ships, drones, radiosondes, APRS)
+- **v6.57.25** - AtlasRF REST data shape normalization for track metadata
+- **v6.57.24** - AtlasRF Direct Ethernet Link compatibility (protocol auto-detection, port alignment)
+- **v6.57.23** - AtlasRF connection reliability (retry logic, WebSocket race condition fixes)
+- **v6.57.22** - AtlasRF silhouette map icons (aircraft, ships, drones, radiosondes, APRS)
 - **v6.57.21** - Search navigation routing fixes, APRS icon rendering
 - **v6.57.20** - RadiaCode cumulative dose persistence, radiation heatmap, CSV/GPX/GeoJSON export
 - **v6.57.19** - Spectrum viewer rewrite with peak detection and isotope annotations
 - **v6.57.3** - FPV Drone Detections panel
-- **v6.57.2** - RF Sentinel FPV drone support
+- **v6.57.2** - AtlasRF FPV drone support
 - **v6.57.1** - CoT Bridge Setup Wizard
 
 ### Documentation

@@ -23,7 +23,7 @@ const STATIC_ASSETS = [
     'js/modules/tak.js',
     'js/modules/aprs.js',
     'js/modules/radiacode.js',
-    'js/modules/rfsentinel.js',
+    'js/modules/atlasrf.js',
     'js/modules/sstv.js',
     'js/modules/sarsat.js',
     'js/modules/sstv-ai.js',

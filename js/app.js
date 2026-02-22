@@ -300,45 +300,45 @@ const App = (function() {
                 });
             }
             
-            // Initialize RF Sentinel module
-            if (typeof RFSentinelModule !== 'undefined') {
-                RFSentinelModule.init();
-                console.log('RF Sentinel module initialized');
+            // Initialize AtlasRF module
+            if (typeof AtlasRFModule !== 'undefined') {
+                AtlasRFModule.init();
+                console.log('AtlasRF module initialized');
                 
-                // Setup event listeners for RF Sentinel events
-                Events.on('rfsentinel:connecting', () => {
-                    if (State.get('activePanel') === 'rfsentinel') {
+                // Setup event listeners for AtlasRF events
+                Events.on('atlasrf:connecting', () => {
+                    if (State.get('activePanel') === 'atlasrf') {
                         PanelsModule.render();
                     }
                 });
                 
-                Events.on('rfsentinel:connected', () => {
-                    if (State.get('activePanel') === 'rfsentinel') {
-                        PanelsModule.render();
-                    }
-                    MapModule.render();
-                });
-                
-                Events.on('rfsentinel:disconnected', () => {
-                    if (State.get('activePanel') === 'rfsentinel') {
+                Events.on('atlasrf:connected', () => {
+                    if (State.get('activePanel') === 'atlasrf') {
                         PanelsModule.render();
                     }
                     MapModule.render();
                 });
                 
-                Events.on('rfsentinel:error', () => {
-                    if (State.get('activePanel') === 'rfsentinel') {
+                Events.on('atlasrf:disconnected', () => {
+                    if (State.get('activePanel') === 'atlasrf') {
+                        PanelsModule.render();
+                    }
+                    MapModule.render();
+                });
+                
+                Events.on('atlasrf:error', () => {
+                    if (State.get('activePanel') === 'atlasrf') {
                         PanelsModule.render();
                     }
                 });
                 
-                Events.on('rfsentinel:track:new', () => {
+                Events.on('atlasrf:track:new', () => {
                     MapModule.render();
                 });
                 
                 // Throttled panel re-render for track updates.
-                // Track batches arrive every ~500ms from rfsentinel.js EventBus,
-                // but renderRFSentinel() rebuilds entire panel HTML via template
+                // Track batches arrive every ~500ms from atlasrf.js EventBus,
+                // but renderAtlasRF() rebuilds entire panel HTML via template
                 // literals. 2-second throttle keeps counts feeling live without
                 // DOM thrashing on constrained hardware (Pi, tablets).
                 let rfPanelRenderTimer = null;
@@ -346,26 +346,26 @@ const App = (function() {
                     if (rfPanelRenderTimer) return;
                     rfPanelRenderTimer = setTimeout(() => {
                         rfPanelRenderTimer = null;
-                        if (State.get('activePanel') === 'rfsentinel') {
+                        if (State.get('activePanel') === 'atlasrf') {
                             PanelsModule.render();
                         }
                     }, 2000);
                 };
                 
-                Events.on('rfsentinel:track:new', throttledRFPanelRender);
-                Events.on('rfsentinel:track:update', throttledRFPanelRender);
-                Events.on('rfsentinel:track:batch', throttledRFPanelRender);
-                Events.on('rfsentinel:track:lost', throttledRFPanelRender);
+                Events.on('atlasrf:track:new', throttledRFPanelRender);
+                Events.on('atlasrf:track:update', throttledRFPanelRender);
+                Events.on('atlasrf:track:batch', throttledRFPanelRender);
+                Events.on('atlasrf:track:lost', throttledRFPanelRender);
                 
-                Events.on('rfsentinel:emergency:squawk', (data) => {
-                    if (State.get('activePanel') === 'rfsentinel') {
+                Events.on('atlasrf:emergency:squawk', (data) => {
+                    if (State.get('activePanel') === 'atlasrf') {
                         PanelsModule.render();
                     }
                     // Route emergency squawk to GridDown alert system
                     if (typeof AlertModule !== 'undefined') {
                         const info = data.info || {};
                         AlertModule.trigger({
-                            source: 'rfsentinel',
+                            source: 'atlasrf',
                             severity: info.severity === 'critical' ? 'emergency' : 'critical',
                             title: `Squawk ${data.squawk || '????'} (${info.name || 'EMERGENCY'})`,
                             message: `Aircraft: ${data.track?.callsign || data.track?.id?.slice(0, 10) || 'Unknown'}`,
@@ -376,14 +376,14 @@ const App = (function() {
                     }
                 });
                 
-                Events.on('rfsentinel:emergency:ais', (data) => {
-                    if (State.get('activePanel') === 'rfsentinel') {
+                Events.on('atlasrf:emergency:ais', (data) => {
+                    if (State.get('activePanel') === 'atlasrf') {
                         PanelsModule.render();
                     }
                     // Route AIS emergency to GridDown alert system
                     if (typeof AlertModule !== 'undefined') {
                         AlertModule.trigger({
-                            source: 'rfsentinel',
+                            source: 'atlasrf',
                             severity: 'emergency',
                             title: `AIS ${data.deviceType || 'Emergency'} Device`,
                             message: `MMSI: ${data.track?.mmsi || 'Unknown'}`,
@@ -394,14 +394,14 @@ const App = (function() {
                     }
                 });
                 
-                // Route RF Sentinel general alerts to GridDown alert system
-                Events.on('rfsentinel:alert', (data) => {
+                // Route AtlasRF general alerts to GridDown alert system
+                Events.on('atlasrf:alert', (data) => {
                     if (typeof AlertModule !== 'undefined') {
                         const severityMap = { critical: 'critical', high: 'warning', medium: 'caution', low: 'info' };
                         AlertModule.trigger({
-                            source: 'rfsentinel',
+                            source: 'atlasrf',
                             severity: severityMap[data.severity] || 'info',
-                            title: data.title || data.type || 'RF Sentinel Alert',
+                            title: data.title || data.type || 'AtlasRF Alert',
                             message: data.message || data.description || '',
                             persistent: data.severity === 'critical',
                             sound: data.severity === 'critical' || data.severity === 'high',
@@ -410,11 +410,11 @@ const App = (function() {
                     }
                 });
                 
-                // Route RF Sentinel correlation events to alert system (non-compliant drones)
-                Events.on('rfsentinel:correlation:new', (data) => {
+                // Route AtlasRF correlation events to alert system (non-compliant drones)
+                Events.on('atlasrf:correlation:new', (data) => {
                     if (data.non_compliant && typeof AlertModule !== 'undefined') {
                         AlertModule.trigger({
-                            source: 'rfsentinel',
+                            source: 'atlasrf',
                             severity: 'warning',
                             title: 'Non-Compliant Drone Detected',
                             message: data.description || `Drone without Remote ID at ${data.distance_nm || '?'} nm`,
@@ -426,23 +426,23 @@ const App = (function() {
                 });
                 
                 // Bridge FIS-B weather updates to GridDown weather module
-                Events.on('rfsentinel:weather:updated', (fisBData) => {
-                    if (typeof WeatherModule !== 'undefined' && WeatherModule.handleRFSentinelWeather) {
-                        WeatherModule.handleRFSentinelWeather(fisBData);
+                Events.on('atlasrf:weather:updated', (fisBData) => {
+                    if (typeof WeatherModule !== 'undefined' && WeatherModule.handleAtlasRFWeather) {
+                        WeatherModule.handleAtlasRFWeather(fisBData);
                     }
                 });
                 
                 // Bridge FIS-B specific pushes  
-                Events.on('rfsentinel:weather:fisb', (fisBData) => {
-                    if (typeof WeatherModule !== 'undefined' && WeatherModule.handleRFSentinelWeather) {
-                        WeatherModule.handleRFSentinelWeather(fisBData);
+                Events.on('atlasrf:weather:fisb', (fisBData) => {
+                    if (typeof WeatherModule !== 'undefined' && WeatherModule.handleAtlasRFWeather) {
+                        WeatherModule.handleAtlasRFWeather(fisBData);
                     }
                 });
                 
                 // Bridge current weather conditions
-                Events.on('rfsentinel:weather:conditions', (conditions) => {
-                    if (typeof WeatherModule !== 'undefined' && WeatherModule.handleRFSentinelConditions) {
-                        WeatherModule.handleRFSentinelConditions(conditions);
+                Events.on('atlasrf:weather:conditions', (conditions) => {
+                    if (typeof WeatherModule !== 'undefined' && WeatherModule.handleAtlasRFConditions) {
+                        WeatherModule.handleAtlasRFConditions(conditions);
                     }
                 });
             }

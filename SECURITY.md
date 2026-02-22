@@ -126,7 +126,7 @@ The following are outside our security scope:
 | Social engineering | User education issue |
 | Browser vulnerabilities | Report to browser vendor |
 | Self-hosted instances | User's responsibility |
-| RF Sentinel hardware | Separate project |
+| AtlasRF hardware | Separate project |
 
 ---
 
@@ -149,7 +149,7 @@ The following are outside our security scope:
 | Map tiles | HTTPS | TLS encryption |
 | Weather API | HTTPS | TLS encryption |
 | AirNow API | HTTPS | TLS encryption + API key |
-| WebSocket (RF Sentinel) | WSS/WS | TLS when available |
+| WebSocket (AtlasRF) | WSS/WS | TLS when available |
 | Bluetooth | BLE | Device pairing |
 | Web Serial | USB | Physical connection |
 
@@ -225,7 +225,7 @@ GridDown does not transmit any data to BlackAtlas LLC servers. We have:
 ### For Hardware Integrations
 
 1. **Trust your devices** - Only connect known hardware
-2. **Secure your network** - For RF Sentinel WebSocket connections
+2. **Secure your network** - For AtlasRF WebSocket connections
 3. **Physical security** - Protect connected devices
 
 ---

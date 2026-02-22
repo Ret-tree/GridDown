@@ -418,7 +418,7 @@ const Constants = (function() {
         { id: 'fieldguides', icon: 'book', label: 'Field Guides', category: 'REFERENCE' },
         // Hardware
         { id: 'offline', icon: 'download', label: 'Offline', category: 'HARDWARE' },
-        { id: 'rfsentinel', icon: 'radar', label: 'RF Sentinel', category: 'HARDWARE' },
+        { id: 'atlasrf', icon: 'radar', label: 'AtlasRF', category: 'HARDWARE' },
         { id: 'sstv', icon: 'camera', label: 'SSTV', category: 'HARDWARE' },
         { id: 'sarsat', icon: 'broadcast', label: 'SARSAT', category: 'HARDWARE' }
     ];

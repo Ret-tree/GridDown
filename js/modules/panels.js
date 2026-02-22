@@ -581,7 +581,7 @@ const PanelsModule = (function() {
             case 'logistics': renderLogistics(); break;
             case 'offline': renderOffline(); break;
             case 'team': renderTeam(); break;
-            case 'rfsentinel': renderRFSentinel(); break;
+            case 'atlasrf': renderAtlasRF(); break;
             case 'sarsat': renderSarsat(); break;
             case 'settings': renderSettings(); break;
             case 'gps': renderGPS(); break;
@@ -10385,7 +10385,7 @@ const PanelsModule = (function() {
                             <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px">
                                 <span style="color:rgba(255,255,255,0.5)">Alert source</span>
                                 ${wxNws.source === 'fisb' ? `
-                                    <span style="color:#22c55e">📡 RF Sentinel FIS-B</span>
+                                    <span style="color:#22c55e">📡 AtlasRF FIS-B</span>
                                 ` : `
                                     <span style="color:#3b82f6">🌐 NWS API${wxNws.alertCount > 0 ? ` (${wxNws.alertCount} active)` : ''}</span>
                                 `}
@@ -10415,7 +10415,7 @@ const PanelsModule = (function() {
                         <div style="padding:10px;background:var(--color-bg-elevated);border-radius:8px;margin-bottom:12px">
                             <div style="font-size:11px;color:rgba(255,255,255,0.5);text-align:center">
                                 Monitors temperature, wind, and severe weather at your current position and waypoints. Triggers audible alerts when dangerous conditions are detected.
-                                Uses NWS Weather Alerts API when RF Sentinel is disconnected.
+                                Uses NWS Weather Alerts API when AtlasRF is disconnected.
                             </div>
                         </div>
                     `}
@@ -23016,28 +23016,28 @@ After spreading:
         }
     }
 
-    // ==================== RF Sentinel Panel ====================
+    // ==================== AtlasRF Panel ====================
     
-    function renderRFSentinel() {
+    function renderAtlasRF() {
         _saveScroll(); _restoreScroll();
         const container = document.getElementById('panel-content');
         if (!container) return;
         
-        const isConnected = typeof RFSentinelModule !== 'undefined' && RFSentinelModule.isConnected();
-        const isConnecting = typeof RFSentinelModule !== 'undefined' && RFSentinelModule.isConnecting();
-        const connectionMode = isConnected ? RFSentinelModule.getConnectionMode() : null;
-        const connectionMethod = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getConnectionMethod() : 'auto';
-        const trackCounts = isConnected ? RFSentinelModule.getTrackCounts() : { aircraft: 0, ship: 0, drone: 0, fpv: 0, radiosonde: 0, aprs: 0 };
-        const trackTypeSettings = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getTrackTypeSettings() : {};
-        const weatherSource = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getWeatherSource() : 'internet';
-        const fisBData = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getFisBData() : { isStale: true };
-        const emergencyTracks = isConnected ? RFSentinelModule.getEmergencyTracks() : [];
-        const fpvTracks = isConnected ? RFSentinelModule.getTracksByType('fpv') : [];
-        const host = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getHost() : 'rfsentinel.local';
-        const port = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getPort() : 8080;
-        const mqttPort = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getMqttPort() : 9001;
-        const useHttps = typeof RFSentinelModule !== 'undefined' ? RFSentinelModule.getUseHttps() : 'auto';
-        const stats = isConnected ? RFSentinelModule.getStats() : null;
+        const isConnected = typeof AtlasRFModule !== 'undefined' && AtlasRFModule.isConnected();
+        const isConnecting = typeof AtlasRFModule !== 'undefined' && AtlasRFModule.isConnecting();
+        const connectionMode = isConnected ? AtlasRFModule.getConnectionMode() : null;
+        const connectionMethod = typeof AtlasRFModule !== 'undefined' ? AtlasRFModule.getConnectionMethod() : 'auto';
+        const trackCounts = isConnected ? AtlasRFModule.getTrackCounts() : { aircraft: 0, ship: 0, drone: 0, fpv: 0, radiosonde: 0, aprs: 0 };
+        const trackTypeSettings = typeof AtlasRFModule !== 'undefined' ? AtlasRFModule.getTrackTypeSettings() : {};
+        const weatherSource = typeof AtlasRFModule !== 'undefined' ? AtlasRFModule.getWeatherSource() : 'internet';
+        const fisBData = typeof AtlasRFModule !== 'undefined' ? AtlasRFModule.getFisBData() : { isStale: true };
+        const emergencyTracks = isConnected ? AtlasRFModule.getEmergencyTracks() : [];
+        const fpvTracks = isConnected ? AtlasRFModule.getTracksByType('fpv') : [];
+        const host = typeof AtlasRFModule !== 'undefined' ? AtlasRFModule.getHost() : 'atlasrf.local';
+        const port = typeof AtlasRFModule !== 'undefined' ? AtlasRFModule.getPort() : 8080;
+        const mqttPort = typeof AtlasRFModule !== 'undefined' ? AtlasRFModule.getMqttPort() : 9001;
+        const useHttps = typeof AtlasRFModule !== 'undefined' ? AtlasRFModule.getUseHttps() : 'auto';
+        const stats = isConnected ? AtlasRFModule.getStats() : null;
         
         const totalTracks = Object.values(trackCounts).reduce((a, b) => a + b, 0);
         
@@ -23045,14 +23045,14 @@ After spreading:
             <div class="panel__header">
                 <h2 class="panel__title" id="panel-title">
                     ${Icons.get('radar')}
-                    RF Sentinel
+                    AtlasRF
                 </h2>
                 <div class="flex items-center gap-2">
                     ${isConnected ? `<span class="text-xs" style="color:#22c55e">● ${connectionMode?.toUpperCase()}</span>` : ''}
                 </div>
             </div>
             
-            <div class="panel__body" role="region" aria-label="RF Sentinel controls">
+            <div class="panel__body" role="region" aria-label="AtlasRF controls">
                 <!-- Connection Status -->
                 <div class="card" style="margin-bottom:1rem;${isConnected ? 'border-left:3px solid #22c55e' : emergencyTracks.length > 0 ? 'border-left:3px solid #ef4444' : ''}">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
@@ -23080,7 +23080,7 @@ After spreading:
                         </div>
                         <div style="margin-bottom:0.75rem">
                             <label style="display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:0.25rem">Host / IP Address</label>
-                            <input type="text" id="rfs-host" value="${host}" placeholder="rfsentinel.local or 192.168.1.x" 
+                            <input type="text" id="rfs-host" value="${host}" placeholder="atlasrf.local or 192.168.1.x" 
                                    style="width:100%;padding:0.5rem;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#f8fafc;font-size:0.875rem">
                         </div>
                         <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.75rem">
@@ -23105,7 +23105,7 @@ After spreading:
                             </select>
                             <div style="font-size:0.65rem;color:#64748b;margin-top:0.25rem">
                                 ${useHttps === 'auto' ? 'Uses HTTP for .local and private IPs, HTTPS for remote hosts' :
-                                  useHttps === true ? 'Force HTTPS/WSS — requires RF Sentinel TLS enabled' :
+                                  useHttps === true ? 'Force HTTPS/WSS — requires AtlasRF TLS enabled' :
                                   'Force HTTP/WS — standard for local network connections'}
                             </div>
                         </div>
@@ -23215,7 +23215,7 @@ After spreading:
                                 No GPS position is available unless correlated with Remote ID broadcasts.
                             </div>
                             <div style="font-size:0.6rem;color:#475569;margin-top:0.375rem;line-height:1.3">
-                                FPV detection requires RF Sentinel Pro license and compatible SDR hardware (Ettus B210).
+                                FPV detection requires AtlasRF Pro license and compatible SDR hardware (Ettus B210).
                                 Intended for authorized security, safety, and research applications only.
                             </div>
                         </div>
@@ -23269,7 +23269,7 @@ After spreading:
                             <input type="radio" name="weather-source" value="fisb" ${weatherSource === 'fisb' ? 'checked' : ''} 
                                    style="accent-color:#22c55e" id="rfs-weather-fisb" ${!isConnected ? 'disabled' : ''}>
                             <div style="flex:1">
-                                <div style="font-weight:500;color:#f8fafc">📡 RF Sentinel FIS-B</div>
+                                <div style="font-weight:500;color:#f8fafc">📡 AtlasRF FIS-B</div>
                                 <div style="font-size:0.7rem;color:#94a3b8">Off-grid via 978 MHz UAT receiver</div>
                             </div>
                         </label>
@@ -23300,11 +23300,11 @@ After spreading:
                 <!-- Help Info -->
                 <div class="card" style="background:#0f172a">
                     <div style="font-weight:600;color:#f8fafc;margin-bottom:0.5rem">
-                        About RF Sentinel
+                        About AtlasRF
                     </div>
                     <div style="font-size:0.75rem;color:#94a3b8;line-height:1.5">
-                        RF Sentinel is a separate SDR-based detection system that tracks aircraft, ships, drones, and other RF signals. 
-                        Connect GridDown to RF Sentinel running on your local network for real-time situational awareness without internet dependency.
+                        AtlasRF is a separate SDR-based detection system that tracks aircraft, ships, drones, and other RF signals. 
+                        Connect GridDown to AtlasRF running on your local network for real-time situational awareness without internet dependency.
                     </div>
                     <div style="font-size:0.7rem;color:#64748b;margin-top:0.5rem">
                         Supported signals: ADS-B, AIS, Remote ID, 978 UAT (FIS-B weather), Radiosondes, APRS
@@ -23313,7 +23313,7 @@ After spreading:
             </div>
         `;
         
-        attachRFSentinelHandlers();
+        attachAtlasRFHandlers();
     }
     
     function renderTrackTypeToggle(type, icon, name, count, enabled, color, freq, isConnected) {
@@ -23338,7 +23338,7 @@ After spreading:
     }
     
     /**
-     * Render an FPV drone track card for the RF Sentinel panel
+     * Render an FPV drone track card for the AtlasRF panel
      * Shows protocol, frequency, signal strength, and correlation status
      */
     function renderFPVTrackCard(track) {
@@ -23471,13 +23471,13 @@ After spreading:
         return `${days}d ago`;
     }
     
-    function attachRFSentinelHandlers() {
+    function attachAtlasRFHandlers() {
         // Connection method dropdown
         const methodSelect = document.getElementById('rfs-connection-method');
         if (methodSelect) {
             methodSelect.onchange = () => {
-                if (typeof RFSentinelModule !== 'undefined') {
-                    RFSentinelModule.setConnectionMethod(methodSelect.value);
+                if (typeof AtlasRFModule !== 'undefined') {
+                    AtlasRFModule.setConnectionMethod(methodSelect.value);
                     
                     // Update MQTT port field visibility
                     const mqttPortContainer = document.getElementById('rfs-mqtt-port-container');
@@ -23493,7 +23493,7 @@ After spreading:
                     }
                     
                     // Re-render to update description text
-                    renderRFSentinel();
+                    renderAtlasRF();
                 }
             };
         }
@@ -23502,10 +23502,10 @@ After spreading:
         const protocolSelect = document.getElementById('rfs-protocol');
         if (protocolSelect) {
             protocolSelect.onchange = () => {
-                if (typeof RFSentinelModule !== 'undefined') {
+                if (typeof AtlasRFModule !== 'undefined') {
                     const val = protocolSelect.value;
-                    RFSentinelModule.setUseHttps(val === 'true' ? true : val === 'false' ? false : 'auto');
-                    renderRFSentinel();
+                    AtlasRFModule.setUseHttps(val === 'true' ? true : val === 'false' ? false : 'auto');
+                    renderAtlasRF();
                 }
             };
         }
@@ -23517,27 +23517,27 @@ After spreading:
                 const hostInput = document.getElementById('rfs-host');
                 const portInput = document.getElementById('rfs-port');
                 const mqttPortInput = domCache.get('rfs-mqtt-port');
-                const host = hostInput?.value || 'rfsentinel.local';
+                const host = hostInput?.value || 'atlasrf.local';
                 const port = parseInt(portInput?.value) || 8080;
                 const mqttPort = parseInt(mqttPortInput?.value) || 9001;
                 
-                if (typeof RFSentinelModule !== 'undefined') {
+                if (typeof AtlasRFModule !== 'undefined') {
                     connectBtn.disabled = true;
                     connectBtn.textContent = 'Connecting...';
                     
                     // Set MQTT port before connecting
-                    RFSentinelModule.setMqttPort(mqttPort);
+                    AtlasRFModule.setMqttPort(mqttPort);
                     
-                    const success = await RFSentinelModule.connect(host, port, mqttPort);
+                    const success = await AtlasRFModule.connect(host, port, mqttPort);
                     
                     if (success) {
-                        const mode = RFSentinelModule.getConnectionMode();
-                        ModalsModule.showToast(`Connected to RF Sentinel (${mode})`, 'success');
+                        const mode = AtlasRFModule.getConnectionMode();
+                        ModalsModule.showToast(`Connected to AtlasRF (${mode})`, 'success');
                     } else {
-                        ModalsModule.showToast('Failed to connect to RF Sentinel', 'error');
+                        ModalsModule.showToast('Failed to connect to AtlasRF', 'error');
                     }
                     
-                    renderRFSentinel();
+                    renderAtlasRF();
                 }
             };
         }
@@ -23546,10 +23546,10 @@ After spreading:
         const disconnectBtn = document.getElementById('rfs-disconnect');
         if (disconnectBtn) {
             disconnectBtn.onclick = () => {
-                if (typeof RFSentinelModule !== 'undefined') {
-                    RFSentinelModule.disconnect();
-                    ModalsModule.showToast('Disconnected from RF Sentinel', 'info');
-                    renderRFSentinel();
+                if (typeof AtlasRFModule !== 'undefined') {
+                    AtlasRFModule.disconnect();
+                    ModalsModule.showToast('Disconnected from AtlasRF', 'info');
+                    renderAtlasRF();
                 }
             };
         }
@@ -23559,8 +23559,8 @@ After spreading:
             const toggle = document.getElementById(`rfs-toggle-${type}`);
             if (toggle) {
                 toggle.onchange = () => {
-                    if (typeof RFSentinelModule !== 'undefined') {
-                        RFSentinelModule.setTrackTypeEnabled(type, toggle.checked);
+                    if (typeof AtlasRFModule !== 'undefined') {
+                        AtlasRFModule.setTrackTypeEnabled(type, toggle.checked);
                         // Don't re-render, just update map
                         if (typeof MapModule !== 'undefined') {
                             MapModule.render();
@@ -23576,22 +23576,22 @@ After spreading:
         
         if (weatherInternet) {
             weatherInternet.onchange = () => {
-                if (weatherInternet.checked && typeof RFSentinelModule !== 'undefined') {
-                    RFSentinelModule.setWeatherSource('internet');
+                if (weatherInternet.checked && typeof AtlasRFModule !== 'undefined') {
+                    AtlasRFModule.setWeatherSource('internet');
                     ModalsModule.showToast('Weather source: Internet (NWS/IEM)', 'info');
-                    renderRFSentinel();
+                    renderAtlasRF();
                 }
             };
         }
         
         if (weatherFisb) {
             weatherFisb.onchange = () => {
-                if (weatherFisb.checked && typeof RFSentinelModule !== 'undefined') {
-                    RFSentinelModule.setWeatherSource('fisb');
-                    ModalsModule.showToast('Weather source: RF Sentinel FIS-B (off-grid)', 'info');
+                if (weatherFisb.checked && typeof AtlasRFModule !== 'undefined') {
+                    AtlasRFModule.setWeatherSource('fisb');
+                    ModalsModule.showToast('Weather source: AtlasRF FIS-B (off-grid)', 'info');
                     // Fetch current FIS-B data
-                    RFSentinelModule.fetchFisBWeather();
-                    renderRFSentinel();
+                    AtlasRFModule.fetchFisBWeather();
+                    renderAtlasRF();
                 }
             };
         }

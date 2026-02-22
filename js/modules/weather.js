@@ -626,9 +626,9 @@ const WeatherModule = (function() {
             // Route through Phase 1 plumbing
             const alerts = processWeatherAlerts(weather.current, 'Current Location');
             
-            // Phase 4: NWS alerts fallback when RF Sentinel is not providing FIS-B
+            // Phase 4: NWS alerts fallback when AtlasRF is not providing FIS-B
             let nwsAlerts = [];
-            if (!_isRFSentinelProvidingAlerts()) {
+            if (!_isAtlasRFProvidingAlerts()) {
                 try {
                     const nwsFeatures = await fetchNWSAlerts(lat, lon);
                     if (nwsFeatures && nwsFeatures.length > 0) {
@@ -645,7 +645,7 @@ const WeatherModule = (function() {
             if (typeof Events !== 'undefined') {
                 Events.emit('weather:monitoring:check', {
                     lat, lon, weather, alerts: allAlerts,
-                    nwsActive: !_isRFSentinelProvidingAlerts(),
+                    nwsActive: !_isAtlasRFProvidingAlerts(),
                     timestamp: weatherMonitoringLastCheck
                 });
             }
@@ -661,7 +661,7 @@ const WeatherModule = (function() {
      * Check weather conditions at all saved waypoints.
      * Iterates each waypoint with a lat/lon, fetches weather, and routes
      * through processWeatherAlerts(). Also checks NWS alerts per waypoint
-     * when RF Sentinel is not providing FIS-B.
+     * when AtlasRF is not providing FIS-B.
      * 
      * Throttles requests with 1-second delays between waypoints to avoid
      * hammering the Open-Meteo API.
@@ -675,7 +675,7 @@ const WeatherModule = (function() {
         if (waypoints.length === 0) return [];
         
         const results = [];
-        const nwsFallback = !_isRFSentinelProvidingAlerts();
+        const nwsFallback = !_isAtlasRFProvidingAlerts();
         
         for (const wp of waypoints) {
             if (!wp.lat || !wp.lon) continue;
@@ -1005,22 +1005,22 @@ const WeatherModule = (function() {
     // =========================================================================
     
     /**
-     * Determine whether RF Sentinel is actively providing FIS-B weather data.
-     * When RF Sentinel is connected and not stale, NWS fallback is suppressed
+     * Determine whether AtlasRF is actively providing FIS-B weather data.
+     * When AtlasRF is connected and not stale, NWS fallback is suppressed
      * to avoid duplicate alerting from two sources.
      * 
-     * @returns {boolean} true if RF Sentinel FIS-B is active
+     * @returns {boolean} true if AtlasRF FIS-B is active
      */
-    function _isRFSentinelProvidingAlerts() {
-        if (typeof RFSentinelModule === 'undefined') return false;
-        if (!RFSentinelModule.isConnected()) return false;
+    function _isAtlasRFProvidingAlerts() {
+        if (typeof AtlasRFModule === 'undefined') return false;
+        if (!AtlasRFModule.isConnected()) return false;
         
         // Check if weather source is set to FIS-B
-        const source = RFSentinelModule.getWeatherSource();
+        const source = AtlasRFModule.getWeatherSource();
         if (source !== 'fisb') return false;
         
         // Check if FIS-B data is not stale
-        if (RFSentinelModule.isFisBStale()) return false;
+        if (AtlasRFModule.isFisBStale()) return false;
         
         return true;
     }
@@ -1260,7 +1260,7 @@ const WeatherModule = (function() {
      * @returns {Object} { lastFetch, alertCount, isActive, source }
      */
     function getNWSAlertStatus() {
-        const rfActive = _isRFSentinelProvidingAlerts();
+        const rfActive = _isAtlasRFProvidingAlerts();
         return {
             lastFetch: nwsLastFetch,
             alertCount: nwsLastAlertCount,
@@ -1828,20 +1828,20 @@ const WeatherModule = (function() {
         return currentWind;
     }
 
-    // ==================== RF Sentinel FIS-B Integration ====================
+    // ==================== AtlasRF FIS-B Integration ====================
     
-    // Storage for off-grid weather data from RF Sentinel
-    let rfSentinelFisBData = null;  // { metars, tafs, sigmets, tfrs, pireps, lastUpdate }
-    let rfSentinelConditions = null;  // { temperature_c, humidity, wind_speed_mps, ... }
+    // Storage for off-grid weather data from AtlasRF
+    let atlasRFFisBData = null;  // { metars, tafs, sigmets, tfrs, pireps, lastUpdate }
+    let atlasRFConditions = null;  // { temperature_c, humidity, wind_speed_mps, ... }
     
     /**
-     * Receive FIS-B weather data from RF Sentinel (via event bridge in app.js)
+     * Receive FIS-B weather data from AtlasRF (via event bridge in app.js)
      * When weather source is set to 'fisb', this data replaces internet weather
      */
-    function handleRFSentinelWeather(fisBData) {
+    function handleAtlasRFWeather(fisBData) {
         if (!fisBData) return;
         
-        rfSentinelFisBData = {
+        atlasRFFisBData = {
             metars: fisBData.metars || [],
             tafs: fisBData.tafs || [],
             sigmets: fisBData.sigmets || [],
@@ -1851,12 +1851,12 @@ const WeatherModule = (function() {
             isStale: fisBData.isStale || false
         };
         
-        console.log('WeatherModule: Received FIS-B data from RF Sentinel',
-            `(${rfSentinelFisBData.metars.length} METARs, ${rfSentinelFisBData.sigmets.length} SIGMETs)`);
+        console.log('WeatherModule: Received FIS-B data from AtlasRF',
+            `(${atlasRFFisBData.metars.length} METARs, ${atlasRFFisBData.sigmets.length} SIGMETs)`);
         
         // Process SIGMETs for alert routing (Phase 3)
-        if (rfSentinelFisBData.sigmets.length > 0) {
-            processFisBSigmets(rfSentinelFisBData.sigmets);
+        if (atlasRFFisBData.sigmets.length > 0) {
+            processFisBSigmets(atlasRFFisBData.sigmets);
         }
     }
     
@@ -1871,11 +1871,11 @@ const WeatherModule = (function() {
      *   sigmet     — severe turbulence, severe icing, volcanic ash (WARNING)
      *   airmet     — moderate turbulence/icing, IFR, mountain obscuration (CAUTION)
      * 
-     * @param {Object} sigmet — a SIGMET object from RF Sentinel
+     * @param {Object} sigmet — a SIGMET object from AtlasRF
      * @returns {Object} { category, alertSeverity, label, icon }
      */
     function classifySigmet(sigmet) {
-        // Normalize fields — RF Sentinel may use different naming conventions
+        // Normalize fields — AtlasRF may use different naming conventions
         const type = (sigmet.type || sigmet.product_type || sigmet.productType || '').toLowerCase();
         const hazard = (sigmet.hazard || sigmet.phenomenon || sigmet.hazard_type || '').toLowerCase();
         const raw = (sigmet.text || sigmet.raw || sigmet.raw_text || sigmet.message || '').toUpperCase();
@@ -2140,13 +2140,13 @@ const WeatherModule = (function() {
     }
     
     /**
-     * Process FIS-B SIGMETs received from RF Sentinel.
+     * Process FIS-B SIGMETs received from AtlasRF.
      * Classifies each SIGMET, checks geographic relevance, deduplicates,
      * and routes relevant alerts through AlertModule.
      * 
-     * Called from handleRFSentinelWeather() when SIGMETs are present.
+     * Called from handleAtlasRFWeather() when SIGMETs are present.
      * 
-     * @param {Array} sigmets — array of SIGMET objects from RF Sentinel
+     * @param {Array} sigmets — array of SIGMET objects from AtlasRF
      * @returns {Array} array of triggered alert objects
      */
     function processFisBSigmets(sigmets) {
@@ -2236,22 +2236,22 @@ const WeatherModule = (function() {
     }
     
     /**
-     * Receive current weather conditions from RF Sentinel (Open-Meteo relay)
+     * Receive current weather conditions from AtlasRF (Open-Meteo relay)
      * Provides current conditions even when GridDown has no internet
      */
-    function handleRFSentinelConditions(conditions) {
+    function handleAtlasRFConditions(conditions) {
         if (!conditions) return;
         
-        rfSentinelConditions = { ...conditions };
+        atlasRFConditions = { ...conditions };
         
-        // Update currentWind from RF Sentinel data
+        // Update currentWind from AtlasRF data
         if (conditions.wind_speed_mps != null && conditions.wind_direction != null) {
             currentWind = {
                 speed: conditions.wind_speed_mps * 2.237,  // m/s -> mph
                 direction: conditions.wind_direction,
                 gusts: conditions.wind_gust_mps ? conditions.wind_gust_mps * 2.237 : null,
                 cardinal: windDirectionToCardinal(conditions.wind_direction),
-                source: 'rfsentinel'
+                source: 'atlasrf'
             };
             updateWindIndicator(currentWind);
             if (typeof Events !== 'undefined') {
@@ -2259,23 +2259,23 @@ const WeatherModule = (function() {
             }
         }
         
-        console.log('WeatherModule: Received conditions from RF Sentinel',
+        console.log('WeatherModule: Received conditions from AtlasRF',
             `(${conditions.temperature_c?.toFixed(1)}°C, ${conditions.conditions || ''})`);
     }
     
     /**
-     * Get RF Sentinel FIS-B weather data
+     * Get AtlasRF FIS-B weather data
      * Returns null if no data received or data is stale
      */
-    function getRFSentinelWeather() {
-        return rfSentinelFisBData;
+    function getAtlasRFWeather() {
+        return atlasRFFisBData;
     }
     
     /**
-     * Get RF Sentinel current conditions
+     * Get AtlasRF current conditions
      */
-    function getRFSentinelConditions() {
-        return rfSentinelConditions;
+    function getAtlasRFConditions() {
+        return atlasRFConditions;
     }
 
     // Public API
@@ -2315,12 +2315,12 @@ const WeatherModule = (function() {
         windDirectionToCardinal,
         getBeaufortScale,
         calcDewpoint,
-        // RF Sentinel FIS-B integration
-        handleRFSentinelWeather,
-        handleRFSentinelConditions,
+        // AtlasRF FIS-B integration
+        handleAtlasRFWeather,
+        handleAtlasRFConditions,
         processFisBSigmets,
-        getRFSentinelWeather,
-        getRFSentinelConditions,
+        getAtlasRFWeather,
+        getAtlasRFConditions,
         WMO_CODES,
         ALERT_THRESHOLDS
     };

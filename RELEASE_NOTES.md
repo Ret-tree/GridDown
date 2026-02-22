@@ -48,7 +48,7 @@ After opening in Chrome or Edge, click the install button or use your browser's 
 - **Offline map download** by drawing regions
 - **RadiaCode radiation detector** with spectrum analysis, dose tracking, and heatmap overlay
 - **Meshtastic mesh networking** with team coordination, position sharing, and encrypted messaging
-- **RF Sentinel integration** for multi-protocol RF detection (ADS-B, AIS, Remote ID, FPV, APRS)
+- **AtlasRF integration** for multi-protocol RF detection (ADS-B, AIS, Remote ID, FPV, APRS)
 - **SARSAT beacon detection** for 406 MHz PLB/ELT/EPIRB signals
 - **CoT Bridge (TAK)** for interoperability with ATAK/WinTAK
 - **Celestial navigation** with star identification, camera sextant, and ephemeris

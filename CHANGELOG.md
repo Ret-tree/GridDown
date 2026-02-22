@@ -79,12 +79,12 @@ All notable changes to GridDown will be documented in this file.
 
 ### Removed
 - **js/modules/update.js.bak** — Stale backup of previous update module.
-- **js/modules/rfsentinel.js.bak** — Stale backup.
+- **js/modules/atlasrf.js.bak** — Stale backup.
 
 ## [6.57.71] - 2025-02-21
 
 ### Added
-- **GridDown Termux Setup Guide** (PDF, 13 pages) — Complete documentation for self-hosting GridDown on Samsung Galaxy Tab Active5 Pro using Termux. Covers F-Droid installation, repository cloning, local Python HTTP server, PWA installation, one-command GitHub updates via shell alias, autostart on boot with Termux:Boot, RF Sentinel USB-C OTG integration, Android wake lock and battery optimization settings, three network architecture patterns (single-device, tablet+Pi, GitHub Pages), troubleshooting table, and quick reference card.
+- **GridDown Termux Setup Guide** (PDF, 13 pages) — Complete documentation for self-hosting GridDown on Samsung Galaxy Tab Active5 Pro using Termux. Covers F-Droid installation, repository cloning, local Python HTTP server, PWA installation, one-command GitHub updates via shell alias, autostart on boot with Termux:Boot, AtlasRF USB-C OTG integration, Android wake lock and battery optimization settings, three network architecture patterns (single-device, tablet+Pi, GitHub Pages), troubleshooting table, and quick reference card.
 - **scripts/termux-setup.sh** — One-command Termux environment setup. Installs all shell aliases to ~/.bashrc via source link, optionally creates Termux:Boot autostart script, verifies environment (Python, Git, rtl-sdr). Idempotent and safe to re-run after updates. Colored terminal output with step-by-step progress.
 - **scripts/griddown-aliases.sh** — 15 shell aliases for Termux: gd, gd-bg, gd-stop, gd-status, gd-restart, gd-start (wake lock + server), gd-shutdown (stop + unlock), griddown-update, gd-version, gd-log, gd-force-update, gd-size, gd-clean, wl/wlu (wake lock shortcuts). Sourced from ~/.bashrc so aliases auto-update when GridDown is updated from GitHub.
 
@@ -369,12 +369,12 @@ Major overhaul of the SARSAT beacon receiver panel connection UX, shifting from 
 ## [6.57.51] - 2025-02-15
 
 ### Fixed
-- **RF Sentinel panel track counts not updating in real-time** — Track counts ("Aircraft: 0, Ships: 0, Drones: 0") in the RF Sentinel panel were stale while tracks rendered fine on the map. Root cause: `rfsentinel:track:new`, `rfsentinel:track:update`, and `rfsentinel:track:batch` events only triggered `MapModule.render()` (or had no handler at all), but never called `PanelsModule.render()`. Counts only refreshed on connection events or when navigating away and back.
+- **AtlasRF panel track counts not updating in real-time** — Track counts ("Aircraft: 0, Ships: 0, Drones: 0") in the AtlasRF panel were stale while tracks rendered fine on the map. Root cause: `atlasrf:track:new`, `atlasrf:track:update`, and `atlasrf:track:batch` events only triggered `MapModule.render()` (or had no handler at all), but never called `PanelsModule.render()`. Counts only refreshed on connection events or when navigating away and back.
   - Added throttled `PanelsModule.render()` on all four track events (new/update/batch/lost) with 2-second trailing-edge throttle. Fast enough to feel live, light enough to avoid DOM thrashing from 500ms batch arrivals on constrained hardware (Pi, tablets).
-  - Panel render gated by `State.get('activePanel') === 'rfsentinel'` — no wasted renders when viewing other panels.
+  - Panel render gated by `State.get('activePanel') === 'atlasrf'` — no wasted renders when viewing other panels.
 
 ### Technical
-- Modified: `js/app.js` — added `rfPanelRenderTimer` throttle variable, `throttledRFPanelRender` function, 4 new `Events.on()` listeners for `rfsentinel:track:new`, `rfsentinel:track:update`, `rfsentinel:track:batch`, `rfsentinel:track:lost`
+- Modified: `js/app.js` — added `rfPanelRenderTimer` throttle variable, `throttledRFPanelRender` function, 4 new `Events.on()` listeners for `atlasrf:track:new`, `atlasrf:track:update`, `atlasrf:track:batch`, `atlasrf:track:lost`
 
 ## [6.57.50] - 2025-02-15
 
@@ -382,7 +382,7 @@ Major overhaul of the SARSAT beacon receiver panel connection UX, shifting from 
 - **Phase 5: Waypoint Weather Monitoring & Threshold Configuration UI** — Completes the audible weather alerts system with waypoint coverage and user-configurable alert thresholds.
 
   **Waypoint Monitoring**
-  - `checkWeatherAtWaypoints()` — iterates all saved waypoints, fetches weather from Open-Meteo for each, routes through `processWeatherAlerts()` with waypoint name for location context in alert messages. Includes NWS fallback per waypoint when RF Sentinel is disconnected.
+  - `checkWeatherAtWaypoints()` — iterates all saved waypoints, fetches weather from Open-Meteo for each, routes through `processWeatherAlerts()` with waypoint name for location context in alert messages. Includes NWS fallback per waypoint when AtlasRF is disconnected.
   - Separate polling timer from current-position monitoring (default: 60 min vs 30 min) to reduce API load — waypoints change less frequently than user position.
   - 1-second throttle between waypoint requests to avoid rate limiting.
   - Wired into `startWeatherMonitoring()` with 5-second initial delay to avoid overlapping with position check, then periodic polling via `waypointMonitoringTimer`.
@@ -409,12 +409,12 @@ Major overhaul of the SARSAT beacon receiver panel connection UX, shifting from 
 ## [6.57.49] - 2025-02-15
 
 ### Added
-- **Phase 4: NWS Weather Alerts API Fallback** — When RF Sentinel is disconnected (or not providing FIS-B data), the background monitoring loop now fetches active weather alerts from the NWS Weather Alerts API (api.weather.gov) and routes them through AlertModule for audible notifications.
+- **Phase 4: NWS Weather Alerts API Fallback** — When AtlasRF is disconnected (or not providing FIS-B data), the background monitoring loop now fetches active weather alerts from the NWS Weather Alerts API (api.weather.gov) and routes them through AlertModule for audible notifications.
 
   **Fallback Architecture**
-  - `_isRFSentinelProvidingAlerts()` — gating function checks 4 conditions: RFSentinelModule loaded, connected, weather source set to FIS-B, and FIS-B data not stale. All four must pass to suppress NWS (prevents duplicate alerting when both sources are available).
-  - When RF Sentinel IS providing FIS-B: Phase 3 SIGMET processing handles aviation weather alerts, NWS is skipped
-  - When RF Sentinel is NOT providing: NWS API fetches active alerts for user's GPS position as fallback
+  - `_isAtlasRFProvidingAlerts()` — gating function checks 4 conditions: AtlasRFModule loaded, connected, weather source set to FIS-B, and FIS-B data not stale. All four must pass to suppress NWS (prevents duplicate alerting when both sources are available).
+  - When AtlasRF IS providing FIS-B: Phase 3 SIGMET processing handles aviation weather alerts, NWS is skipped
+  - When AtlasRF is NOT providing: NWS API fetches active alerts for user's GPS position as fallback
   - Both Phase 1 threshold alerts (Open-Meteo) and NWS alerts are combined in monitoring results
 
   **NWS API Integration**
@@ -436,25 +436,25 @@ Major overhaul of the SARSAT beacon receiver panel connection UX, shifting from 
   - Prevents re-alerting on repeated monitoring checks for same active alerts
 
   **Weather Panel UI Updates**
-  - Alert source indicator in monitoring status card: "📡 RF Sentinel FIS-B" (green) when connected, "🌐 NWS API (N active)" (blue) when fallback is active
+  - Alert source indicator in monitoring status card: "📡 AtlasRF FIS-B" (green) when connected, "🌐 NWS API (N active)" (blue) when fallback is active
   - Updated threshold description to mention NWS alert types alongside Open-Meteo thresholds
   - Updated monitoring OFF description to mention NWS API fallback behavior
 
 ### Technical
-- Modified: `js/modules/weather.js` — added NWS state variables (API base, User-Agent, cache duration, alerts cache, last fetch, alert count, dedup map), 5 new functions (_isRFSentinelProvidingAlerts, fetchNWSAlerts, classifyNWSAlert, processNWSAlerts, getNWSAlertStatus), wired NWS check into checkWeatherAtCurrentPosition after Phase 1 alerts, updated getWeatherMonitoringSettings to include NWS status, 3 new public API exports
+- Modified: `js/modules/weather.js` — added NWS state variables (API base, User-Agent, cache duration, alerts cache, last fetch, alert count, dedup map), 5 new functions (_isAtlasRFProvidingAlerts, fetchNWSAlerts, classifyNWSAlert, processNWSAlerts, getNWSAlertStatus), wired NWS check into checkWeatherAtCurrentPosition after Phase 1 alerts, updated getWeatherMonitoringSettings to include NWS status, 3 new public API exports
 - Modified: `js/modules/panels.js` — alert source indicator in monitoring status card, updated threshold/description text
-- No changes to alerts.js, app.js, or rfsentinel.js — uses existing RFSentinelModule public API for connection/source/stale checks
+- No changes to alerts.js, app.js, or atlasrf.js — uses existing AtlasRFModule public API for connection/source/stale checks
 
 ## [6.57.48] - 2025-02-15
 
 ### Added
-- **Phase 3: FIS-B SIGMET Alert Processing** — SIGMETs received from RF Sentinel via FIS-B (978 MHz UAT) are now classified, geographically filtered, deduplicated, and routed through AlertModule for audible alerts. Previously, SIGMETs were received and stored but never processed into notifications.
+- **Phase 3: FIS-B SIGMET Alert Processing** — SIGMETs received from AtlasRF via FIS-B (978 MHz UAT) are now classified, geographically filtered, deduplicated, and routed through AlertModule for audible alerts. Previously, SIGMETs were received and stored but never processed into notifications.
 
   **SIGMET Classification**
   - Convective SIGMETs (severe thunderstorms, tornadoes) → CRITICAL (sound + persistent banner + push notification)
   - Standard SIGMETs (severe turbulence, severe icing, volcanic ash, dust/sandstorms) → WARNING (sound + toast + push notification)
   - AIRMETs (moderate turbulence/icing, IFR conditions, mountain obscuration) → CAUTION (toast only, no sound)
-  - Keyword-based classification with multiple field name fallbacks — handles varying RF Sentinel data formats robustly
+  - Keyword-based classification with multiple field name fallbacks — handles varying AtlasRF data formats robustly
   - Sub-classification with descriptive labels: Tornado SIGMET, Severe Turbulence SIGMET, AIRMET Sierra/Tango/Zulu, etc.
 
   **Geographic Relevance Filtering**
@@ -471,13 +471,13 @@ Major overhaul of the SARSAT beacon receiver panel connection UX, shifting from 
   - Fallback key generation from type + content hash when structured IDs are absent
 
   **Integration**
-  - `processFisBSigmets()` called automatically from `handleRFSentinelWeather()` when SIGMETs are present
-  - Event flow: RF Sentinel → rfsentinel.js → app.js event bridge → handleRFSentinelWeather → processFisBSigmets → AlertModule.trigger
+  - `processFisBSigmets()` called automatically from `handleAtlasRFWeather()` when SIGMETs are present
+  - Event flow: AtlasRF → atlasrf.js → app.js event bridge → handleAtlasRFWeather → processFisBSigmets → AlertModule.trigger
   - `weather:sigmet:alerts` event emitted for other modules to consume
   - Also exported as public API for manual invocation
 
 ### Technical
-- Modified: `js/modules/weather.js` — added SIGMET dedup state (`alertedSigmetIds` Map, `SIGMET_ALERT_RADIUS_MI` constant), 8 new functions (classifySigmet, getSigmetKey, getSigmetPosition, _haversineDistMi, isSigmetRelevant, getSigmetDescription, getSigmetExpiration, processFisBSigmets), wired call from handleRFSentinelWeather, 1 new public API export
+- Modified: `js/modules/weather.js` — added SIGMET dedup state (`alertedSigmetIds` Map, `SIGMET_ALERT_RADIUS_MI` constant), 8 new functions (classifySigmet, getSigmetKey, getSigmetPosition, _haversineDistMi, isSigmetRelevant, getSigmetDescription, getSigmetExpiration, processFisBSigmets), wired call from handleAtlasRFWeather, 1 new public API export
 - No changes to alerts.js, panels.js, or app.js — existing event bridge and AlertModule infrastructure already handle the alert routing
 
 ## [6.57.47] - 2025-02-15
@@ -545,13 +545,13 @@ Major overhaul of the SARSAT beacon receiver panel connection UX, shifting from 
 ## [6.57.44] - 2025-02-14
 
 ### Added
-- **RF Sentinel auto-reconnect on page refresh** — When connected to an RF Sentinel server (via WebSocket, MQTT, or REST), the connection now automatically restores after page refresh or PWA restart. Uses the same pattern as CoT/TAK Bridge: saves `autoReconnect: true` when connection succeeds, clears it when user explicitly disconnects. All three connection methods (WebSocket, MQTT, REST) and auto mode are supported. If the server is temporarily unreachable on refresh, the next refresh will retry.
-- `rfsentinel:connecting` event listener in app.js — panel re-renders to show "Connecting..." during auto-reconnect
-- `rfsentinel:error` event listener in app.js — panel re-renders to show "Disconnected" if auto-reconnect fails
+- **AtlasRF auto-reconnect on page refresh** — When connected to an AtlasRF server (via WebSocket, MQTT, or REST), the connection now automatically restores after page refresh or PWA restart. Uses the same pattern as CoT/TAK Bridge: saves `autoReconnect: true` when connection succeeds, clears it when user explicitly disconnects. All three connection methods (WebSocket, MQTT, REST) and auto mode are supported. If the server is temporarily unreachable on refresh, the next refresh will retry.
+- `atlasrf:connecting` event listener in app.js — panel re-renders to show "Connecting..." during auto-reconnect
+- `atlasrf:error` event listener in app.js — panel re-renders to show "Disconnected" if auto-reconnect fails
 
 ### Technical
-- Modified: `js/modules/rfsentinel.js` — added `autoReconnect` to state, loadSettings, saveSettings; `init()` chains `loadSettings().then(connect)` when autoReconnect is true; `connect()` sets `autoReconnect = true`; `disconnect()` sets `autoReconnect = false` and persists
-- Modified: `js/app.js` — added `rfsentinel:connecting` and `rfsentinel:error` event listeners
+- Modified: `js/modules/atlasrf.js` — added `autoReconnect` to state, loadSettings, saveSettings; `init()` chains `loadSettings().then(connect)` when autoReconnect is true; `connect()` sets `autoReconnect = true`; `disconnect()` sets `autoReconnect = false` and persists
+- Modified: `js/app.js` — added `atlasrf:connecting` and `atlasrf:error` event listeners
 
 ## [6.57.43] - 2025-02-14
 
@@ -810,7 +810,7 @@ Major overhaul of the SARSAT beacon receiver panel connection UX, shifting from 
 ## [6.57.26] - 2025-02-13
 
 ### Fixed
-- **RadiaCode heatmap dead code** - Map rendering reimplemented RadiaCode tracks/position inline (130 lines) instead of calling `RadiaCodeModule.renderOnMap()`, making the heatmap toggle a no-op. Replaced with delegation call matching the RF Sentinel pattern. Heatmap IDW overlay, demo mode indicator, and pulse ring hex parsing all now work end-to-end
+- **RadiaCode heatmap dead code** - Map rendering reimplemented RadiaCode tracks/position inline (130 lines) instead of calling `RadiaCodeModule.renderOnMap()`, making the heatmap toggle a no-op. Replaced with delegation call matching the AtlasRF pattern. Heatmap IDW overlay, demo mode indicator, and pulse ring hex parsing all now work end-to-end
 - **Team rally point sync broken** - All three rally operations (add/update/remove) broadcast `rally_update` with empty data. Receivers checked `msg.d.rallyPoints` which was always undefined, silently dropping all rally sync. Now sends full rally array
 - **Team comm plan sync missing** - `updateCommPlan()` broadcast `comm_plan` messages but `processTeamSync()` had no handler case. Comm plan changes (frequencies, check-in schedules, emergency words) never reached other team members. Added `case 'comm_plan':` handler
 - **Team info sync broken** - `updateTeam()` broadcast `team_info` with empty data. Receivers checked `msg.d.name` and `msg.d.settings` which were undefined, dropping name/settings updates. Now sends name, description, and settings
@@ -830,32 +830,32 @@ Major overhaul of the SARSAT beacon receiver panel connection UX, shifting from 
 ## [6.57.25] - 2025-02-13
 
 ### Fixed
-- **RF Sentinel REST data shape mismatch** - Track metadata (callsign, ICAO, squawk, MMSI, etc.) was buried in a nested `metadata` dict when received via REST polling, but at the top level when received via WebSocket. Tracks appeared as anonymous blips in REST mode. Now `handleTrackUpdate` flattens metadata into top-level fields so both connection modes render identically.
+- **AtlasRF REST data shape mismatch** - Track metadata (callsign, ICAO, squawk, MMSI, etc.) was buried in a nested `metadata` dict when received via REST polling, but at the top level when received via WebSocket. Tracks appeared as anonymous blips in REST mode. Now `handleTrackUpdate` flattens metadata into top-level fields so both connection modes render identically.
 - **REST poll cache-busting** - Added `cache: 'no-store'` to `fetchAllTracks()` and health check fetches to prevent any browser caching of stale track data.
 
 ### Technical
-- RF Sentinel module v1.4.0 → v1.5.0
+- AtlasRF module v1.4.0 → v1.5.0
 - Service worker cache: v6.57.24 → v6.57.25
 
 ## [6.57.24] - 2025-02-10
 
 ### Fixed
-- **RF Sentinel Direct Ethernet Link compatibility** — Full support for RF Sentinel's Direct Ethernet Link feature (10.42.0.x subnet):
-  - Aligned default port from 8000 to 8080 to match RF Sentinel's actual server port across rfsentinel.js CONFIG, panels.js UI placeholder, and all fallback values
+- **AtlasRF Direct Ethernet Link compatibility** — Full support for AtlasRF's Direct Ethernet Link feature (10.42.0.x subnet):
+  - Aligned default port from 8000 to 8080 to match AtlasRF's actual server port across atlasrf.js CONFIG, panels.js UI placeholder, and all fallback values
   - Added protocol-aware URL construction — `getBaseUrl()`, `getWsUrl()`, and `getMqttWsUrl()` now use HTTP/WS for local hosts (.local, private IPs) and HTTPS/WSS for remote hosts, preventing mixed-content browser blocks when GridDown is served over HTTPS
-  - New `shouldUseHttps()` auto-detection: uses HTTP for `rfsentinel.local`, `10.42.0.x`, `192.168.x.x`, `localhost`; matches page protocol for non-local hosts
-  - Added Protocol selector (Auto / HTTP / HTTPS) to RF Sentinel connection panel for manual override
-  - `useHttps` setting persisted in `rfsentinel_settings` storage, exposed via `getUseHttps()`/`setUseHttps()` API
+  - New `shouldUseHttps()` auto-detection: uses HTTP for `atlasrf.local`, `10.42.0.x`, `192.168.x.x`, `localhost`; matches page protocol for non-local hosts
+  - Added Protocol selector (Auto / HTTP / HTTPS) to AtlasRF connection panel for manual override
+  - `useHttps` setting persisted in `atlasrf_settings` storage, exposed via `getUseHttps()`/`setUseHttps()` API
 
 ### Documentation
-- Provided corrected RF Sentinel `NETWORK_SETUP.md` with port 8000→8080 fixes and new Mode 4 (Direct Ethernet Link) section documenting the API-driven 10.42.0.x subnet feature
-- Provided corrected RF Sentinel `setup_network.sh` with stale `RF_SENTINEL_PORT=8000` updated to 8080
+- Provided corrected AtlasRF `NETWORK_SETUP.md` with port 8000→8080 fixes and new Mode 4 (Direct Ethernet Link) section documenting the API-driven 10.42.0.x subnet feature
+- Provided corrected AtlasRF `setup_network.sh` with stale `ATLASRF_PORT=8000` updated to 8080
 
 ## [6.57.23] - 2025-02-10
 
 ### Fixed
-- **RF Sentinel connection reliability** - Fixed issue requiring 5+ Connect button presses before connection establishes:
-  - Health check now retries up to 3 attempts with 8-second timeout per attempt, accommodating slow mDNS hostname resolution (e.g. `rfsentinel.local`) which can take 3-8 seconds on first lookup
+- **AtlasRF connection reliability** - Fixed issue requiring 5+ Connect button presses before connection establishes:
+  - Health check now retries up to 3 attempts with 8-second timeout per attempt, accommodating slow mDNS hostname resolution (e.g. `atlasrf.local`) which can take 3-8 seconds on first lookup
   - Fixed WebSocket timeout/onclose race condition where the timeout handler called both `close()` and `reject()`, causing delayed `onclose` to fire after REST fallback was already active and clobber the connection state back to disconnected
   - Added `settled` guard flag in `connectWebSocket()` to prevent double resolve/reject from concurrent timeout and onclose events
   - `connectAuto()` now explicitly cleans up the failed WebSocket reference (`state.ws = null`) before starting REST fallback, preventing stale onclose handlers from interfering
@@ -864,7 +864,7 @@ Major overhaul of the SARSAT beacon receiver panel connection UX, shifting from 
 ## [6.57.22] - 2025-02-10
 
 ### Improved
-- **RF Sentinel map icons** - Upgraded all track type renderers from basic geometric shapes (chevrons, diamonds, circles) to distinct, recognizable silhouette icons:
+- **AtlasRF map icons** - Upgraded all track type renderers from basic geometric shapes (chevrons, diamonds, circles) to distinct, recognizable silhouette icons:
   - Aircraft: Top-down airplane with fuselage, swept wings, and horizontal stabilizer (rotates with heading)
   - Ships: Vessel hull with pointed bow and bridge superstructure block (rotates with COG)
   - Drones (Remote ID): Quadcopter with X-arms, central body, 4 rotor circles, and direction indicator (rotates with heading)
@@ -964,7 +964,7 @@ Major overhaul of the SARSAT beacon receiver panel connection UX, shifting from 
   - Added: wind indicator, dewpoint/UV, air quality, satellite/radar, stream gauges
   - Added: hiking mode, terrain analysis, dead reckoning, coordinate converter
   - Added: logistics, contingency planning, medical reference, field guides
-  - Added: SSTV, RF Sentinel, RadiaCode, TAK bridge, compass/declination
+  - Added: SSTV, AtlasRF, RadiaCode, TAK bridge, compass/declination
   - Added: track recording, Meshtastic device setup
   - Updated barometer entry to note location in GPS panel
   - All entries include relevant search keywords for discoverability
@@ -3775,7 +3775,7 @@ MeshtasticModule.getMessageDetails(messageId, isDM, nodeId)
 ## [6.18.1] - 2025-01-27
 
 ### Added
-- **MQTT Connection Support** - RF Sentinel now supports MQTT over WebSocket:
+- **MQTT Connection Support** - AtlasRF now supports MQTT over WebSocket:
   
   **Connection Method Selector**:
   - Auto (recommended) - Tries WebSocket first, falls back to REST
@@ -3786,12 +3786,12 @@ MeshtasticModule.getMessageDetails(messageId, isDM, nodeId)
   **MQTT Implementation**:
   - Dynamically loads MQTT.js library from CDN when MQTT is selected
   - Configurable MQTT WebSocket port (default: 9001)
-  - Subscribes to topic hierarchy: `rfsentinel/tracks/#`, `rfsentinel/weather/#`, `rfsentinel/alerts`, `rfsentinel/emergency`
+  - Subscribes to topic hierarchy: `atlasrf/tracks/#`, `atlasrf/weather/#`, `atlasrf/alerts`, `atlasrf/emergency`
   - Automatic reconnection with exponential backoff
   - Graceful error handling when broker unavailable
   
   **UI Updates**:
-  - Connection method dropdown in RF Sentinel panel
+  - Connection method dropdown in AtlasRF panel
   - MQTT port input field (enabled when MQTT selected)
   - Dynamic description text based on selected method
   - Connection mode displayed when connected (WEBSOCKET/MQTT/REST)
@@ -3806,7 +3806,7 @@ MeshtasticModule.getMessageDetails(messageId, isDM, nodeId)
 ## [6.18.0] - 2025-01-27
 
 ### Added
-- **RF Sentinel Integration** - Connect to RF Sentinel for off-grid situational awareness:
+- **AtlasRF Integration** - Connect to AtlasRF for off-grid situational awareness:
   
   **Track Detection Display**:
   - Aircraft (ADS-B 1090 MHz) - Blue aircraft symbols with heading
@@ -3823,7 +3823,7 @@ MeshtasticModule.getMessageDetails(messageId, isDM, nodeId)
   
   **Weather Source Toggle**:
   - Internet (NWS/IEM) - Default, reliable online weather
-  - RF Sentinel FIS-B - Off-grid weather via 978 MHz UAT
+  - AtlasRF FIS-B - Off-grid weather via 978 MHz UAT
   - Stale data detection with 15-minute threshold
   - Auto-fallback option when FIS-B data goes stale
   
@@ -3832,7 +3832,7 @@ MeshtasticModule.getMessageDetails(messageId, isDM, nodeId)
   - REST polling fallback (5-second interval)
   - Automatic reconnection with exponential backoff
   - Health check monitoring every 30 seconds
-  - Configurable host/port (default: rfsentinel.local:8000)
+  - Configurable host/port (default: atlasrf.local:8000)
   
   **Emergency Alerts**:
   - Aircraft squawk detection (7500 Hijack, 7600 Radio Fail, 7700 Emergency)
@@ -3851,10 +3851,10 @@ MeshtasticModule.getMessageDetails(messageId, isDM, nodeId)
   - Connection status with WebSocket/REST mode indicator
   - Track statistics grid with live counts
   - Emergency alerts section (when active)
-  - Help documentation for RF Sentinel setup
+  - Help documentation for AtlasRF setup
 
 ### Technical Details
-- New module: `js/modules/rfsentinel.js` (~900 lines)
+- New module: `js/modules/atlasrf.js` (~900 lines)
 - New nav item with radar icon
 - Map overlay integrated with existing render pipeline
 - Event-driven architecture for real-time updates
